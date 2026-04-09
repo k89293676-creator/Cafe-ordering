@@ -6,16 +6,10 @@ import logging
 import os
 import re
 import secrets
-import smtplib
 import tempfile
 import threading
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime, timedelta, timezone
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from functools import wraps
 from pathlib import Path
 
@@ -338,11 +332,6 @@ def login_required(view_func):
     return wrapper
 
 
-def _is_valid_email(email: str) -> bool:
-    """Basic RFC-5321 email validation — rejects obvious non-emails."""
-    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)) and len(email) <= 254
-
-
 def _is_strong_password(password: str) -> bool:
     """Require at least 8 chars with one letter and one digit."""
     return (
@@ -406,82 +395,6 @@ def _no_store(response):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
-
-# ---------------------------------------------------------------------------
-# OTP helpers — cryptographically secure
-# ---------------------------------------------------------------------------
-
-OTP_VALIDITY_SECONDS = 600  # 10 minutes
-
-
-def generate_otp() -> str:
-    return f"{secrets.randbelow(900000) + 100000:06d}"
-
-
-def _otp_is_expired(created_at_key: str = "signup_otp_created_at") -> bool:
-    created_at_str = session.get(created_at_key)
-    if not created_at_str:
-        return True
-    try:
-        created_at = datetime.fromisoformat(created_at_str)
-        return (datetime.now(timezone.utc) - created_at).total_seconds() > OTP_VALIDITY_SECONDS
-    except ValueError:
-        return True
-
-
-def _send_email_otp(email: str, otp: str) -> None:
-    """Send OTP via SMTP email.
-
-    Reads SMTP_HOST, SMTP_PORT (default 587), SMTP_USER, SMTP_PASSWORD, and
-    SMTP_FROM from environment variables.
-    Falls back to demo-mode logging when credentials are not fully configured.
-    """
-    smtp_host = os.environ.get("SMTP_HOST")
-    smtp_user = os.environ.get("SMTP_USER")
-    smtp_password = os.environ.get("SMTP_PASSWORD")
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_from = os.environ.get("SMTP_FROM") or smtp_user
-
-    if not smtp_host or not smtp_user or not smtp_password:
-        app.logger.warning(
-            "SMTP credentials not set — OTP %s for %s (demo mode)", otp, email
-        )
-        return
-
-    subject = "Your Cafe Portal OTP Code"
-    body_text = (
-        f"Your one-time password for Cafe Portal is: {otp}\n\n"
-        "This code expires in 10 minutes. Do not share it with anyone."
-    )
-    body_html = (
-        "<html><body>"
-        "<p>Your one-time password for <strong>Cafe Portal</strong> is:</p>"
-        f'<h2 style="letter-spacing:0.25em;font-family:monospace;">{otp}</h2>'
-        "<p>This code expires in <strong>10 minutes</strong>. "
-        "Do not share it with anyone.</p>"
-        "</body></html>"
-    )
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = smtp_from
-    msg["To"] = email
-    msg.attach(MIMEText(body_text, "plain"))
-    msg.attach(MIMEText(body_html, "html"))
-
-    try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_from, [email], msg.as_string())
-            app.logger.info("OTP email sent to %s", email)
-    except smtplib.SMTPAuthenticationError as exc:
-        app.logger.error("SMTP authentication failed sending to %s: %s", email, exc)
-    except smtplib.SMTPException as exc:
-        app.logger.error("SMTP error sending OTP to %s: %s", email, exc)
-    except Exception as exc:
-        app.logger.error("Unexpected error sending OTP email to %s: %s", email, exc)
 
 # ---------------------------------------------------------------------------
 # Order computation
@@ -664,113 +577,6 @@ def owner_login() -> str | Response:
 
 
 # ---------------------------------------------------------------------------
-# Auth routes — OTP login via email
-# ---------------------------------------------------------------------------
-
-@app.route("/owner/login-otp", methods=["GET", "POST"])
-@limiter.limit("10 per minute; 30 per hour", methods=["POST"])
-def owner_login_otp() -> str | Response:
-    if logged_in_owner():
-        return redirect(url_for("owner_dashboard"))
-
-    if request.method == "POST":
-        email_raw = str(request.form.get("email", "")).strip()[:254]
-
-        if not _is_valid_email(email_raw):
-            flash("Please enter a valid email address.")
-            return render_template("owner_login_otp.html")
-
-        email_normalised = email_raw.lower()
-        owners = load_owners()
-        owner = next(
-            (o for o in owners if o.get("email", "").lower() == email_normalised),
-            None,
-        )
-
-        if not owner:
-            # Don't reveal whether the address exists — generic message
-            log_security("OTP_LOGIN_UNKNOWN_EMAIL", f"email={email_normalised!r}")
-            flash("If this email is registered, you will receive an OTP shortly.")
-            return render_template("owner_login_otp.html")
-
-        otp = generate_otp()
-        session["login_otp"] = otp
-        session["login_otp_created_at"] = datetime.now(timezone.utc).isoformat()
-        session["login_otp_email"] = email_normalised
-
-        _send_email_otp(email_normalised, otp)
-        log_security("LOGIN_OTP_ISSUED", f"email={email_normalised!r}")
-
-        return redirect(url_for("owner_login_otp_verify"))
-
-    return render_template("owner_login_otp.html")
-
-
-@app.route("/owner/login-otp/verify", methods=["GET", "POST"])
-@limiter.limit("5 per 15 minutes", methods=["POST"])
-def owner_login_otp_verify() -> str | Response:
-    if logged_in_owner():
-        return redirect(url_for("owner_dashboard"))
-
-    email = session.get("login_otp_email")
-    if not email:
-        flash("Session expired. Please request a new OTP.")
-        return redirect(url_for("owner_login_otp"))
-
-    if request.method == "POST":
-        if _otp_is_expired("login_otp_created_at"):
-            session.pop("login_otp", None)
-            session.pop("login_otp_created_at", None)
-            session.pop("login_otp_email", None)
-            session.pop("login_otp_attempts", None)
-            log_security("LOGIN_OTP_EXPIRED", f"email={email!r}")
-            flash("Your OTP has expired. Please request a new one.")
-            return redirect(url_for("owner_login_otp"))
-
-        entered = str(request.form.get("otp", "")).strip()[:6]
-        stored = session.get("login_otp", "")
-
-        if not secrets.compare_digest(entered, stored):
-            attempts = session.get("login_otp_attempts", 0) + 1
-            session["login_otp_attempts"] = attempts
-            log_security("LOGIN_OTP_FAILURE", f"email={email!r} attempt={attempts}")
-            if attempts >= 3:
-                # Invalidate OTP — attacker must request a fresh one
-                session.pop("login_otp", None)
-                session.pop("login_otp_created_at", None)
-                session.pop("login_otp_email", None)
-                session.pop("login_otp_attempts", None)
-                flash("Too many incorrect attempts. Please request a new OTP.")
-                return redirect(url_for("owner_login_otp"))
-            flash(f"Incorrect OTP. {3 - attempts} attempt(s) remaining.")
-            return _no_store(
-                app.make_response(render_template("owner_login_otp_verify.html", email=email))
-            )
-
-        owners = load_owners()
-        owner = next(
-            (o for o in owners if o.get("email", "").lower() == email),
-            None,
-        )
-        if not owner:
-            log_security("LOGIN_OTP_OWNER_NOT_FOUND", f"email={email!r}")
-            flash("Account not found. Please contact support.")
-            return redirect(url_for("owner_login"))
-
-        ip = _client_ip()
-        _clear_failed_logins(ip)
-        session.clear()
-        session["owner_username"] = owner["username"]
-        session.permanent = True
-        log_security("LOGIN_OTP_SUCCESS", f"user={owner['username']!r}")
-        return redirect(url_for("owner_dashboard"))
-
-    return _no_store(
-        app.make_response(render_template("owner_login_otp_verify.html", email=email))
-    )
-
-
-# ---------------------------------------------------------------------------
 # Auth routes — signup (first owner only)
 # ---------------------------------------------------------------------------
 
@@ -785,96 +591,35 @@ def owner_signup() -> str | Response:
 
     if request.method == "POST":
         username = str(request.form.get("username", "")).strip()[:64]
-        email = str(request.form.get("email", "")).strip()[:254]
         password = str(request.form.get("password", ""))[:256]
 
-        if not username or not email or not password:
-            flash("Username, email address, and password are all required.")
+        if not username or not password:
+            flash("Username and password are required.")
             return render_template("owner_signup.html")
 
         if not re.fullmatch(r"[a-zA-Z0-9_\-\.]{3,64}", username):
             flash("Username may only contain letters, digits, underscores, hyphens, and dots (3–64 chars).")
             return render_template("owner_signup.html")
 
-        if not _is_valid_email(email):
-            flash("Please enter a valid email address.")
-            return render_template("owner_signup.html")
-
         if not _is_strong_password(password):
             flash("Password must be at least 8 characters and contain at least one letter and one digit.")
             return render_template("owner_signup.html")
 
-        otp = generate_otp()
-        session["pending_signup"] = {
-            "username": username,
-            "email": email.lower(),
-            "passwordHash": generate_password_hash(password, method="scrypt"),
-        }
-        session["signup_otp"] = otp
-        session["signup_otp_created_at"] = datetime.now(timezone.utc).isoformat()
-
-        _send_email_otp(email.lower(), otp)
-        log_security("SIGNUP_OTP_ISSUED", f"user={username!r}")
-        return redirect(url_for("owner_signup_verify"))
-
-    return render_template("owner_signup.html")
-
-
-@app.route("/owner/signup/verify", methods=["GET", "POST"])
-@limiter.limit("5 per 15 minutes", methods=["POST"])
-def owner_signup_verify() -> str | Response:
-    owners = load_owners()
-    if len(owners) > 0:
-        return redirect(url_for("owner_login"))
-
-    pending = session.get("pending_signup")
-    if not pending:
-        flash("Session expired. Please start registration again.")
-        return redirect(url_for("owner_signup"))
-
-    if request.method == "POST":
-        if _otp_is_expired("signup_otp_created_at"):
-            session.pop("pending_signup", None)
-            session.pop("signup_otp", None)
-            session.pop("signup_otp_created_at", None)
-            session.pop("signup_otp_attempts", None)
-            log_security("OTP_EXPIRED", f"user={pending.get('username', '?')!r}")
-            flash("Your OTP has expired. Please register again.")
-            return redirect(url_for("owner_signup"))
-
-        entered = str(request.form.get("otp", "")).strip()[:6]
-        stored = session.get("signup_otp", "")
-
-        if not secrets.compare_digest(entered, stored):
-            attempts = session.get("signup_otp_attempts", 0) + 1
-            session["signup_otp_attempts"] = attempts
-            log_security("OTP_FAILURE", f"user={pending.get('username', '?')!r} attempt={attempts}")
-            if attempts >= 3:
-                session.pop("pending_signup", None)
-                session.pop("signup_otp", None)
-                session.pop("signup_otp_created_at", None)
-                session.pop("signup_otp_attempts", None)
-                flash("Too many incorrect attempts. Please start registration again.")
-                return redirect(url_for("owner_signup"))
-            flash(f"Incorrect OTP. {3 - attempts} attempt(s) remaining.")
-            return _no_store(app.make_response(render_template("owner_signup_verify.html")))
-
         new_owner = {
             "id": next_id(owners),
-            "username": pending["username"],
-            "email": pending["email"],
-            "passwordHash": pending["passwordHash"],
+            "username": username,
+            "passwordHash": generate_password_hash(password, method="scrypt"),
             "createdAt": datetime.now(timezone.utc).isoformat(),
         }
         owners.append(new_owner)
         save_owners(owners)
         session.clear()
-        session["owner_username"] = pending["username"]
+        session["owner_username"] = username
         session.permanent = True
-        log_security("SIGNUP_SUCCESS", f"user={pending['username']!r}")
+        log_security("SIGNUP_SUCCESS", f"user={username!r}")
         return redirect(url_for("owner_dashboard"))
 
-    return _no_store(app.make_response(render_template("owner_signup_verify.html")))
+    return render_template("owner_signup.html")
 
 
 @app.route("/owner/logout")
