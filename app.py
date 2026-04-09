@@ -913,6 +913,9 @@ def complete_order(order_id: int) -> Response:
             if order["id"] == order_id:
                 order["status"] = "completed"
                 break
+        else:
+            flash("Order not found.")
+            return redirect(url_for("owner_dashboard") + "#orders")
         save_orders(orders)
     return redirect(url_for("owner_dashboard") + "#orders")
 
@@ -1020,7 +1023,7 @@ def get_order(order_id: int) -> tuple[dict, int]:
         "customerName": order.get("customerName", ""),
         "items": order.get("items", []),
         "total": order.get("total", 0),
-        "placedAt": order.get("placedAt", ""),
+        "createdAt": order.get("createdAt", ""),
     }
     return {"order": safe_order}, 200
 
