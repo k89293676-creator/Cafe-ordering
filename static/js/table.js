@@ -314,7 +314,9 @@ function clearCart() {
 // ---------------------------------------------------------------------------
 async function loadMenu() {
   try {
-    const res = await fetch("/api/menu?v=" + Date.now(), {
+    const tableId = tableIdInput?.value || "";
+    const params = new URLSearchParams({ table_id: tableId, v: Date.now() }).toString();
+    const res = await fetch("/api/menu?" + params, {
       cache: "no-store",
       headers: { "Cache-Control": "no-cache" },
     });

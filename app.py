@@ -324,6 +324,11 @@ def logged_in_owner() -> str | None:
     return session.get("owner_username")
 
 
+def logged_in_owner_id() -> int | None:
+    """Return the logged-in owner's ID from session."""
+    return session.get("owner_id")
+
+
 def login_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
@@ -581,6 +586,7 @@ def owner_login() -> str | Response:
             _clear_failed_logins(ip)
             session.clear()
             session["owner_username"] = owner["username"]
+            session["owner_id"] = owner["id"]
             session.permanent = True
             log_security("LOGIN_SUCCESS", f"user={owner['username']!r}")
             return redirect(url_for("owner_dashboard"))
@@ -633,6 +639,7 @@ def owner_signup() -> str | Response:
         save_owners(owners)
         session.clear()
         session["owner_username"] = username
+        session["owner_id"] = new_owner["id"]
         session.permanent = True
         log_security("SIGNUP_SUCCESS", f"user={username!r}")
         return redirect(url_for("owner_dashboard"))
@@ -655,10 +662,14 @@ def owner_logout() -> Response:
 @app.route("/owner/dashboard")
 @login_required
 def owner_dashboard() -> Response:
-    tables = load_tables()
-    orders = sorted(load_orders(), key=lambda o: o.get("createdAt", ""), reverse=True)
+    owner_id = logged_in_owner_id()
+    all_tables = load_tables()
+    tables = [t for t in all_tables if t.get("ownerId") == owner_id]
+    all_orders = sorted(load_orders(), key=lambda o: o.get("createdAt", ""), reverse=True)
+    orders = [o for o in all_orders if o.get("ownerId") == owner_id]
     orders = [_resolve_order_table_labels(o, tables) for o in orders]
-    menu = load_menu()
+    all_menu = load_menu()
+    menu = {"categories": [c for c in all_menu.get("categories", []) if c.get("ownerId") == owner_id]}
     pending_orders = [o for o in orders if o.get("status") != "completed"]
     completed_orders = [o for o in orders if o.get("status") == "completed"]
     total_items = sum(len(cat.get("items", [])) for cat in menu.get("categories", []))
@@ -684,15 +695,16 @@ def owner_dashboard() -> Response:
 @login_required
 @limiter.limit("30 per hour")
 def create_menu_category() -> Response:
+    owner_id = logged_in_owner_id()
     name = str(request.form.get("categoryName", "")).strip()[:100]
     if not name:
         flash("Category name cannot be empty.")
         return redirect(url_for("owner_dashboard") + "#menu")
 
     menu = load_menu()
-    existing_ids = {c["id"] for c in menu["categories"]}
+    existing_ids = {c["id"] for c in menu["categories"] if c.get("ownerId") == owner_id}
     category_id = unique_id(normalize_id(name), existing_ids)
-    menu["categories"].append({"id": category_id, "name": name, "items": []})
+    menu["categories"].append({"id": category_id, "name": name, "items": [], "ownerId": owner_id})
     save_menu(menu)
     flash(f"Category '{name}' created.")
     return redirect(url_for("owner_dashboard") + "#menu")
@@ -701,9 +713,13 @@ def create_menu_category() -> Response:
 @app.route("/owner/menu/category/<category_id>/delete", methods=["POST"])
 @login_required
 def delete_menu_category(category_id: str) -> Response:
+    owner_id = logged_in_owner_id()
     if not re.fullmatch(r"[a-zA-Z0-9_\-]{1,100}", category_id):
         abort(400)
     menu = load_menu()
+    category = next((c for c in menu["categories"] if c["id"] == category_id), None)
+    if not category or category.get("ownerId") != owner_id:
+        abort(403, description="You do not own this category.")
     menu["categories"] = [c for c in menu["categories"] if c["id"] != category_id]
     save_menu(menu)
     flash("Category deleted.")
@@ -713,6 +729,7 @@ def delete_menu_category(category_id: str) -> Response:
 @app.route("/owner/menu/category/<category_id>/rename", methods=["POST"])
 @login_required
 def rename_menu_category(category_id: str) -> Response:
+    owner_id = logged_in_owner_id()
     if not re.fullmatch(r"[a-zA-Z0-9_\-]{1,100}", category_id):
         abort(400)
     new_name = str(request.form.get("categoryName", "")).strip()[:100]
@@ -725,6 +742,8 @@ def rename_menu_category(category_id: str) -> Response:
     if not category:
         flash("Category not found.")
         return redirect(url_for("owner_dashboard") + "#menu")
+    if category.get("ownerId") != owner_id:
+        abort(403, description="You do not own this category.")
 
     category["name"] = new_name
     save_menu(menu)
@@ -736,6 +755,7 @@ def rename_menu_category(category_id: str) -> Response:
 @login_required
 @limiter.limit("60 per hour")
 def save_menu_item() -> Response:
+    owner_id = logged_in_owner_id()
     form = request.form
     category_id = str(form.get("categoryId", "")).strip()[:100]
     item_id = str(form.get("itemId", "")).strip()[:100]
@@ -762,6 +782,8 @@ def save_menu_item() -> Response:
     if not category:
         flash("Selected category does not exist.")
         return redirect(url_for("owner_dashboard") + "#menu")
+    if category.get("ownerId") != owner_id:
+        abort(403, description="You do not own this category.")
 
     if item_id:
         item = next((i for i in category["items"] if i["id"] == item_id), None)
@@ -772,7 +794,7 @@ def save_menu_item() -> Response:
             flash("Menu item not found.")
             return redirect(url_for("owner_dashboard") + "#menu")
     else:
-        existing_ids = {i["id"] for c in menu["categories"] for i in c["items"]}
+        existing_ids = {i["id"] for c in menu["categories"] if c.get("ownerId") == owner_id for i in c["items"]}
         new_item_id = unique_id(normalize_id(name), existing_ids)
         category["items"].append(
             {"id": new_item_id, "name": name, "description": description, "price": price, "tags": tags}
@@ -786,14 +808,19 @@ def save_menu_item() -> Response:
 @app.route("/owner/menu/item/<item_id>/delete", methods=["POST"])
 @login_required
 def delete_menu_item(item_id: str) -> Response:
+    owner_id = logged_in_owner_id()
     if not re.fullmatch(r"[a-zA-Z0-9_\-]{1,100}", item_id):
         abort(400)
     menu = load_menu()
     for category in menu["categories"]:
-        category["items"] = [i for i in category["items"] if i["id"] != item_id]
-    save_menu(menu)
-    flash("Menu item deleted.")
-    return redirect(url_for("owner_dashboard") + "#menu")
+        if category.get("ownerId") != owner_id:
+            continue
+        if any(i["id"] == item_id for i in category["items"]):
+            category["items"] = [i for i in category["items"] if i["id"] != item_id]
+            save_menu(menu)
+            flash("Menu item deleted.")
+            return redirect(url_for("owner_dashboard") + "#menu")
+    abort(404, description="Menu item not found.")
 
 
 @app.route("/owner/menu", methods=["POST"])
@@ -838,19 +865,21 @@ def update_menu() -> Response:
 @login_required
 @limiter.limit("20 per hour")
 def create_table() -> Response:
+    owner_id = logged_in_owner_id()
     table_name = str(request.form.get("tableName", "")).strip()[:100]
     if not table_name:
         flash("Table name cannot be empty.")
         return redirect(url_for("owner_dashboard") + "#tables")
 
     tables = load_tables()
-    table_num = next_table_number(tables)
+    table_num = next_table_number([t for t in tables if t.get("ownerId") == owner_id])
     table_id = f"table-{table_num}"
     tables.append(
         {
             "id": table_id,
             "name": table_name,
             "createdAt": datetime.now(timezone.utc).isoformat(),
+            "ownerId": owner_id,
         }
     )
     save_tables(tables)
@@ -860,9 +889,13 @@ def create_table() -> Response:
 @app.route("/owner/tables/<table_id>/delete", methods=["POST"])
 @login_required
 def delete_table(table_id: str) -> Response:
+    owner_id = logged_in_owner_id()
     if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
         abort(400)
     tables = load_tables()
+    table = next((t for t in tables if t["id"] == table_id), None)
+    if not table or table.get("ownerId") != owner_id:
+        abort(403, description="You do not own this table.")
     filtered = [t for t in tables if t["id"] != table_id]
     save_tables(filtered)
     return redirect(url_for("owner_dashboard") + "#tables")
@@ -872,6 +905,7 @@ def delete_table(table_id: str) -> Response:
 @login_required
 @limiter.limit("60 per hour")
 def table_qr(table_id: str) -> Response:
+    owner_id = logged_in_owner_id()
     if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
         abort(400)
     try:
@@ -879,6 +913,8 @@ def table_qr(table_id: str) -> Response:
         table = next((t for t in tables if t["id"] == table_id), None)
         if not table:
             abort(404, description="Table not found.")
+        if table.get("ownerId") != owner_id:
+            abort(403, description="You do not own this table.")
         table_url = url_for("table_order", table_id=table_id, _external=True)
         qr = qrcode.QRCode(box_size=8, border=2)
         qr.add_data(table_url)
@@ -904,6 +940,7 @@ VALID_ORDER_STATUSES = {"pending", "preparing", "ready", "completed"}
 @app.route("/owner/order/<int:order_id>/status", methods=["POST"])
 @login_required
 def update_order_status(order_id: int) -> Response:
+    owner_id = logged_in_owner_id()
     new_status = str(request.form.get("status", "")).strip()
     if new_status not in VALID_ORDER_STATUSES:
         flash("Invalid order status.")
@@ -913,6 +950,8 @@ def update_order_status(order_id: int) -> Response:
         found = False
         for order in orders:
             if order["id"] == order_id:
+                if order.get("ownerId") != owner_id:
+                    abort(403, description="You do not own this order.")
                 order["status"] = new_status
                 found = True
                 break
@@ -926,13 +965,18 @@ def update_order_status(order_id: int) -> Response:
 @app.route("/owner/order/<int:order_id>/complete", methods=["POST"])
 @login_required
 def complete_order(order_id: int) -> Response:
+    owner_id = logged_in_owner_id()
     with _orders_lock:
         orders = load_orders()
+        found = False
         for order in orders:
             if order["id"] == order_id:
+                if order.get("ownerId") != owner_id:
+                    abort(403, description="You do not own this order.")
                 order["status"] = "completed"
+                found = True
                 break
-        else:
+        if not found:
             flash("Order not found.")
             return redirect(url_for("owner_dashboard") + "#orders")
         save_orders(orders)
@@ -942,9 +986,11 @@ def complete_order(order_id: int) -> Response:
 @app.route("/owner/menu/download")
 @login_required
 def download_menu() -> Response:
+    owner_id = logged_in_owner_id()
     menu = load_menu()
+    owner_menu = {"categories": [c for c in menu.get("categories", []) if c.get("ownerId") == owner_id]}
     return Response(
-        json.dumps(menu, indent=2),
+        json.dumps(owner_menu, indent=2),
         mimetype="application/json",
         headers={"Content-Disposition": "attachment; filename=menu.json"},
     )
@@ -957,7 +1003,22 @@ def download_menu() -> Response:
 @csrf.exempt
 @limiter.limit("120 per minute")
 def menu_api() -> Response:
-    response = jsonify(load_menu())
+    # If table_id is provided in query, return menu for that table's owner
+    table_id = request.args.get("table_id", "").strip()[:64]
+    all_menu = load_menu()
+    
+    if table_id:
+        table = next((t for t in load_tables() if t["id"] == table_id), None)
+        if table:
+            owner_id = table.get("ownerId")
+            filtered_menu = {"categories": [c for c in all_menu.get("categories", []) if c.get("ownerId") == owner_id]}
+        else:
+            filtered_menu = {"categories": []}
+    else:
+        # No table_id provided, return empty menu (shouldn't happen in normal flow)
+        filtered_menu = {"categories": []}
+    
+    response = jsonify(filtered_menu)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     return response
@@ -988,9 +1049,11 @@ def checkout() -> tuple[dict, int]:
         abort(400, description="Invalid table ID.")
 
     table_name = None
+    owner_id = None
     if table_id:
         table = next((t for t in load_tables() if t["id"] == table_id), None)
         table_name = table["name"] if table else table_id
+        owner_id = table.get("ownerId") if table else None
     else:
         table_name = "Online"
 
@@ -1002,6 +1065,7 @@ def checkout() -> tuple[dict, int]:
             "customerName": customer_name,
             "tableId": table_id,
             "tableName": table_name,
+            "ownerId": owner_id,
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "items": order_summary["items"],
             "total": order_summary["total"],
@@ -1019,8 +1083,11 @@ def checkout() -> tuple[dict, int]:
 @limiter.limit("60 per minute")
 @api_login_required
 def orders_api() -> tuple[dict, int]:
-    """Return all orders — owner-only endpoint."""
-    return {"orders": load_orders()}, 200
+    """Return orders for the logged-in owner only."""
+    owner_id = logged_in_owner_id()
+    all_orders = load_orders()
+    owner_orders = [o for o in all_orders if o.get("ownerId") == owner_id]
+    return {"orders": owner_orders}, 200
 
 
 @app.route("/api/order/<int:order_id>", methods=["GET"])
