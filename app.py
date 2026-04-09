@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import secrets
+import smtplib
 import tempfile
 import threading
 import time
@@ -13,6 +14,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from functools import wraps
 from pathlib import Path
 
@@ -335,26 +338,9 @@ def login_required(view_func):
     return wrapper
 
 
-def _normalise_mobile(mobile: str) -> str:
-    return re.sub(r"[^\d]", "", mobile)
-
-
-def _is_valid_mobile(mobile: str) -> bool:
-    digits = _normalise_mobile(mobile)
-    return 7 <= len(digits) <= 15
-
-
-def _is_valid_indian_mobile(mobile: str) -> bool:
-    """Accept Indian mobile numbers: 10 digits, optionally prefixed with +91 or 0."""
-    digits = _normalise_mobile(mobile)
-    if len(digits) == 10:
-        return digits[0] in "6789"
-    if len(digits) == 12 and digits.startswith("91"):
-        return digits[2] in "6789"
-    if len(digits) == 11 and digits.startswith("0"):
-        return digits[1] in "6789"
-    # Also accept international numbers as a fallback
-    return _is_valid_mobile(mobile)
+def _is_valid_email(email: str) -> bool:
+    """Basic RFC-5321 email validation — rejects obvious non-emails."""
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)) and len(email) <= 254
 
 
 def _is_strong_password(password: str) -> bool:
@@ -443,48 +429,59 @@ def _otp_is_expired(created_at_key: str = "signup_otp_created_at") -> bool:
         return True
 
 
-def _send_otp(mobile: str, otp: str) -> None:
-    """Send OTP via Fast2SMS.
+def _send_email_otp(email: str, otp: str) -> None:
+    """Send OTP via SMTP email.
 
-    Uses the Fast2SMS OTP route (pre-approved DLT template).
-    Mobile must be a 10-digit Indian number (no country code).
-    Falls back to demo-mode logging when FAST2SMS_API_KEY is not set.
+    Reads SMTP_HOST, SMTP_PORT (default 587), SMTP_USER, SMTP_PASSWORD, and
+    SMTP_FROM from environment variables.
+    Falls back to demo-mode logging when credentials are not fully configured.
     """
-    api_key = os.environ.get("FAST2SMS_API_KEY")
-    if not api_key:
-        app.logger.warning("FAST2SMS_API_KEY not set — OTP %s for %s (demo mode)", otp, mobile)
+    smtp_host = os.environ.get("SMTP_HOST")
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_password = os.environ.get("SMTP_PASSWORD")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_from = os.environ.get("SMTP_FROM") or smtp_user
+
+    if not smtp_host or not smtp_user or not smtp_password:
+        app.logger.warning(
+            "SMTP credentials not set — OTP %s for %s (demo mode)", otp, email
+        )
         return
 
-    # Fast2SMS expects 10-digit number without country code
-    digits = re.sub(r"[^\d]", "", mobile)
-    if len(digits) == 12 and digits.startswith("91"):
-        digits = digits[2:]
-    elif len(digits) == 11 and digits.startswith("0"):
-        digits = digits[1:]
+    subject = "Your Cafe Portal OTP Code"
+    body_text = (
+        f"Your one-time password for Cafe Portal is: {otp}\n\n"
+        "This code expires in 10 minutes. Do not share it with anyone."
+    )
+    body_html = (
+        "<html><body>"
+        "<p>Your one-time password for <strong>Cafe Portal</strong> is:</p>"
+        f'<h2 style="letter-spacing:0.25em;font-family:monospace;">{otp}</h2>'
+        "<p>This code expires in <strong>10 minutes</strong>. "
+        "Do not share it with anyone.</p>"
+        "</body></html>"
+    )
 
-    params = urllib.parse.urlencode({
-        "authorization": api_key,
-        "route": "otp",
-        "variables_values": otp,
-        "flash": "0",
-        "numbers": digits,
-    })
-    url = f"https://www.fast2sms.com/dev/bulkV2?{params}"
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = smtp_from
+    msg["To"] = email
+    msg.attach(MIMEText(body_text, "plain"))
+    msg.attach(MIMEText(body_html, "html"))
 
     try:
-        req = urllib.request.Request(
-            url,
-            headers={"cache-control": "no-cache"},
-            method="GET",
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-            app.logger.info("Fast2SMS response for %s: %s", digits, body)
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        app.logger.error("Fast2SMS HTTP error %s for %s: %s", exc.code, digits, body)
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_from, [email], msg.as_string())
+            app.logger.info("OTP email sent to %s", email)
+    except smtplib.SMTPAuthenticationError as exc:
+        app.logger.error("SMTP authentication failed sending to %s: %s", email, exc)
+    except smtplib.SMTPException as exc:
+        app.logger.error("SMTP error sending OTP to %s: %s", email, exc)
     except Exception as exc:
-        app.logger.error("Fast2SMS request failed for %s: %s", digits, exc)
+        app.logger.error("Unexpected error sending OTP email to %s: %s", email, exc)
 
 # ---------------------------------------------------------------------------
 # Order computation
@@ -644,7 +641,7 @@ def owner_login() -> str | Response:
             (
                 o for o in owners
                 if o["username"] == identifier
-                or _normalise_mobile(o.get("mobile", "")) == _normalise_mobile(identifier)
+                or o.get("email", "").lower() == identifier.lower()
             ),
             None,
         )
@@ -667,7 +664,7 @@ def owner_login() -> str | Response:
 
 
 # ---------------------------------------------------------------------------
-# Auth routes — OTP login via phone number
+# Auth routes — OTP login via email
 # ---------------------------------------------------------------------------
 
 @app.route("/owner/login-otp", methods=["GET", "POST"])
@@ -677,32 +674,32 @@ def owner_login_otp() -> str | Response:
         return redirect(url_for("owner_dashboard"))
 
     if request.method == "POST":
-        mobile_raw = str(request.form.get("mobile", "")).strip()[:20]
+        email_raw = str(request.form.get("email", "")).strip()[:254]
 
-        if not _is_valid_indian_mobile(mobile_raw):
-            flash("Please enter a valid Indian mobile number (10 digits starting with 6-9).")
+        if not _is_valid_email(email_raw):
+            flash("Please enter a valid email address.")
             return render_template("owner_login_otp.html")
 
-        mobile_normalised = _normalise_mobile(mobile_raw)
+        email_normalised = email_raw.lower()
         owners = load_owners()
         owner = next(
-            (o for o in owners if _normalise_mobile(o.get("mobile", "")) == mobile_normalised),
+            (o for o in owners if o.get("email", "").lower() == email_normalised),
             None,
         )
 
         if not owner:
-            # Don't reveal whether the number exists — generic message
-            log_security("OTP_LOGIN_UNKNOWN_MOBILE", f"mobile={mobile_normalised!r}")
-            flash("If this number is registered, you will receive an OTP shortly.")
+            # Don't reveal whether the address exists — generic message
+            log_security("OTP_LOGIN_UNKNOWN_EMAIL", f"email={email_normalised!r}")
+            flash("If this email is registered, you will receive an OTP shortly.")
             return render_template("owner_login_otp.html")
 
         otp = generate_otp()
         session["login_otp"] = otp
         session["login_otp_created_at"] = datetime.now(timezone.utc).isoformat()
-        session["login_otp_mobile"] = mobile_normalised
+        session["login_otp_email"] = email_normalised
 
-        _send_otp(mobile_normalised, otp)
-        log_security("LOGIN_OTP_ISSUED", f"mobile={mobile_normalised!r}")
+        _send_email_otp(email_normalised, otp)
+        log_security("LOGIN_OTP_ISSUED", f"email={email_normalised!r}")
 
         return redirect(url_for("owner_login_otp_verify"))
 
@@ -715,8 +712,8 @@ def owner_login_otp_verify() -> str | Response:
     if logged_in_owner():
         return redirect(url_for("owner_dashboard"))
 
-    mobile = session.get("login_otp_mobile")
-    if not mobile:
+    email = session.get("login_otp_email")
+    if not email:
         flash("Session expired. Please request a new OTP.")
         return redirect(url_for("owner_login_otp"))
 
@@ -724,9 +721,9 @@ def owner_login_otp_verify() -> str | Response:
         if _otp_is_expired("login_otp_created_at"):
             session.pop("login_otp", None)
             session.pop("login_otp_created_at", None)
-            session.pop("login_otp_mobile", None)
+            session.pop("login_otp_email", None)
             session.pop("login_otp_attempts", None)
-            log_security("LOGIN_OTP_EXPIRED", f"mobile={mobile!r}")
+            log_security("LOGIN_OTP_EXPIRED", f"email={email!r}")
             flash("Your OTP has expired. Please request a new one.")
             return redirect(url_for("owner_login_otp"))
 
@@ -736,27 +733,27 @@ def owner_login_otp_verify() -> str | Response:
         if not secrets.compare_digest(entered, stored):
             attempts = session.get("login_otp_attempts", 0) + 1
             session["login_otp_attempts"] = attempts
-            log_security("LOGIN_OTP_FAILURE", f"mobile={mobile!r} attempt={attempts}")
+            log_security("LOGIN_OTP_FAILURE", f"email={email!r} attempt={attempts}")
             if attempts >= 3:
                 # Invalidate OTP — attacker must request a fresh one
                 session.pop("login_otp", None)
                 session.pop("login_otp_created_at", None)
-                session.pop("login_otp_mobile", None)
+                session.pop("login_otp_email", None)
                 session.pop("login_otp_attempts", None)
                 flash("Too many incorrect attempts. Please request a new OTP.")
                 return redirect(url_for("owner_login_otp"))
             flash(f"Incorrect OTP. {3 - attempts} attempt(s) remaining.")
             return _no_store(
-                app.make_response(render_template("owner_login_otp_verify.html", mobile=mobile))
+                app.make_response(render_template("owner_login_otp_verify.html", email=email))
             )
 
         owners = load_owners()
         owner = next(
-            (o for o in owners if _normalise_mobile(o.get("mobile", "")) == mobile),
+            (o for o in owners if o.get("email", "").lower() == email),
             None,
         )
         if not owner:
-            log_security("LOGIN_OTP_OWNER_NOT_FOUND", f"mobile={mobile!r}")
+            log_security("LOGIN_OTP_OWNER_NOT_FOUND", f"email={email!r}")
             flash("Account not found. Please contact support.")
             return redirect(url_for("owner_login"))
 
@@ -769,7 +766,7 @@ def owner_login_otp_verify() -> str | Response:
         return redirect(url_for("owner_dashboard"))
 
     return _no_store(
-        app.make_response(render_template("owner_login_otp_verify.html", mobile=mobile))
+        app.make_response(render_template("owner_login_otp_verify.html", email=email))
     )
 
 
@@ -788,19 +785,19 @@ def owner_signup() -> str | Response:
 
     if request.method == "POST":
         username = str(request.form.get("username", "")).strip()[:64]
-        mobile = str(request.form.get("mobile", "")).strip()[:20]
+        email = str(request.form.get("email", "")).strip()[:254]
         password = str(request.form.get("password", ""))[:256]
 
-        if not username or not mobile or not password:
-            flash("Username, mobile number, and password are all required.")
+        if not username or not email or not password:
+            flash("Username, email address, and password are all required.")
             return render_template("owner_signup.html")
 
         if not re.fullmatch(r"[a-zA-Z0-9_\-\.]{3,64}", username):
             flash("Username may only contain letters, digits, underscores, hyphens, and dots (3–64 chars).")
             return render_template("owner_signup.html")
 
-        if not _is_valid_indian_mobile(mobile):
-            flash("Please enter a valid Indian mobile number (10 digits starting with 6, 7, 8, or 9).")
+        if not _is_valid_email(email):
+            flash("Please enter a valid email address.")
             return render_template("owner_signup.html")
 
         if not _is_strong_password(password):
@@ -810,13 +807,13 @@ def owner_signup() -> str | Response:
         otp = generate_otp()
         session["pending_signup"] = {
             "username": username,
-            "mobile": _normalise_mobile(mobile),
+            "email": email.lower(),
             "passwordHash": generate_password_hash(password, method="scrypt"),
         }
         session["signup_otp"] = otp
         session["signup_otp_created_at"] = datetime.now(timezone.utc).isoformat()
 
-        _send_otp(_normalise_mobile(mobile), otp)
+        _send_email_otp(email.lower(), otp)
         log_security("SIGNUP_OTP_ISSUED", f"user={username!r}")
         return redirect(url_for("owner_signup_verify"))
 
@@ -865,7 +862,7 @@ def owner_signup_verify() -> str | Response:
         new_owner = {
             "id": next_id(owners),
             "username": pending["username"],
-            "mobile": pending["mobile"],
+            "email": pending["email"],
             "passwordHash": pending["passwordHash"],
             "createdAt": datetime.now(timezone.utc).isoformat(),
         }

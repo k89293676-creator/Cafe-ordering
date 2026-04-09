@@ -16,7 +16,7 @@
 
   <div class="auth-card">
     <h2>Enter your OTP</h2>
-    <p class="subtitle">A 6-digit code has been sent via SMS to +91-{{ mobile[-10:] if mobile|length >= 10 else mobile }}</p>
+    <p class="subtitle">A 6-digit code has been sent to {{ email }}</p>
 
     {% with messages = get_flashed_messages() %}
     {% if messages %}
@@ -27,7 +27,7 @@
     {% endwith %}
 
     <div class="alert alert-info" style="margin-bottom:1.25rem;">
-      📱 Check your SMS inbox. The code expires in 10 minutes.
+      ✉️ Check your email inbox (and spam folder). The code expires in 10 minutes.
     </div>
 
     <form method="post" autocomplete="off">
@@ -52,7 +52,7 @@
     </form>
 
     <p class="auth-footer" style="margin-top:1.25rem;">
-      Wrong number? <a href="{{ url_for('owner_login_otp') }}">Go back</a>
+      Wrong email? <a href="{{ url_for('owner_login_otp') }}">Go back</a>
     </p>
   </div>
 </div>

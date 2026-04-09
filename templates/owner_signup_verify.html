@@ -16,7 +16,7 @@
 
   <div class="auth-card">
     <h2>Verify your identity</h2>
-    <p class="subtitle">Step 2 of 2 — Enter the OTP sent to your mobile</p>
+    <p class="subtitle">Step 2 of 2 — Enter the OTP sent to your email</p>
 
     {% with messages = get_flashed_messages() %}
     {% if messages %}
@@ -27,7 +27,7 @@
     {% endwith %}
 
     <div class="alert alert-info" style="margin-bottom:1.25rem;">
-      📱 A 6-digit OTP has been sent via SMS. It expires in 10 minutes.
+      ✉️ A 6-digit OTP has been sent to your email. It expires in 10 minutes.
     </div>
 
     <form method="post" autocomplete="off">

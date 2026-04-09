@@ -27,7 +27,7 @@
     {% endwith %}
 
     <div class="alert alert-info" style="margin-bottom:1.25rem;">
-      After submitting, you'll receive a 6-digit OTP to verify your account.
+      After submitting, you'll receive a 6-digit OTP to your email to verify your account.
     </div>
 
     <form method="post" autocomplete="on">
@@ -37,8 +37,8 @@
         <input id="username" name="username" placeholder="Letters, digits, _ - . (3–64 chars)" autocomplete="username" required />
       </div>
       <div class="form-group">
-        <label for="mobile">Mobile Number</label>
-        <input id="mobile" name="mobile" type="tel" placeholder="e.g. 9876543210" autocomplete="tel" required />
+        <label for="email">Email Address</label>
+        <input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required />
       </div>
       <div class="form-group">
         <label for="password">Password</label>
