@@ -39,8 +39,18 @@
       <button class="btn btn-primary btn-full" type="submit" style="margin-top:0.5rem;">Sign In →</button>
     </form>
 
+    <div style="margin:1.25rem 0;display:flex;align-items:center;gap:0.75rem;">
+      <div style="flex:1;height:1px;background:var(--border);"></div>
+      <span style="font-size:0.8125rem;color:var(--text-muted);white-space:nowrap;">or sign in with</span>
+      <div style="flex:1;height:1px;background:var(--border);"></div>
+    </div>
+
+    <a href="{{ url_for('owner_login_otp') }}" class="btn btn-secondary btn-full" style="display:flex;align-items:center;justify-content:center;gap:0.5rem;">
+      📱 Mobile OTP Login
+    </a>
+
     {% if allow_signup %}
-    <p class="auth-footer">
+    <p class="auth-footer" style="margin-top:1.25rem;">
       First time here? <a href="{{ url_for('owner_signup') }}">Create an owner account</a>
     </p>
     {% endif %}
