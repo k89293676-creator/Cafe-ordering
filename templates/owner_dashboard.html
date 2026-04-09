@@ -141,10 +141,23 @@
                     <span class="order-total-label">Total</span>
                     <span class="order-total-value">${{ '%.2f' | format(order.total) }}</span>
                   </div>
-                  <div style="margin-top:0.75rem;">
-                    <form action="{{ url_for('complete_order', order_id=order.id) }}" method="post">
+                  <div style="margin-top:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
+                    {% if order.status == 'pending' %}
+                    <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="flex:1;">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                      <button class="btn btn-primary btn-sm btn-full" type="submit">✓ Mark Completed</button>
+                      <input type="hidden" name="status" value="preparing" />
+                      <button class="btn btn-secondary btn-sm btn-full" type="submit">👨‍🍳 Mark Preparing</button>
+                    </form>
+                    {% elif order.status == 'preparing' %}
+                    <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="flex:1;">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                      <input type="hidden" name="status" value="ready" />
+                      <button class="btn btn-secondary btn-sm btn-full" type="submit">🔔 Mark Ready</button>
+                    </form>
+                    {% endif %}
+                    <form action="{{ url_for('complete_order', order_id=order.id) }}" method="post" style="flex:1;">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                      <button class="btn btn-primary btn-sm btn-full" type="submit">✓ Complete</button>
                     </form>
                   </div>
                 </div>
@@ -437,8 +450,23 @@
                   <span class="order-total-label">Total</span>
                   <span class="order-total-value">${{ '%.2f' | format(order.total) }}</span>
                 </div>
-                <div style="margin-top:0.875rem;">
-                  <form action="{{ url_for('complete_order', order_id=order.id) }}" method="post">
+                <div style="margin-top:0.875rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
+                  {% if order.status == 'pending' %}
+                  <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="flex:1;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="status" value="preparing" />
+                    <button class="btn btn-secondary btn-full" type="submit">👨‍🍳 Mark as Preparing</button>
+                  </form>
+                  {% elif order.status == 'preparing' %}
+                  <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="flex:1;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="status" value="ready" />
+                    <button class="btn btn-secondary btn-full" type="submit">🔔 Mark as Ready</button>
+                  </form>
+                  {% elif order.status == 'ready' %}
+                  <div style="flex:1;padding:0.5rem 1rem;background:var(--success-light);color:var(--success);border-radius:var(--radius);font-weight:600;text-align:center;">🔔 Ready for pickup</div>
+                  {% endif %}
+                  <form action="{{ url_for('complete_order', order_id=order.id) }}" method="post" style="flex:1;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                     <button class="btn btn-primary btn-full" type="submit">✓ Mark as Completed</button>
                   </form>

@@ -51,7 +51,7 @@ IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production" or os.environ.get("R
 # Secret key
 # ---------------------------------------------------------------------------
 
-_secret_key = os.environ.get("SECRET_KEY")
+_secret_key = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET")
 if _secret_key:
     app.secret_key = _secret_key
 else:
@@ -185,7 +185,18 @@ def write_json(path: Path, data) -> None:
 
 
 def load_menu() -> dict:
-    return read_json(MENU_PATH, {"categories": []})
+    menu = read_json(MENU_PATH, {"categories": []})
+    # Back-fill category IDs if missing (e.g. seed data without IDs)
+    changed = False
+    existing_ids: set[str] = set()
+    for cat in menu.get("categories", []):
+        if not cat.get("id"):
+            cat["id"] = unique_id(normalize_id(cat.get("name", "category")), existing_ids)
+            changed = True
+        existing_ids.add(cat["id"])
+    if changed:
+        write_json(MENU_PATH, menu)
+    return menu
 
 
 def load_orders() -> list[dict]:
@@ -427,6 +438,9 @@ def table_order(table_id: str) -> str:
 @app.route("/owner/login", methods=["GET", "POST"])
 @limiter.limit("15 per minute; 50 per hour", methods=["POST"])
 def owner_login() -> str | Response:
+    if logged_in_owner():
+        return redirect(url_for("owner_dashboard"))
+
     owners = load_owners()
     allow_signup = len(owners) == 0
 
@@ -460,6 +474,8 @@ def owner_login() -> str | Response:
 @app.route("/owner/signup", methods=["GET", "POST"])
 @limiter.limit("5 per hour", methods=["POST"])
 def owner_signup() -> str | Response:
+    if logged_in_owner():
+        return redirect(url_for("owner_dashboard"))
     owners = load_owners()
     if len(owners) > 0:
         return redirect(url_for("owner_login"))
@@ -534,19 +550,17 @@ def owner_signup_verify() -> str | Response:
             return render_template("owner_signup_verify.html", otp_hint=otp_hint)
 
         # OTP correct — create account
-        owners.append(
-            {
-                "id": next_id(owners),
-                "username": pending["username"],
-                "mobile": pending["mobile"],
-                "passwordHash": pending["passwordHash"],
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+        new_owner = {
+            "id": next_id(owners),
+            "username": pending["username"],
+            "mobile": pending["mobile"],
+            "passwordHash": pending["passwordHash"],
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+        }
+        owners.append(new_owner)
         save_owners(owners)
-        session.pop("pending_signup", None)
-        session.pop("signup_otp", None)
-        session.pop("signup_otp_created_at", None)
+        # Clear all session data (including pending signup keys) then log in
+        session.clear()
         session["owner_username"] = pending["username"]
         session.permanent = True
         log_security("SIGNUP_SUCCESS", f"user={pending['username']!r}")
@@ -809,6 +823,30 @@ def table_qr(table_id: str) -> Response:
 # Order management
 # ---------------------------------------------------------------------------
 
+VALID_ORDER_STATUSES = {"pending", "preparing", "ready", "completed"}
+
+
+@app.route("/owner/order/<int:order_id>/status", methods=["POST"])
+@login_required
+def update_order_status(order_id: int) -> Response:
+    new_status = str(request.form.get("status", "")).strip()
+    if new_status not in VALID_ORDER_STATUSES:
+        flash("Invalid order status.")
+        return redirect(url_for("owner_dashboard") + "#orders")
+    orders = load_orders()
+    found = False
+    for order in orders:
+        if order["id"] == order_id:
+            order["status"] = new_status
+            found = True
+            break
+    if not found:
+        flash("Order not found.")
+        return redirect(url_for("owner_dashboard") + "#orders")
+    save_orders(orders)
+    return redirect(url_for("owner_dashboard") + "#orders")
+
+
 @app.route("/owner/order/<int:order_id>/complete", methods=["POST"])
 @login_required
 def complete_order(order_id: int) -> Response:
@@ -897,9 +935,20 @@ def checkout() -> tuple[dict, int]:
 
 @app.route("/api/orders", methods=["GET"])
 @csrf.exempt
-@limiter.limit("30 per minute")
+@limiter.limit("60 per minute")
 def orders_api() -> tuple[dict, int]:
     return {"orders": load_orders()}, 200
+
+
+@app.route("/api/order/<int:order_id>", methods=["GET"])
+@csrf.exempt
+@limiter.limit("120 per minute")
+def get_order(order_id: int) -> tuple[dict, int]:
+    orders = load_orders()
+    order = next((o for o in orders if o["id"] == order_id), None)
+    if not order:
+        abort(404, description="Order not found.")
+    return {"order": order}, 200
 
 # ---------------------------------------------------------------------------
 # Init data files
