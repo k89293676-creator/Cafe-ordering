@@ -78,7 +78,7 @@ function handleEditToggle(e) {
 }
 
 // ---------------------------------------------------------------------------
-// Order polling — auto-refresh when new orders arrive
+// Real-time order updates via Server-Sent Events (SSE)
 // ---------------------------------------------------------------------------
 
 let knownPendingCount = parseInt(
@@ -86,8 +86,9 @@ let knownPendingCount = parseInt(
   10
 );
 
-// Track what was shown on page load (from server render)
-let initialPendingCount = knownPendingCount;
+let eventSource = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
 
 function updateOrderBadges(pendingCount) {
   // Update sidebar badge
@@ -141,10 +142,10 @@ function showNewOrderBanner(newCount) {
   banner.id = "new-order-banner";
   banner.className = "new-order-banner";
   banner.innerHTML = `
-    <span>🔔 ${newCount} new order${newCount > 1 ? "s" : ""} received!</span>
+    <span>New order${newCount > 1 ? "s" : ""} received!</span>
     <div style="display:flex;gap:0.5rem;align-items:center;">
       <button class="btn btn-primary btn-sm" id="refresh-orders-btn">Refresh Dashboard</button>
-      <button class="btn btn-ghost btn-sm" id="dismiss-banner-btn" style="color:inherit;">✕</button>
+      <button class="btn btn-ghost btn-sm" id="dismiss-banner-btn" style="color:inherit;">X</button>
     </div>
   `;
 
@@ -162,7 +163,72 @@ function showNewOrderBanner(newCount) {
   setTimeout(() => banner.remove(), 30000);
 }
 
-async function pollOrders() {
+function playNotificationSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (_) {}
+}
+
+function connectSSE() {
+  if (eventSource) {
+    eventSource.close();
+  }
+  
+  eventSource = new EventSource("/api/events/orders");
+  
+  eventSource.addEventListener("connected", (e) => {
+    reconnectAttempts = 0;
+    console.log("[v0] SSE connected for order updates");
+  });
+  
+  eventSource.addEventListener("order_update", (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      const newPendingCount = data.pendingCount || 0;
+      
+      if (newPendingCount > knownPendingCount) {
+        const diff = newPendingCount - knownPendingCount;
+        showNewOrderBanner(diff);
+        playNotificationSound();
+      }
+      
+      knownPendingCount = newPendingCount;
+      updateOrderBadges(newPendingCount);
+    } catch (_) {}
+  });
+  
+  eventSource.addEventListener("heartbeat", () => {
+    // Connection is alive, nothing to do
+  });
+  
+  eventSource.onerror = () => {
+    eventSource.close();
+    eventSource = null;
+    
+    // Attempt to reconnect with exponential backoff
+    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      reconnectAttempts++;
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+      console.log(`[v0] SSE disconnected, reconnecting in ${delay}ms...`);
+      setTimeout(connectSSE, delay);
+    } else {
+      console.log("[v0] SSE max reconnect attempts reached, falling back to polling");
+      // Fallback to polling if SSE keeps failing
+      setInterval(pollOrdersFallback, 20000);
+    }
+  };
+}
+
+async function pollOrdersFallback() {
   try {
     const res = await fetch("/api/orders?v=" + Date.now(), { cache: "no-store" });
     if (!res.ok) return;
@@ -174,19 +240,7 @@ async function pollOrders() {
     if (pendingCount > knownPendingCount) {
       const newCount = pendingCount - knownPendingCount;
       showNewOrderBanner(newCount);
-      // Play a subtle notification sound effect via audio context if available
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = 880;
-        gain.gain.setValueAtTime(0.1, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.3);
-      } catch (_) {}
+      playNotificationSound();
     }
 
     knownPendingCount = pendingCount;
@@ -209,6 +263,18 @@ document.addEventListener("DOMContentLoaded", () => {
     switchTab(hash);
   }
 
-  // Start order polling every 20 seconds
-  setInterval(pollOrders, 20000);
+  // Start real-time updates via SSE (with polling fallback)
+  if (typeof EventSource !== "undefined") {
+    connectSSE();
+  } else {
+    // Fallback for browsers without SSE support
+    setInterval(pollOrdersFallback, 20000);
+  }
+});
+
+// Clean up SSE connection when leaving page
+window.addEventListener("beforeunload", () => {
+  if (eventSource) {
+    eventSource.close();
+  }
 });

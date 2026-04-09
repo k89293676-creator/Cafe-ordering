@@ -31,27 +31,64 @@ function fmt(amount) { return amount.toFixed(2); }
 // Cart panel toggle (mobile)
 // ---------------------------------------------------------------------------
 function openCart() {
-  cartPanel?.classList.add("cart-panel--open");
+  if (!cartPanel) return;
+  cartPanel.classList.add("cart-panel--open");
   document.body.classList.add("cart-open");
+  // Re-render cart to ensure it shows current items
+  renderCart();
 }
+
 function closeCart() {
-  cartPanel?.classList.remove("cart-panel--open");
+  if (!cartPanel) return;
+  cartPanel.classList.remove("cart-panel--open");
   document.body.classList.remove("cart-open");
 }
 
-cartToggleBtn?.addEventListener("click", openCart);
-cartCloseBtn?.addEventListener("click", closeCart);
-
-// Tap backdrop to close on mobile
-document.addEventListener("click", (e) => {
-  if (document.body.classList.contains("cart-open")) {
-    if (!cartPanel?.contains(e.target) && e.target !== cartToggleBtn && !cartToggleBtn?.contains(e.target)) {
-      closeCart();
-    }
+// Initialize cart panel event listeners after DOM is ready
+function initCartPanel() {
+  if (cartToggleBtn) {
+    cartToggleBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openCart();
+    });
   }
-});
+  
+  if (cartCloseBtn) {
+    cartCloseBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeCart();
+    });
+  }
+  
+  if (cartFab) {
+    cartFab.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openCart();
+    });
+  }
+  
+  // Tap backdrop to close on mobile
+  document.addEventListener("click", (e) => {
+    if (document.body.classList.contains("cart-open")) {
+      const isInsideCart = cartPanel?.contains(e.target);
+      const isToggleBtn = e.target === cartToggleBtn || cartToggleBtn?.contains(e.target);
+      const isFabBtn = e.target === cartFab || cartFab?.contains(e.target);
+      if (!isInsideCart && !isToggleBtn && !isFabBtn) {
+        closeCart();
+      }
+    }
+  });
+}
 
-cartFab?.addEventListener("click", openCart);
+// Call init on DOMContentLoaded
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initCartPanel);
+} else {
+  initCartPanel();
+}
 
 // ---------------------------------------------------------------------------
 // Category navigation

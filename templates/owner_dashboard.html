@@ -165,7 +165,9 @@
                     <div class="order-row-id">#{{ order.id }}</div>
                     <div class="order-row-name">{{ order.customerName | default('Guest') }}</div>
                     <div class="order-row-meta">
-                      <span class="order-table-badge">{{ order.tableName or 'Online' }}</span>
+                      <span class="order-table-badge" title="{{ order.tableId or 'online' }}">
+                        {% if order.tableId %}{{ order.tableName or order.tableId }}{% else %}Online{% endif %}
+                      </span>
                       <span class="order-row-time">{{ (order.createdAt or '')[:16] | replace('T',' ') }}</span>
                     </div>
                   </div>
@@ -288,7 +290,9 @@
                       <div class="order-row-id">#{{ order.id }}</div>
                       <div class="order-row-name">{{ order.customerName | default('Guest') }}</div>
                       <div class="order-row-meta">
-                        <span class="order-table-badge">{{ order.tableName or 'Online' }}</span>
+                        <span class="order-table-badge" title="{{ order.tableId or 'online' }}">
+                    {% if order.tableId %}{{ order.tableName or order.tableId }}{% else %}Online{% endif %}
+                  </span>
                       </div>
                     </div>
                     <div class="order-row-right">
@@ -545,7 +549,9 @@
                     <div class="order-customer">{{ order.customerName | default('Guest') }}</div>
                     <div class="order-time">{{ (order.createdAt or '')[:16] | replace('T',' ') }}</div>
                   </div>
-                  <span class="order-table-badge">{{ order.tableName or 'Online' }}</span>
+                  <span class="order-table-badge" title="{{ order.tableId or 'online' }}">
+                    {% if order.tableId %}{{ order.tableName or order.tableId }}{% else %}Online{% endif %}
+                  </span>
                 </div>
                 <div class="order-items-list">
                   {% for item in (order['items'] or []) %}
@@ -593,7 +599,9 @@
                     <div class="order-time">{{ (order.createdAt or '')[:16] | replace('T',' ') }}</div>
                   </div>
                   <div style="text-align:right;">
-                    <span class="order-table-badge">{{ order.tableName or 'Online' }}</span>
+                    <span class="order-table-badge" title="{{ order.tableId or 'online' }}">
+                    {% if order.tableId %}{{ order.tableName or order.tableId }}{% else %}Online{% endif %}
+                  </span>
                     <div style="margin-top:0.375rem;">
                       {% if order.status == 'ready' %}
                         <span class="order-status-badge status-ready">🔔 Ready</span>
@@ -653,7 +661,9 @@
                     <div class="order-time">{{ (order.createdAt or '')[:16] | replace('T',' ') }}</div>
                   </div>
                   <div style="text-align:right;">
-                    <span class="order-table-badge">{{ order.tableName or 'Online' }}</span>
+                    <span class="order-table-badge" title="{{ order.tableId or 'online' }}">
+                    {% if order.tableId %}{{ order.tableName or order.tableId }}{% else %}Online{% endif %}
+                  </span>
                     <div style="margin-top:0.375rem;"><span class="order-status-badge status-completed">✓ Done</span></div>
                   </div>
                 </div>

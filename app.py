@@ -6,12 +6,10 @@ import logging
 import os
 import re
 import secrets
-import tempfile
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from pathlib import Path
 
 import qrcode
 from flask import (
@@ -32,20 +30,8 @@ from flask_talisman import Talisman
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
-
-BASE_DIR = Path(__file__).resolve().parent
-MENU_PATH = BASE_DIR / "menu.json"
-ORDERS_PATH = BASE_DIR / "orders.json"
-OWNERS_PATH = BASE_DIR / "owners.json"
-TABLES_PATH = BASE_DIR / "tables.json"
-
-# Per-file write locks prevent concurrent read-modify-write races within a process.
-_orders_lock = threading.Lock()
-_menu_lock = threading.Lock()
-_tables_lock = threading.Lock()
+# Import database module
+import database as db
 
 # ---------------------------------------------------------------------------
 # App creation
@@ -189,114 +175,31 @@ def log_security(event: str, detail: str = "") -> None:
     security_log.info("%s ip=%s %s", event, _client_ip(), detail)
 
 # ---------------------------------------------------------------------------
-# Data helpers
+# Data helpers (delegated to database module)
 # ---------------------------------------------------------------------------
 
-def read_json(path: Path, default):
-    """Read JSON from *path*, returning *default* on any error."""
-    if not path.exists():
-        return default
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        return data
-    except json.JSONDecodeError as exc:
-        app.logger.error("Corrupt JSON in %s (%s) — returning default", path, exc)
-        try:
-            corrupt = path.with_suffix(".corrupt")
-            path.rename(corrupt)
-            app.logger.error("Moved corrupt file to %s", corrupt)
-        except OSError:
-            pass
-        return default
-    except OSError as exc:
-        app.logger.error("Failed to read %s: %s", path, exc)
-        return default
-
-
-def write_json(path: Path, data) -> None:
-    """Atomically write *data* as JSON to *path* using a temp-file + rename."""
-    try:
-        dir_ = path.parent
-        fd, tmp_path = tempfile.mkstemp(dir=dir_, prefix=".~", suffix=".json")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(data, handle, indent=2)
-            os.replace(tmp_path, path)
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-    except OSError as exc:
-        app.logger.error("Failed to write %s: %s", path, exc)
-        raise
-
-
 def load_menu() -> dict:
-    menu = read_json(MENU_PATH, {"categories": []})
-    changed = False
-    existing_ids: set[str] = set()
-    for cat in menu.get("categories", []):
-        if not cat.get("id"):
-            cat["id"] = unique_id(normalize_id(cat.get("name", "category")), existing_ids)
-            changed = True
-        existing_ids.add(cat["id"])
-    if changed:
-        write_json(MENU_PATH, menu)
-    return menu
+    return db.get_menu()
 
 
 def load_orders() -> list[dict]:
-    return read_json(ORDERS_PATH, [])
+    return db.get_orders()
 
 
 def load_owners() -> list[dict]:
-    return read_json(OWNERS_PATH, [])
+    return db.get_owners()
 
 
 def load_tables() -> list[dict]:
-    return read_json(TABLES_PATH, [])
-
-
-def save_orders(orders: list[dict]) -> None:
-    write_json(ORDERS_PATH, orders)
-
-
-def save_owners(owners: list[dict]) -> None:
-    write_json(OWNERS_PATH, owners)
-
-
-def save_tables(tables: list[dict]) -> None:
-    write_json(TABLES_PATH, tables)
+    return db.get_tables()
 
 
 def save_menu(menu: dict) -> None:
-    write_json(MENU_PATH, menu)
+    db.save_menu(menu)
 
 # ---------------------------------------------------------------------------
-# ID generation
+# ID generation helpers
 # ---------------------------------------------------------------------------
-
-def next_id(records: list[dict]) -> int:
-    return max(
-        (r.get("id", 0) for r in records if isinstance(r.get("id"), int)),
-        default=0,
-    ) + 1
-
-
-def next_table_number(tables: list[dict]) -> int:
-    nums = []
-    for t in tables:
-        tid = t.get("id", "")
-        if isinstance(tid, str) and tid.startswith("table-"):
-            try:
-                nums.append(int(tid[len("table-"):]))
-            except ValueError:
-                pass
-    return max(nums, default=0) + 1
-
 
 def normalize_id(name: str) -> str:
     slug = name.lower().strip()
@@ -605,16 +508,10 @@ def owner_signup() -> str | Response:
             flash("Password must be at least 8 characters and contain at least one letter and one digit.")
             return render_template("owner_signup.html")
 
-        new_owner = {
-            "id": next_id(owners),
-            "username": username,
-            "passwordHash": generate_password_hash(password, method="scrypt"),
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-        }
-        owners.append(new_owner)
-        save_owners(owners)
+        password_hash = generate_password_hash(password, method="scrypt")
+        new_owner = db.create_owner(username, password_hash)
         session.clear()
-        session["owner_username"] = username
+        session["owner_username"] = new_owner["username"]
         session.permanent = True
         log_security("SIGNUP_SUCCESS", f"user={username!r}")
         return redirect(url_for("owner_dashboard"))
@@ -824,17 +721,9 @@ def create_table() -> Response:
         flash("Table name cannot be empty.")
         return redirect(url_for("owner_dashboard") + "#tables")
 
-    tables = load_tables()
-    table_num = next_table_number(tables)
+    table_num = db.next_table_number()
     table_id = f"table-{table_num}"
-    tables.append(
-        {
-            "id": table_id,
-            "name": table_name,
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-        }
-    )
-    save_tables(tables)
+    db.create_table(table_id, table_name)
     return redirect(url_for("owner_dashboard") + "#tables")
 
 
@@ -843,9 +732,7 @@ def create_table() -> Response:
 def delete_table(table_id: str) -> Response:
     if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
         abort(400)
-    tables = load_tables()
-    filtered = [t for t in tables if t["id"] != table_id]
-    save_tables(filtered)
+    db.delete_table(table_id)
     return redirect(url_for("owner_dashboard") + "#tables")
 
 
@@ -884,36 +771,25 @@ VALID_ORDER_STATUSES = {"pending", "preparing", "ready", "completed"}
 
 @app.route("/owner/order/<int:order_id>/status", methods=["POST"])
 @login_required
-def update_order_status(order_id: int) -> Response:
+def update_order_status_route(order_id: int) -> Response:
     new_status = str(request.form.get("status", "")).strip()
     if new_status not in VALID_ORDER_STATUSES:
         flash("Invalid order status.")
         return redirect(url_for("owner_dashboard") + "#orders")
-    with _orders_lock:
-        orders = load_orders()
-        found = False
-        for order in orders:
-            if order["id"] == order_id:
-                order["status"] = new_status
-                found = True
-                break
-        if not found:
-            flash("Order not found.")
-            return redirect(url_for("owner_dashboard") + "#orders")
-        save_orders(orders)
+    
+    if not db.update_order_status(order_id, new_status):
+        flash("Order not found.")
+        return redirect(url_for("owner_dashboard") + "#orders")
+    
+    _increment_order_version()  # Notify SSE listeners
     return redirect(url_for("owner_dashboard") + "#orders")
 
 
 @app.route("/owner/order/<int:order_id>/complete", methods=["POST"])
 @login_required
 def complete_order(order_id: int) -> Response:
-    with _orders_lock:
-        orders = load_orders()
-        for order in orders:
-            if order["id"] == order_id:
-                order["status"] = "completed"
-                break
-        save_orders(orders)
+    db.update_order_status(order_id, "completed")
+    _increment_order_version()  # Notify SSE listeners
     return redirect(url_for("owner_dashboard") + "#orders")
 
 
@@ -965,29 +841,22 @@ def checkout() -> tuple[dict, int]:
     if table_id and not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
         abort(400, description="Invalid table ID.")
 
-    table_name = None
+    table_name = "Online"
     if table_id:
-        table = next((t for t in load_tables() if t["id"] == table_id), None)
+        table = db.get_table(table_id)
         table_name = table["name"] if table else table_id
-    else:
-        table_name = "Online"
 
     order_summary = compute_order_summary(items)
-    with _orders_lock:
-        orders = load_orders()
-        order_record = {
-            "id": next_id(orders),
-            "customerName": customer_name,
-            "tableId": table_id,
-            "tableName": table_name,
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-            "items": order_summary["items"],
-            "total": order_summary["total"],
-            "status": "pending",
-            "origin": "table" if table_id else "online",
-        }
-        orders.append(order_record)
-        save_orders(orders)
+    origin = "table" if table_id else "online"
+    order_record = db.create_order(
+        customer_name=customer_name,
+        table_id=table_id,
+        table_name=table_name,
+        items=order_summary["items"],
+        total=order_summary["total"],
+        origin=origin,
+    )
+    _increment_order_version()  # Notify SSE listeners
     log_security("ORDER_PLACED", f"table={table_id!r} total=₹{order_record['total']}")
     return {"message": "Order placed successfully.", "order": order_record}, 201
 
@@ -1004,46 +873,128 @@ def orders_api() -> tuple[dict, int]:
 @app.route("/api/order/<int:order_id>", methods=["GET"])
 @csrf.exempt
 @limiter.limit("20 per minute; 60 per hour")
-def get_order(order_id: int) -> tuple[dict, int]:
+def get_order_api(order_id: int) -> tuple[dict, int]:
     """Public customer tracker — returns only UX-required fields.
     Internal fields (tableId UUID, raw timestamps) are stripped to limit
     sequential-ID enumeration impact. Rate limit also slows scraping.
     """
-    orders = load_orders()
-    order = next((o for o in orders if o["id"] == order_id), None)
+    order = db.get_order(order_id)
     if not order:
         abort(404, description="Order not found.")
     safe_order = {
         "id": order["id"],
         "status": order.get("status", "pending"),
+        "tableId": order.get("tableId", ""),
         "tableName": order.get("tableName", ""),
         "customerName": order.get("customerName", ""),
         "items": order.get("items", []),
         "total": order.get("total", 0),
-        "placedAt": order.get("placedAt", ""),
+        "createdAt": order.get("createdAt", ""),
     }
     return {"order": safe_order}, 200
 
+
 # ---------------------------------------------------------------------------
-# Init data files
+# Server-Sent Events (SSE) for real-time updates
 # ---------------------------------------------------------------------------
 
-def _init_data_files() -> None:
-    if not ORDERS_PATH.exists():
-        write_json(ORDERS_PATH, [])
-    if not OWNERS_PATH.exists():
-        write_json(OWNERS_PATH, [])
-    if not TABLES_PATH.exists():
-        write_json(TABLES_PATH, [])
-    if not MENU_PATH.exists():
-        write_json(MENU_PATH, {"categories": []})
+# Event tracking for SSE
+_sse_order_version = {"version": 0}
+_sse_lock = threading.Lock()
 
+
+def _increment_order_version() -> int:
+    """Increment and return the new order version for SSE notifications."""
+    with _sse_lock:
+        _sse_order_version["version"] += 1
+        return _sse_order_version["version"]
+
+
+def _get_order_version() -> int:
+    """Get current order version."""
+    with _sse_lock:
+        return _sse_order_version["version"]
+
+
+@app.route("/api/events/orders", methods=["GET"])
+@csrf.exempt
+@limiter.limit("10 per minute")
+@api_login_required
+def sse_orders():
+    """SSE endpoint for real-time order updates (owner dashboard)."""
+    def generate():
+        last_version = _get_order_version()
+        # Send initial connection event
+        yield f"event: connected\ndata: {json.dumps({'version': last_version})}\n\n"
+        
+        while True:
+            time.sleep(2)  # Check every 2 seconds
+            current_version = _get_order_version()
+            if current_version != last_version:
+                last_version = current_version
+                orders = load_orders()
+                pending_count = len([o for o in orders if o.get("status") != "completed"])
+                yield f"event: order_update\ndata: {json.dumps({'version': current_version, 'pendingCount': pending_count})}\n\n"
+            else:
+                # Send heartbeat to keep connection alive
+                yield f"event: heartbeat\ndata: {json.dumps({'time': datetime.now(timezone.utc).isoformat()})}\n\n"
+    
+    response = Response(generate(), mimetype="text/event-stream")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"  # Disable nginx buffering
+    return response
+
+
+@app.route("/api/events/order/<int:order_id>", methods=["GET"])
+@csrf.exempt
+@limiter.limit("20 per minute")
+def sse_order_status(order_id: int):
+    """SSE endpoint for customer to track their order status in real-time."""
+    def generate():
+        last_status = None
+        while True:
+            order = db.get_order(order_id)
+            if not order:
+                yield f"event: error\ndata: {json.dumps({'message': 'Order not found'})}\n\n"
+                break
+            
+            current_status = order.get("status", "pending")
+            if current_status != last_status:
+                last_status = current_status
+                safe_order = {
+                    "id": order["id"],
+                    "status": current_status,
+                    "tableName": order.get("tableName", ""),
+                    "customerName": order.get("customerName", ""),
+                    "items": order.get("items", []),
+                    "total": order.get("total", 0),
+                }
+                yield f"event: status_update\ndata: {json.dumps(safe_order)}\n\n"
+                
+                if current_status == "completed":
+                    break
+            else:
+                # Send heartbeat
+                yield f"event: heartbeat\ndata: {json.dumps({'time': datetime.now(timezone.utc).isoformat()})}\n\n"
+            
+            time.sleep(3)  # Check every 3 seconds
+    
+    response = Response(generate(), mimetype="text/event-stream")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Initialize database
+# ---------------------------------------------------------------------------
 
 try:
-    _init_data_files()
+    db.init_database()
+    app.logger.info("Database initialized successfully (mode: %s)", "PostgreSQL" if db.USE_POSTGRES else "JSON files")
 except Exception as exc:
     import sys
-    print(f"WARNING: Could not initialise data files: {exc}", file=sys.stderr, flush=True)
+    print(f"WARNING: Could not initialize database: {exc}", file=sys.stderr, flush=True)
 
 # ---------------------------------------------------------------------------
 # Entry point
