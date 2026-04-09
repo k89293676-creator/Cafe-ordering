@@ -87,12 +87,8 @@ app.config.update(
 # Security extensions
 # ---------------------------------------------------------------------------
 
-# CSRF protection — all POST/PUT/PATCH/DELETE forms must include token.
-# JSON API endpoints are explicitly exempted below via @csrf.exempt.
 csrf = CSRFProtect(app)
 
-# Rate limiter — keyed by remote IP.
-# Uses in-memory storage (acceptable for single-worker; use Redis in production).
 limiter = Limiter(
     key_func=get_remote_address,
     app=app,
@@ -100,9 +96,6 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
-# Content-Security-Policy definition.
-# 'unsafe-inline' for style-src is needed for inline style="" attributes in templates.
-# All JS is served from 'self' — no inline scripts exist after dashboard refactor.
 _csp = {
     "default-src": "'self'",
     "script-src": "'self'",
@@ -115,27 +108,50 @@ _csp = {
     "base-uri": "'self'",
 }
 
-# Flask-Talisman adds security headers on every response.
-# force_https=False because Railway terminates TLS at the proxy.
-Talisman(
-    app,
-    force_https=False,
-    strict_transport_security=IS_PRODUCTION,
-    strict_transport_security_max_age=31536000,
-    strict_transport_security_include_subdomains=True,
-    session_cookie_secure=IS_PRODUCTION,
-    content_security_policy=_csp,
-    content_security_policy_nonce_in=None,
-    referrer_policy="strict-origin-when-cross-origin",
-    feature_policy={
-        "geolocation": "'none'",
-        "camera": "'none'",
-        "microphone": "'none'",
-    },
-    frame_options="DENY",
-    x_content_type_options=True,
-    x_xss_protection=True,
-)
+# Flask-Talisman — permissions_policy replaces deprecated feature_policy
+try:
+    Talisman(
+        app,
+        force_https=False,
+        strict_transport_security=IS_PRODUCTION,
+        strict_transport_security_max_age=31536000,
+        strict_transport_security_include_subdomains=True,
+        session_cookie_secure=IS_PRODUCTION,
+        content_security_policy=_csp,
+        content_security_policy_nonce_in=None,
+        referrer_policy="strict-origin-when-cross-origin",
+        permissions_policy={
+            "geolocation": "()",
+            "camera": "()",
+            "microphone": "()",
+            "payment": "()",
+            "usb": "()",
+        },
+        frame_options="DENY",
+        x_content_type_options=True,
+        x_xss_protection=True,
+    )
+except TypeError:
+    # Older Flask-Talisman versions use feature_policy
+    Talisman(
+        app,
+        force_https=False,
+        strict_transport_security=IS_PRODUCTION,
+        strict_transport_security_max_age=31536000,
+        strict_transport_security_include_subdomains=True,
+        session_cookie_secure=IS_PRODUCTION,
+        content_security_policy=_csp,
+        content_security_policy_nonce_in=None,
+        referrer_policy="strict-origin-when-cross-origin",
+        feature_policy={
+            "geolocation": "'none'",
+            "camera": "'none'",
+            "microphone": "'none'",
+        },
+        frame_options="DENY",
+        x_content_type_options=True,
+        x_xss_protection=True,
+    )
 
 # ---------------------------------------------------------------------------
 # Additional security headers not covered by Talisman
@@ -185,7 +201,6 @@ def read_json(path: Path, default):
         return data
     except json.JSONDecodeError as exc:
         app.logger.error("Corrupt JSON in %s (%s) — returning default", path, exc)
-        # Rename the corrupt file so we don't lose it, then recover gracefully
         try:
             corrupt = path.with_suffix(".corrupt")
             path.rename(corrupt)
@@ -206,7 +221,7 @@ def write_json(path: Path, data) -> None:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(data, handle, indent=2)
-            os.replace(tmp_path, path)  # atomic on POSIX, best-effort on Windows
+            os.replace(tmp_path, path)
         except Exception:
             try:
                 os.unlink(tmp_path)
@@ -220,7 +235,6 @@ def write_json(path: Path, data) -> None:
 
 def load_menu() -> dict:
     menu = read_json(MENU_PATH, {"categories": []})
-    # Back-fill category IDs if missing (e.g. seed data without IDs)
     changed = False
     existing_ids: set[str] = set()
     for cat in menu.get("categories", []):
@@ -322,7 +336,21 @@ def _normalise_mobile(mobile: str) -> str:
 
 
 def _is_valid_mobile(mobile: str) -> bool:
-    return 7 <= len(_normalise_mobile(mobile)) <= 15
+    digits = _normalise_mobile(mobile)
+    return 7 <= len(digits) <= 15
+
+
+def _is_valid_indian_mobile(mobile: str) -> bool:
+    """Accept Indian mobile numbers: 10 digits, optionally prefixed with +91 or 0."""
+    digits = _normalise_mobile(mobile)
+    if len(digits) == 10:
+        return digits[0] in "6789"
+    if len(digits) == 12 and digits.startswith("91"):
+        return digits[2] in "6789"
+    if len(digits) == 11 and digits.startswith("0"):
+        return digits[1] in "6789"
+    # Also accept international numbers as a fallback
+    return _is_valid_mobile(mobile)
 
 
 def _is_strong_password(password: str) -> bool:
@@ -334,18 +362,18 @@ def _is_strong_password(password: str) -> bool:
     )
 
 # ---------------------------------------------------------------------------
-# OTP helpers — use secrets module (cryptographically secure)
+# OTP helpers — cryptographically secure
 # ---------------------------------------------------------------------------
+
+OTP_VALIDITY_SECONDS = 600  # 10 minutes
+
 
 def generate_otp() -> str:
     return f"{secrets.randbelow(900000) + 100000:06d}"
 
 
-OTP_VALIDITY_SECONDS = 600  # 10 minutes
-
-
-def _otp_is_expired() -> bool:
-    created_at_str = session.get("signup_otp_created_at")
+def _otp_is_expired(created_at_key: str = "signup_otp_created_at") -> bool:
+    created_at_str = session.get(created_at_key)
     if not created_at_str:
         return True
     try:
@@ -353,6 +381,21 @@ def _otp_is_expired() -> bool:
         return (datetime.now(timezone.utc) - created_at).total_seconds() > OTP_VALIDITY_SECONDS
     except ValueError:
         return True
+
+
+def _send_otp(mobile: str, otp: str) -> None:
+    """Send OTP via SMS.
+    
+    In production: integrate an SMS provider (e.g. MSG91, Twilio, Fast2SMS).
+    Set the provider credentials as environment variables and implement the
+    HTTP call here. In demo/development mode the OTP is shown on-screen.
+    """
+    # Production SMS sending would go here:
+    # provider_api_key = os.environ.get("SMS_API_KEY")
+    # if provider_api_key:
+    #     send_via_provider(mobile, otp, provider_api_key)
+    #     return
+    app.logger.info("OTP for %s: %s (demo mode — no SMS sent)", mobile, otp)
 
 # ---------------------------------------------------------------------------
 # Order computation
@@ -404,13 +447,6 @@ def compute_order_summary(items: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 def _wants_json() -> bool:
-    """Return True when the client expects a JSON response.
-
-    Covers:
-    - Requests with Content-Type: application/json (POST/PUT API calls)
-    - Requests to /api/* routes (GET API polling, where Content-Type is absent)
-    - Requests that list application/json first in their Accept header
-    """
     if request.is_json:
         return True
     if request.path.startswith("/api/"):
@@ -481,7 +517,6 @@ def home() -> str:
 @app.route("/table/<table_id>")
 @limiter.limit("60 per minute")
 def table_order(table_id: str) -> str:
-    # Sanitise table_id: only alphanumeric and hyphens allowed
     if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
         abort(404)
     tables = load_tables()
@@ -491,7 +526,7 @@ def table_order(table_id: str) -> str:
     return render_template("table_order.html", table=table)
 
 # ---------------------------------------------------------------------------
-# Auth routes
+# Auth routes — password login
 # ---------------------------------------------------------------------------
 
 @app.route("/owner/login", methods=["GET", "POST"])
@@ -523,12 +558,107 @@ def owner_login() -> str | Response:
             log_security("LOGIN_SUCCESS", f"user={owner['username']!r}")
             return redirect(url_for("owner_dashboard"))
 
-        # Constant-time-safe failure path — always log
         log_security("LOGIN_FAILURE", f"identifier={identifier!r}")
-        flash("Sign in failed. Check your credentials.")
+        flash("Sign in failed. Check your credentials and try again.")
 
     return render_template("owner_login.html", allow_signup=allow_signup)
 
+
+# ---------------------------------------------------------------------------
+# Auth routes — OTP login via phone number
+# ---------------------------------------------------------------------------
+
+@app.route("/owner/login-otp", methods=["GET", "POST"])
+@limiter.limit("10 per minute; 30 per hour", methods=["POST"])
+def owner_login_otp() -> str | Response:
+    if logged_in_owner():
+        return redirect(url_for("owner_dashboard"))
+
+    if request.method == "POST":
+        mobile_raw = str(request.form.get("mobile", "")).strip()[:20]
+
+        if not _is_valid_indian_mobile(mobile_raw):
+            flash("Please enter a valid Indian mobile number (10 digits starting with 6-9).")
+            return render_template("owner_login_otp.html")
+
+        mobile_normalised = _normalise_mobile(mobile_raw)
+        owners = load_owners()
+        owner = next(
+            (o for o in owners if _normalise_mobile(o.get("mobile", "")) == mobile_normalised),
+            None,
+        )
+
+        if not owner:
+            # Don't reveal whether the number exists — generic message
+            log_security("OTP_LOGIN_UNKNOWN_MOBILE", f"mobile={mobile_normalised!r}")
+            flash("If this number is registered, you will receive an OTP shortly.")
+            return render_template("owner_login_otp.html")
+
+        otp = generate_otp()
+        session["login_otp"] = otp
+        session["login_otp_created_at"] = datetime.now(timezone.utc).isoformat()
+        session["login_otp_mobile"] = mobile_normalised
+
+        _send_otp(mobile_normalised, otp)
+        log_security("LOGIN_OTP_ISSUED", f"mobile={mobile_normalised!r}")
+
+        return redirect(url_for("owner_login_otp_verify", otp_hint=otp))
+
+    return render_template("owner_login_otp.html")
+
+
+@app.route("/owner/login-otp/verify", methods=["GET", "POST"])
+@limiter.limit("5 per 15 minutes", methods=["POST"])
+def owner_login_otp_verify() -> str | Response:
+    if logged_in_owner():
+        return redirect(url_for("owner_dashboard"))
+
+    mobile = session.get("login_otp_mobile")
+    if not mobile:
+        flash("Session expired. Please request a new OTP.")
+        return redirect(url_for("owner_login_otp"))
+
+    otp_hint = request.args.get("otp_hint", "")
+
+    if request.method == "POST":
+        if _otp_is_expired("login_otp_created_at"):
+            session.pop("login_otp", None)
+            session.pop("login_otp_created_at", None)
+            session.pop("login_otp_mobile", None)
+            log_security("LOGIN_OTP_EXPIRED", f"mobile={mobile!r}")
+            flash("Your OTP has expired. Please request a new one.")
+            return redirect(url_for("owner_login_otp"))
+
+        entered = str(request.form.get("otp", "")).strip()[:6]
+        stored = session.get("login_otp", "")
+
+        if not secrets.compare_digest(entered, stored):
+            log_security("LOGIN_OTP_FAILURE", f"mobile={mobile!r}")
+            flash("Incorrect OTP. Please try again.")
+            return render_template("owner_login_otp_verify.html", mobile=mobile, otp_hint=otp_hint)
+
+        owners = load_owners()
+        owner = next(
+            (o for o in owners if _normalise_mobile(o.get("mobile", "")) == mobile),
+            None,
+        )
+        if not owner:
+            log_security("LOGIN_OTP_OWNER_NOT_FOUND", f"mobile={mobile!r}")
+            flash("Account not found. Please contact support.")
+            return redirect(url_for("owner_login"))
+
+        session.clear()
+        session["owner_username"] = owner["username"]
+        session.permanent = True
+        log_security("LOGIN_OTP_SUCCESS", f"user={owner['username']!r}")
+        return redirect(url_for("owner_dashboard"))
+
+    return render_template("owner_login_otp_verify.html", mobile=mobile, otp_hint=otp_hint)
+
+
+# ---------------------------------------------------------------------------
+# Auth routes — signup (first owner only)
+# ---------------------------------------------------------------------------
 
 @app.route("/owner/signup", methods=["GET", "POST"])
 @limiter.limit("5 per hour", methods=["POST"])
@@ -552,8 +682,8 @@ def owner_signup() -> str | Response:
             flash("Username may only contain letters, digits, underscores, hyphens, and dots (3–64 chars).")
             return render_template("owner_signup.html")
 
-        if not _is_valid_mobile(mobile):
-            flash("Please enter a valid mobile number (7–15 digits).")
+        if not _is_valid_indian_mobile(mobile):
+            flash("Please enter a valid Indian mobile number (10 digits starting with 6, 7, 8, or 9).")
             return render_template("owner_signup.html")
 
         if not _is_strong_password(password):
@@ -569,8 +699,8 @@ def owner_signup() -> str | Response:
         session["signup_otp"] = otp
         session["signup_otp_created_at"] = datetime.now(timezone.utc).isoformat()
 
+        _send_otp(_normalise_mobile(mobile), otp)
         log_security("SIGNUP_OTP_ISSUED", f"user={username!r}")
-        # In production: send OTP via SMS. Here we pass it through URL for demo.
         return redirect(url_for("owner_signup_verify", otp_hint=otp))
 
     return render_template("owner_signup.html")
@@ -591,8 +721,7 @@ def owner_signup_verify() -> str | Response:
     otp_hint = request.args.get("otp_hint", "")
 
     if request.method == "POST":
-        # Check OTP expiry
-        if _otp_is_expired():
+        if _otp_is_expired("signup_otp_created_at"):
             session.pop("pending_signup", None)
             session.pop("signup_otp", None)
             session.pop("signup_otp_created_at", None)
@@ -608,7 +737,6 @@ def owner_signup_verify() -> str | Response:
             flash("Incorrect OTP. Please try again.")
             return render_template("owner_signup_verify.html", otp_hint=otp_hint)
 
-        # OTP correct — create account
         new_owner = {
             "id": next_id(owners),
             "username": pending["username"],
@@ -618,7 +746,6 @@ def owner_signup_verify() -> str | Response:
         }
         owners.append(new_owner)
         save_owners(owners)
-        # Clear all session data (including pending signup keys) then log in
         session.clear()
         session["owner_username"] = pending["username"]
         session.permanent = True
@@ -736,10 +863,10 @@ def save_menu_item() -> Response:
 
     try:
         price = round(float(price_text), 2)
-        if price < 0 or price > 9999.99:
+        if price < 0 or price > 99999.99:  # Increased limit for INR prices
             raise ValueError("Price out of range")
     except ValueError:
-        flash("Item price must be a valid positive number.")
+        flash("Item price must be a valid positive number (up to ₹99,999.99).")
         return redirect(url_for("owner_dashboard") + "#menu")
 
     tags = [t.strip()[:50] for t in tags_text.split(",") if t.strip()][:10]
@@ -993,7 +1120,7 @@ def checkout() -> tuple[dict, int]:
         }
         orders.append(order_record)
         save_orders(orders)
-    log_security("ORDER_PLACED", f"table={table_id!r} total={order_record['total']}")
+    log_security("ORDER_PLACED", f"table={table_id!r} total=₹{order_record['total']}")
     return {"message": "Order placed successfully.", "order": order_record}, 201
 
 
