@@ -396,6 +396,22 @@ def _no_store(response):
     response.headers["Expires"] = "0"
     return response
 
+
+def _resolve_order_table_labels(order: dict, tables: list[dict]) -> dict:
+    """Return an order copy enriched with a stable display label for the table source."""
+    order_copy = dict(order)
+    table_id = order_copy.get("tableId")
+    table_name = order_copy.get("tableName")
+    if table_id:
+        table = next((t for t in tables if t["id"] == table_id), None)
+        if table:
+            order_copy["tableName"] = table.get("name", table_id)
+        else:
+            order_copy["tableName"] = table_name or table_id
+    else:
+        order_copy["tableName"] = table_name or "Online"
+    return order_copy
+
 # ---------------------------------------------------------------------------
 # Order computation
 # ---------------------------------------------------------------------------
@@ -639,6 +655,7 @@ def owner_logout() -> Response:
 def owner_dashboard() -> Response:
     tables = load_tables()
     orders = sorted(load_orders(), key=lambda o: o.get("createdAt", ""), reverse=True)
+    orders = [_resolve_order_table_labels(o, tables) for o in orders]
     menu = load_menu()
     pending_orders = [o for o in orders if o.get("status") != "completed"]
     completed_orders = [o for o in orders if o.get("status") == "completed"]
