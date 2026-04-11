@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cafe 11:11 — Management Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <style>
+    body { margin: 0; background: #0a0a0a; }
+    .home-hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at 60% 40%, rgba(79,70,229,0.18) 0%, transparent 60%),
+                  radial-gradient(ellipse at 20% 80%, rgba(245,158,11,0.1) 0%, transparent 50%),
+                  #0a0a0a;
+      text-align: center;
+      padding: 2rem 1.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .home-hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 30px 30px;
+      pointer-events: none;
+    }
+    .home-time-mark {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(4rem, 12vw, 9rem);
+      font-weight: 700;
+      color: white;
+      line-height: 0.85;
+      letter-spacing: -0.04em;
+      margin-bottom: 1rem;
+      position: relative;
+    }
+    .home-time-mark span {
+      display: block;
+      font-size: 0.22em;
+      font-weight: 400;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.35);
+      font-family: 'Inter', sans-serif;
+      margin-bottom: 0.5em;
+    }
+    .home-divider {
+      width: 40px;
+      height: 1px;
+      background: rgba(255,255,255,0.2);
+      margin: 1.5rem auto;
+    }
+    .home-tagline {
+      font-family: 'Inter', sans-serif;
+      font-size: 1rem;
+      color: rgba(255,255,255,0.45);
+      font-weight: 300;
+      letter-spacing: 0.03em;
+      max-width: 360px;
+      line-height: 1.7;
+      margin: 0 auto 2.5rem;
+    }
+    .home-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    .btn-home-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.625rem;
+      padding: 0.9rem 2.25rem;
+      background: white;
+      color: #0a0a0a;
+      border-radius: 100px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      text-decoration: none;
+      letter-spacing: -0.01em;
+      transition: all 0.2s;
+      border: 1.5px solid transparent;
+    }
+    .btn-home-primary:hover {
+      background: rgba(255,255,255,0.9);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.3);
+    }
+    .btn-home-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.75rem;
+      background: transparent;
+      color: rgba(255,255,255,0.55);
+      border-radius: 100px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.875rem;
+      font-weight: 500;
+      text-decoration: none;
+      border: 1px solid rgba(255,255,255,0.15);
+      transition: all 0.2s;
+    }
+    .btn-home-secondary:hover {
+      border-color: rgba(255,255,255,0.3);
+      color: rgba(255,255,255,0.8);
+    }
+    .home-footer {
+      position: absolute;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.75rem;
+      color: rgba(255,255,255,0.2);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+<div class="home-hero">
+  <div class="home-time-mark">
+    <span>Cafe</span>
+    11:11
+  </div>
+  <div class="home-divider"></div>
+  <p class="home-tagline">
+    A moment of perfect timing. Table ordering, QR codes and order management — all in one place.
+  </p>
+  <div class="home-actions">
+    {% if owner_username %}
+    <a class="btn-home-primary" href="{{ url_for('owner_dashboard') }}">
+      Go to Dashboard
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </a>
+    <a class="btn-home-secondary" href="{{ url_for('owner_logout') }}">Sign Out</a>
+    {% else %}
+    <a class="btn-home-primary" href="{{ url_for('owner_login') }}">
+      Owner Sign In
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </a>
+    <a class="btn-home-secondary" href="{{ url_for('owner_signup') }}">Create an Account</a>
+    {% endif %}
+  </div>
+  <div class="home-footer">Cafe Management Portal</div>
+</div>
+</body>
+</html>

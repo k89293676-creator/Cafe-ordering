@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <style>
+    .remember-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.25rem;
+    }
+    .remember-row input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: var(--primary);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .remember-row label {
+      margin: 0;
+      font-weight: 400;
+      font-size: 0.875rem;
+      cursor: pointer;
+      color: var(--text-secondary);
+      line-height: 1.3;
+    }
+    .lockout-warning {
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.2);
+      border-radius: 8px;
+      padding: 0.625rem 0.875rem;
+      font-size: 0.8125rem;
+      color: #f87171;
+      margin-bottom: 0.75rem;
+      display: none;
+    }
+    .lockout-warning.visible { display: block; }
+    .signin-btn-inner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-logo">
+    <div class="auth-logo-wordmark">11:11</div>
+    <h1>Cafe 11:11</h1>
+    <p>Owner Management</p>
+  </div>
+
+  <div class="auth-card">
+    <h2>Welcome back</h2>
+    <p class="subtitle">Sign in to manage your cafe</p>
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for message in messages %}
+      <div class="alert alert-error">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <div class="lockout-warning" id="lockout-warning">
+      Too many failed attempts. Please wait before trying again.
+    </div>
+
+    <form method="post" autocomplete="on" id="login-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="form-group">
+        <label for="identifier">Username or Email</label>
+        <input id="identifier" name="identifier" placeholder="Enter username or email"
+               autocomplete="username" required />
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <div class="input-with-toggle">
+          <input id="password" type="password" name="password"
+                 placeholder="Enter your password"
+                 autocomplete="current-password" required />
+          <button type="button" class="password-toggle" aria-label="Toggle password visibility"
+                  onclick="togglePw(this,'password')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="form-group remember-row">
+        <input type="checkbox" id="remember_me" name="remember_me" value="on" />
+        <label for="remember_me">Keep me signed in for 90 days</label>
+      </div>
+      <button class="btn btn-primary btn-full" type="submit" style="margin-top:1rem;" id="signin-btn">
+        <span class="signin-btn-inner">
+          Sign In
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </span>
+      </button>
+    </form>
+
+    <p class="auth-footer" style="margin-top:1.25rem;">
+      New owner? <a href="{{ url_for('owner_signup') }}">Create an account</a>
+    </p>
+  </div>
+</div>
+<script>
+function togglePw(btn, id) {
+  const inp = document.getElementById(id);
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+  btn.style.opacity = inp.type === 'text' ? '0.4' : '1';
+}
+
+(function () {
+  // Autofill last-used identifier from localStorage
+  const saved = localStorage.getItem('cafe_last_identifier');
+  const field = document.getElementById('identifier');
+  if (saved && field && !field.value) {
+    field.value = saved;
+    // Auto-check remember me if they had it saved
+    const rememberCb = document.getElementById('remember_me');
+    if (rememberCb) rememberCb.checked = true;
+  }
+
+  // Save identifier on submit
+  const form = document.getElementById('login-form');
+  if (form) {
+    form.addEventListener('submit', () => {
+      const val = (field?.value || '').trim();
+      if (val) localStorage.setItem('cafe_last_identifier', val);
+    });
+  }
+
+  // Show lockout warning if 5 failures recorded in localStorage
+  const failKey = 'cafe_login_fails';
+  const failData = JSON.parse(localStorage.getItem(failKey) || '{"count":0,"since":0}');
+  const now = Date.now();
+  if (failData.since && now - failData.since > 900000) {
+    // Reset after 15 min
+    localStorage.removeItem(failKey);
+  } else if (failData.count >= 5) {
+    const warn = document.getElementById('lockout-warning');
+    if (warn) warn.classList.add('visible');
+  }
+
+  // Track failures via flash messages
+  const alerts = document.querySelectorAll('.alert-error');
+  if (alerts.length > 0) {
+    const d = JSON.parse(localStorage.getItem(failKey) || '{"count":0,"since":0}');
+    d.count = (d.count || 0) + 1;
+    d.since = d.since || now;
+    localStorage.setItem(failKey, JSON.stringify(d));
+  } else if (document.referrer.includes('/owner/login')) {
+    // Successful login — clear fail counter
+    localStorage.removeItem(failKey);
+  }
+})();
+</script>
+</body>
+</html>

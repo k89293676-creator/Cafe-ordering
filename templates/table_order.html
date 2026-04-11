@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#faf8f4" />
+  <title>{{ table.name }} — {{ cafe_name }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="/static/css/order.css" />
+</head>
+<body class="order-body">
+
+<!-- ═══════════════════════════════════════
+     HEADER
+     ═══════════════════════════════════════ -->
+<header class="o-header">
+  <div class="o-header__inner">
+
+    <div class="o-header__brand">
+      <div class="o-header__logo" aria-hidden="true">11:11</div>
+      <div>
+        <span class="o-header__cafe">{{ cafe_name }}</span>
+        <h1 class="o-header__table">{{ table.name }}</h1>
+      </div>
+    </div>
+
+    <button class="o-cart-btn is-empty" id="header-cart-btn" aria-label="View your order" aria-haspopup="dialog">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18M16 10a4 4 0 01-8 0"/></svg>
+      Order
+      <span class="o-cart-btn__badge" id="cart-badge">0</span>
+    </button>
+
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════
+     SEARCH + CATEGORIES
+     ═══════════════════════════════════════ -->
+<div class="o-subnav">
+  <div class="o-subnav__inner">
+
+    <div class="o-search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input
+        id="search-input"
+        class="o-search__input"
+        type="search"
+        placeholder="Search menu…"
+        autocomplete="off"
+        aria-label="Search menu items"
+      />
+    </div>
+
+    <nav class="o-cats" id="cat-nav" aria-label="Menu categories"></nav>
+
+  </div>
+</div>
+
+<!-- Cart backdrop (mobile) -->
+<div class="o-backdrop" id="cart-backdrop" aria-hidden="true"></div>
+
+<!-- ═══════════════════════════════════════
+     MAIN LAYOUT
+     ═══════════════════════════════════════ -->
+<div class="o-layout">
+
+  <!-- Menu -->
+  <main class="o-menu" id="menu-panel" aria-label="Menu">
+    <div id="menu-container">
+      <div class="o-loading">
+        <div class="o-spinner" role="status" aria-label="Loading menu"></div>
+        <span>Loading menu…</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- Cart panel -->
+  <aside class="o-cart" id="cart-panel" role="complementary" aria-label="Your order">
+
+    <div class="o-drag-handle" aria-hidden="true"></div>
+
+    <div class="o-cart__head">
+      <h2 class="o-cart__title">
+        Your Order
+        <span class="o-cart__count-pill" id="cart-count-pill" style="display:none;"></span>
+      </h2>
+      <button class="o-cart__close" id="cart-close-btn" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="o-cart__body" id="cart-body">
+      <div class="o-cart__items" id="cart-items">
+        <div class="o-cart__empty">
+          <div class="o-cart__empty-icon">🛒</div>
+          <p>Nothing added yet</p>
+          <span>Browse the menu and tap + Add</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="o-cart__foot" id="cart-foot">
+      <div class="o-cart__totals">
+        <div class="o-cart__row">
+          <span>Items</span>
+          <span id="cart-item-count">0</span>
+        </div>
+        <div class="o-cart__row o-cart__row--total">
+          <span>Total</span>
+          <span class="o-cart__total-val">₹<span id="cart-total">0.00</span></span>
+        </div>
+      </div>
+
+      <div class="o-cart__actions">
+        <button id="clear-cart-btn" class="o-clear-btn" type="button" aria-label="Clear cart">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+          Clear cart
+        </button>
+      </div>
+
+      <form id="checkout-form" novalidate>
+        <input
+          id="customer-name"
+          class="o-name-input"
+          type="text"
+          name="customerName"
+          placeholder="Your name (optional)"
+          autocomplete="name"
+          maxlength="80"
+          aria-label="Your name (optional)"
+        />
+        <button type="submit" class="o-place-btn" id="place-order-btn">
+          Place Order →
+        </button>
+      </form>
+
+      <div id="checkout-resp" class="o-resp" role="alert" aria-live="assertive"></div>
+    </div>
+
+  </aside>
+
+</div><!-- /.o-layout -->
+
+<!-- ═══════════════════════════════════════
+     MOBILE FAB
+     ═══════════════════════════════════════ -->
+<button class="o-fab" id="cart-fab" aria-label="View your order" aria-haspopup="dialog">
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18M16 10a4 4 0 01-8 0"/></svg>
+  <span class="o-fab__badge" id="fab-badge">0</span>
+  <span>View Order</span>
+  <span class="o-fab__sep">·</span>
+  <span class="o-fab__price">₹<span id="fab-price">0.00</span></span>
+</button>
+
+<!-- ═══════════════════════════════════════
+     REVIEWS SECTION (hidden until order complete)
+     ═══════════════════════════════════════ -->
+<section class="o-reviews o-reviews--hidden" id="reviews-section" aria-label="Guest reviews">
+  <div class="o-reviews__inner">
+
+    <div class="o-reviews__head">
+      <div>
+        <h2 class="o-reviews__title">What guests say</h2>
+        <p class="o-reviews__sub">Real feedback from our customers</p>
+      </div>
+      <div id="reviews-summary"></div>
+    </div>
+
+    <div class="o-review-list" id="review-list" aria-live="polite">
+      <p style="text-align:center;color:var(--text-3);font-size:0.9rem;">Loading reviews…</p>
+    </div>
+
+    {% if google_place_id %}
+    <div style="text-align:center;margin-bottom:1.5rem;">
+      <a href="https://search.google.com/local/reviews?placeid={{ google_place_id }}"
+         target="_blank" rel="noopener noreferrer"
+         style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.625rem 1.25rem;border:1.5px solid var(--gold-border);border-radius:var(--radius-s);color:var(--gold);font-weight:600;font-size:0.875rem;text-decoration:none;background:var(--gold-bg);">
+        ★ Leave a Google Review
+      </a>
+    </div>
+    {% endif %}
+
+    <div class="o-reviews__cta">
+      <p>Enjoyed your visit?</p>
+      <button class="o-leave-review-btn" id="open-feedback-btn">Share Your Thoughts</button>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════
+     FEEDBACK MODAL
+     ═══════════════════════════════════════ -->
+<div class="o-modal-bg" id="feedback-modal-bg" role="dialog" aria-modal="true" aria-labelledby="feedback-title">
+  <div class="o-modal">
+
+    <button class="o-modal__close" id="feedback-close-btn" aria-label="Close">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+
+    <div class="o-modal__icon" aria-hidden="true">☕</div>
+    <h3 class="o-modal__title" id="feedback-title">How was your experience?</h3>
+    <p class="o-modal__sub">Your feedback helps us improve</p>
+
+    <div class="o-star-row" id="feedback-stars" role="group" aria-label="Rating">
+      <button class="o-star-btn" data-val="1" aria-label="1 star">★</button>
+      <button class="o-star-btn" data-val="2" aria-label="2 stars">★</button>
+      <button class="o-star-btn" data-val="3" aria-label="3 stars">★</button>
+      <button class="o-star-btn" data-val="4" aria-label="4 stars">★</button>
+      <button class="o-star-btn" data-val="5" aria-label="5 stars">★</button>
+    </div>
+
+    <textarea
+      id="feedback-comment"
+      class="o-modal__textarea"
+      placeholder="Tell us more (optional)…"
+      rows="3"
+      aria-label="Additional comments"
+    ></textarea>
+
+    <button class="o-modal__submit" id="feedback-submit-btn">Send Feedback</button>
+    <div id="feedback-resp" class="o-modal__resp" role="alert" aria-live="polite"></div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SCRIPTS
+     ═══════════════════════════════════════ -->
+<script>
+  window.CAFE_TABLE_ID = "{{ table.id | e }}";
+  window.CAFE_NAME     = "{{ cafe_name | e }}";
+</script>
+<script src="/static/js/table.js" defer></script>
+
+</body>
+</html>
