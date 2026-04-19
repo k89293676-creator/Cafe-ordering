@@ -260,10 +260,10 @@ def _daily_revenue(store, days: int = 14) -> list[dict]:
                     SELECT DATE(created_at) AS day, COALESCE(SUM(total), 0) AS rev
                     FROM orders
                     WHERE status != 'cancelled'
-                      AND created_at >= NOW() - INTERVAL '%s days'
+                      AND created_at >= NOW() - (%s * INTERVAL '1 day')
                     GROUP BY day
                     ORDER BY day
-                """ % days)
+                """, (days,))
                 return [{"date": str(r[0]), "revenue": float(r[1])} for r in cur.fetchall()]
     else:
         orders = store.read_json(store.ORDERS_PATH, [])
