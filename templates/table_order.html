@@ -6,6 +6,8 @@
   <meta name="theme-color" content="#faf8f4" />
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>{{ table.name }} — {{ cafe_name }}</title>
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#1c1c1e" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="/static/css/order.css" />
@@ -54,6 +56,12 @@
     </div>
 
     <nav class="o-cats" id="cat-nav" aria-label="Menu categories"></nav>
+
+    <div class="o-diet-filters" aria-label="Dietary filters">
+      <button class="o-cat js-diet-filter" data-filter="vegan">🌱 Vegan</button>
+      <button class="o-cat js-diet-filter" data-filter="gluten-free">🌾 GF</button>
+      <button class="o-cat js-diet-filter" data-filter="nut-free">🥜 Nut-free</button>
+    </div>
 
   </div>
 </div>
@@ -107,10 +115,31 @@
           <span>Items</span>
           <span id="cart-item-count">0</span>
         </div>
+        <div class="o-cart__row">
+          <span>Subtotal</span>
+          <span>₹<span id="cart-subtotal">0.00</span></span>
+        </div>
+        <div class="o-cart__row">
+          <span>Tip</span>
+          <span id="cart-tip-amount">—</span>
+        </div>
         <div class="o-cart__row o-cart__row--total">
           <span>Total</span>
           <span class="o-cart__total-val">₹<span id="cart-total">0.00</span></span>
         </div>
+      </div>
+
+      <!-- Tip selector -->
+      <div class="o-tip-selector">
+        <div class="o-tip-label">Add a tip?</div>
+        <div class="o-tip-btns">
+          <button class="o-tip-btn js-tip-btn" data-tip="0">No tip</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="10">10%</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="15">15%</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="20">20%</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="custom">Custom</button>
+        </div>
+        <input id="tip-custom-input" type="number" min="0" step="1" placeholder="Custom tip ₹" class="o-tip-custom" style="display:none;" />
       </div>
 
       <div class="o-cart__actions">
@@ -118,6 +147,15 @@
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
           Clear cart
         </button>
+        <button id="save-fav-btn" class="o-clear-btn" type="button" aria-label="Save as favourite">
+          ♥ Save
+        </button>
+      </div>
+
+      <!-- Favourites -->
+      <div class="o-favourites">
+        <div class="o-fav-label">Saved Orders</div>
+        <div id="favourites-list"></div>
       </div>
 
       <form id="checkout-form" novalidate>
@@ -235,5 +273,14 @@
 </script>
 <script src="/static/js/table.js" defer></script>
 
+<script>
+// Dark mode persistence
+if (localStorage.getItem('darkMode') === '1') document.documentElement.classList.add('dark');
+
+// Register service worker for PWA
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/js/sw.js').catch(() => {});
+}
+</script>
 </body>
 </html>

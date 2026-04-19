@@ -1455,3 +1455,117 @@ body.feedback-open { overflow: hidden; }
 @media (min-width: 769px) {
   .o-cart__close { display: none; }
 }
+
+/* ===================== DIETARY FILTERS ===================== */
+.o-diet-filters {
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+  padding-top: 0.375rem;
+}
+
+.o-diet-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  margin-right: 0.25rem;
+}
+.o-diet-badge--vegan { background: #dcfce7; color: #15803d; }
+.o-diet-badge--gluten-free { background: #fef3c7; color: #92400e; }
+.o-diet-badge--nut-free { background: #fee2e2; color: #991b1b; }
+
+.o-item__dietary { margin-top: 0.25rem; }
+.o-item__prep { font-size: 0.75rem; color: var(--text-muted, #94a3b8); margin-top: 0.25rem; }
+.o-item__modifiers { font-size: 0.75rem; color: var(--text-secondary, #64748b); margin-top: 0.25rem; display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.o-modifier { background: #f1f5f9; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.7rem; }
+
+/* ===================== TIP SELECTOR ===================== */
+.o-tip-selector {
+  padding: 0.875rem 1rem;
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+
+.o-tip-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #64748b);
+  margin-bottom: 0.5rem;
+}
+
+.o-tip-btns {
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+
+.o-tip-btn {
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  color: var(--text-primary, #0f172a);
+  transition: background 0.15s, border-color 0.15s;
+}
+.o-tip-btn:hover { background: #f1f5f9; }
+.o-tip-btn.is-selected {
+  background: var(--primary, #4f46e5);
+  border-color: var(--primary, #4f46e5);
+  color: #fff;
+}
+
+.o-tip-custom {
+  margin-top: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-sm, 8px);
+  font-size: 0.875rem;
+  background: var(--surface, #fff);
+  color: var(--text-primary, #0f172a);
+}
+
+/* ===================== FAVOURITES ===================== */
+.o-favourites {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+
+.o-fav-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #64748b);
+  margin-bottom: 0.5rem;
+}
+
+.o-fav-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.375rem 0;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  font-size: 0.875rem;
+}
+.o-fav-item:last-child { border-bottom: none; }
+.o-fav-item__name { font-weight: 500; color: var(--text-primary, #0f172a); }
+.o-fav-item__meta { font-size: 0.75rem; color: var(--text-muted, #94a3b8); }
+.o-fav-reorder {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--primary, #4f46e5);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--primary, #4f46e5);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.o-fav-reorder:hover { background: var(--primary, #4f46e5); color: #fff; }
+.o-fav-empty { font-size: 0.8125rem; color: var(--text-muted, #94a3b8); }
+

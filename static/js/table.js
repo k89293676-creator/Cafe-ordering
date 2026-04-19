@@ -17,6 +17,10 @@ let orderDone      = false;
 let lastName       = "Guest";
 let reviewsShown   = false;
 let activeCat      = "";
+let activeFilter   = "";   // dietary filter: "vegan" | "gluten-free" | "nut-free" | ""
+let tipPercent     = 0;    // 0 = no tip, otherwise percentage or custom
+let customTip      = 0;
+let favourites     = JSON.parse(localStorage.getItem("cafe_favourites") || "[]");
 
 /* ── Tiny helpers ── */
 const $  = id  => document.getElementById(id);
@@ -30,6 +34,13 @@ function csrfHeaders(extra = {}) {
 
 function totalQty()   { return Object.values(cart).reduce((s, e) => s + e.qty, 0); }
 function totalPrice() { return Object.values(cart).reduce((s, e) => s + e.item.price * e.qty, 0); }
+function getTipAmount() {
+  const sub = totalPrice();
+  if (customTip > 0) return customTip;
+  if (tipPercent > 0) return Math.round(sub * tipPercent) / 100;
+  return 0;
+}
+function grandTotal() { return totalPrice() + getTipAmount(); }
 
 function esc(s) {
   return String(s ?? "")
@@ -133,8 +144,10 @@ function renderMenu() {
   const visible = cats.map(cat => ({
     ...cat,
     items: cat.items.filter(item => {
-      if (!q) return true;
-      return `${item.name} ${item.description || ""} ${(item.tags || []).join(" ")}`.toLowerCase().includes(q);
+      if (!item.available && item.available !== undefined) return item.available !== false;
+      const matchesSearch = !q || `${item.name} ${item.description || ""} ${(item.tags || []).join(" ")}`.toLowerCase().includes(q);
+      const matchesFilter = !activeFilter || (item.dietary_tags || []).includes(activeFilter);
+      return matchesSearch && matchesFilter;
     })
   })).filter(c => c.items.length > 0);
 
@@ -191,6 +204,9 @@ function itemCard(item) {
         </div>
         ${item.description ? `<p class="o-item__desc">${esc(item.description)}</p>` : ""}
         ${item.tags?.length ? `<div class="o-item__tags">${item.tags.map(t => `<span class="o-item__tag">${esc(t)}</span>`).join("")}</div>` : ""}
+        ${item.dietary_tags?.length ? `<div class="o-item__dietary">${item.dietary_tags.map(t => `<span class="o-diet-badge o-diet-badge--${esc(t.replace(/\s+/g,"-"))}">${esc(t)}</span>`).join("")}</div>` : ""}
+        ${item.prep_time ? `<div class="o-item__prep">⏱ ~${esc(item.prep_time)} min</div>` : ""}
+        ${item.modifiers?.length ? `<div class="o-item__modifiers">${item.modifiers.map(m => `<span class="o-modifier">+ ${esc(m.name)} ₹${fmt(m.price)}</span>`).join("")}</div>` : ""}
       </div>
       <div class="o-item__footer">
         <span class="o-item__price">₹${fmt(item.price)}</span>
@@ -247,7 +263,7 @@ function syncCart() {
     const fbadge = $("fab-badge");
     const fprice = $("fab-price");
     if (fbadge) fbadge.textContent = qty;
-    if (fprice) fprice.textContent = fmt(price);
+    if (fprice) fprice.textContent = fmt(grandTotal());
   }
 
   /* Cart header count pill */
@@ -261,7 +277,17 @@ function syncCart() {
   const itemCountEl = $("cart-item-count");
   const totalEl     = $("cart-total");
   if (itemCountEl) itemCountEl.textContent = qty;
-  if (totalEl) totalEl.textContent = fmt(price);
+  const tip = getTipAmount();
+  const grand = price + tip;
+  if (totalEl) totalEl.textContent = fmt(grand);
+  // Update tip display if elements exist
+  const tipEl = $("cart-tip-amount");
+  if (tipEl) tipEl.textContent = tip > 0 ? "₹" + fmt(tip) : "—";
+  const subtotalEl = $("cart-subtotal");
+  if (subtotalEl) subtotalEl.textContent = fmt(price);
+  // Update FAB price
+  const fabPrice = $("fab-price");
+  if (fabPrice) fabPrice.textContent = fmt(grand);
 
   /* Items list */
   const listEl = $("cart-items");
@@ -311,9 +337,11 @@ async function placeOrder(name) {
   if (btn) { btn.disabled = true; btn.textContent = "Placing order…"; }
   lastName = name || "Guest";
 
+  const tipAmt = getTipAmount();
   const payload = {
     tableId:      TABLE_ID,
     customerName: lastName,
+    tip:          Math.round(tipAmt * 100) / 100,
     items: Object.entries(cart).map(([id, { qty }]) => ({ id, quantity: qty })),
   };
 
@@ -763,6 +791,102 @@ document.addEventListener("DOMContentLoaded", () => {
   if (cartEl) wireCartPanel(cartEl);
   syncCart();
   loadMenu();
+
+  /* ── Dietary filter buttons ── */
+  document.querySelectorAll(".js-diet-filter").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const val = btn.dataset.filter || "";
+      activeFilter = activeFilter === val ? "" : val;
+      document.querySelectorAll(".js-diet-filter").forEach(b => {
+        b.classList.toggle("o-cat--active", b.dataset.filter === activeFilter);
+      });
+      renderMenu();
+    });
+  });
+
+  /* ── Tip selector ── */
+  document.querySelectorAll(".js-tip-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".js-tip-btn").forEach(b => b.classList.remove("is-selected"));
+      btn.classList.add("is-selected");
+      const val = btn.dataset.tip;
+      if (val === "custom") {
+        tipPercent = 0;
+        const customInput = $("tip-custom-input");
+        if (customInput) {
+          customInput.style.display = "block";
+          customTip = parseFloat(customInput.value) || 0;
+        }
+      } else {
+        tipPercent = parseInt(val) || 0;
+        customTip = 0;
+        const ci = $("tip-custom-input");
+        if (ci) ci.style.display = "none";
+      }
+      syncCart();
+    });
+  });
+
+  const customTipInput = $("tip-custom-input");
+  if (customTipInput) {
+    customTipInput.addEventListener("input", () => {
+      customTip = parseFloat(customTipInput.value) || 0;
+      syncCart();
+    });
+  }
+
+  /* ── Favourites ── */
+  function saveFavourite(label) {
+    const items = Object.entries(cart).map(([id, {item, qty}]) => ({id, name: item.name, price: item.price, quantity: qty}));
+    if (!items.length) { showToast("Add items before saving a favourite."); return; }
+    const fav = { name: label || "My Order", items, savedAt: new Date().toISOString() };
+    favourites = [fav, ...favourites.filter(f => f.name !== fav.name)].slice(0, 5);
+    localStorage.setItem("cafe_favourites", JSON.stringify(favourites));
+    showToast("Saved as favourite!");
+    renderFavourites();
+  }
+
+  function renderFavourites() {
+    const container = $("favourites-list");
+    if (!container) return;
+    if (!favourites.length) {
+      container.innerHTML = "<p class='o-fav-empty'>No saved orders yet.</p>";
+      return;
+    }
+    container.innerHTML = favourites.map((fav, i) => `
+      <div class="o-fav-item">
+        <div>
+          <span class="o-fav-item__name">${esc(fav.name)}</span>
+          <span class="o-fav-item__meta"> · ${fav.items.length} item(s)</span>
+        </div>
+        <button class="o-fav-reorder" data-idx="${i}">Order again</button>
+      </div>`).join("");
+    container.querySelectorAll(".o-fav-reorder").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const fav = favourites[parseInt(btn.dataset.idx)];
+        if (!fav) return;
+        cart = {};
+        fav.items.forEach(it => {
+          const menuItem = findItem(it.id);
+          if (menuItem) cart[it.id] = { item: menuItem, qty: it.quantity };
+        });
+        syncCart();
+        renderMenu();
+        openCart();
+        showToast("Favourite order loaded!");
+      });
+    });
+  }
+
+  const saveFavBtn = $("save-fav-btn");
+  if (saveFavBtn) {
+    saveFavBtn.addEventListener("click", () => {
+      const name = $("customer-name")?.value.trim() || "My Order";
+      saveFavourite(name);
+    });
+  }
+
+  renderFavourites();
 });
 
 window.addEventListener("resize", setNavH);
