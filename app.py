@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
+import csv
 import portalocker
 import qrcode
 from dotenv import load_dotenv
@@ -1238,7 +1239,21 @@ def compute_order_summary(items: list[dict], owner_menu: dict | None = None) -> 
             abort(400, description=f"Unknown item id: {item_id!r}")
         if not menu_item.get("available", True):
             abort(400, description=f"Sorry, '{menu_item['name']}' is currently sold out.")
-        item_total = menu_item["price"] * quantity
+        # Handle per-item modifiers
+        modifiers = entry.get("modifiers", [])
+        modifier_total = 0.0
+        modifier_list = []
+        if isinstance(modifiers, list):
+            for mod in modifiers:
+                if isinstance(mod, dict):
+                    try:
+                        mod_price = round(float(mod.get("price", 0)), 2)
+                    except (TypeError, ValueError):
+                        mod_price = 0.0
+                    modifier_total += mod_price
+                    modifier_list.append({"name": str(mod.get("name", ""))[:50], "price": mod_price})
+        item_unit_price = menu_item["price"] + modifier_total
+        item_total = item_unit_price * quantity
         total += item_total
         summary.append(
             {
@@ -1246,6 +1261,7 @@ def compute_order_summary(items: list[dict], owner_menu: dict | None = None) -> 
                 "name": menu_item["name"],
                 "price": menu_item["price"],
                 "quantity": quantity,
+                "modifiers": modifier_list,
                 "lineTotal": round(item_total, 2),
             }
         )
@@ -2412,6 +2428,16 @@ def checkout() -> tuple[dict, int]:
 
     order_summary = compute_order_summary(items, owner_menu)
 
+    # Tip handling
+    try:
+        tip = round(float(payload.get("tip", 0)), 2)
+        if tip < 0 or tip > 10000:
+            tip = 0.0
+    except (TypeError, ValueError):
+        tip = 0.0
+
+    grand_total = round(order_summary["total"] + tip, 2)
+
     order_data = {
         "customerName": customer_name,
         "tableId": table_id,
@@ -2419,7 +2445,9 @@ def checkout() -> tuple[dict, int]:
         "ownerId": owner_id,
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "items": order_summary["items"],
-        "total": order_summary["total"],
+        "subtotal": order_summary["total"],
+        "tip": tip,
+        "total": grand_total,
         "status": "pending",
         "origin": "table" if table_id else "online",
     }
@@ -2660,6 +2688,208 @@ def get_feedback() -> tuple[dict, int]:
     ]
     avg = round(sum(f["rating"] for f in owner_feedback) / len(owner_feedback), 1) if owner_feedback else 0
     return {"feedback": owner_feedback[:20], "average": avg, "total": len(owner_feedback)}, 200
+
+
+# ---------------------------------------------------------------------------
+# Analytics — revenue charts with 1-hour cache
+# ---------------------------------------------------------------------------
+
+_analytics_cache: dict = {}
+_analytics_cache_ts: float = 0.0
+_ANALYTICS_TTL: int = 3600
+
+
+def _build_analytics(owner_id: int) -> dict:
+    """Aggregate order data into analytics payload."""
+    from collections import defaultdict
+    all_orders = load_orders()
+    orders = [o for o in all_orders if o.get("ownerId") == owner_id and o.get("status") == "completed"]
+
+    daily: dict = defaultdict(float)
+    item_counts: dict = defaultdict(int)
+
+    for o in orders:
+        created = o.get("createdAt", "")[:10]
+        daily[created] = round(daily[created] + float(o.get("total") or 0), 2)
+        for it in o.get("items", []):
+            item_counts[it.get("name", "?")] += it.get("quantity", 1)
+
+    sorted_days = sorted(daily.keys())[-30:]
+    revenue_by_day = [{"date": d, "revenue": daily[d]} for d in sorted_days]
+
+    top_items = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_items_data = [{"name": n, "count": c} for n, c in top_items]
+
+    total_revenue = round(sum(float(o.get("total") or 0) for o in orders), 2)
+    total_orders = len(orders)
+    avg_order = round(total_revenue / total_orders, 2) if total_orders else 0
+
+    return {
+        "revenueByDay": revenue_by_day,
+        "topItems": top_items_data,
+        "totalRevenue": total_revenue,
+        "totalOrders": total_orders,
+        "avgOrderValue": avg_order,
+    }
+
+
+@app.route("/api/owner/analytics")
+@login_required
+def owner_analytics_data() -> tuple[dict, int]:
+    """Cached analytics JSON for Chart.js."""
+    global _analytics_cache, _analytics_cache_ts
+    owner_id = logged_in_owner_id()
+    now = time.time()
+    cache_key = f"analytics_{owner_id}"
+    if cache_key in _analytics_cache and (now - _analytics_cache_ts) < _ANALYTICS_TTL:
+        return _analytics_cache[cache_key], 200
+    data = _build_analytics(owner_id)
+    _analytics_cache[cache_key] = data
+    _analytics_cache_ts = now
+    return data, 200
+
+
+@app.route("/owner/analytics")
+@login_required
+def owner_analytics_page():
+    """Analytics dashboard with Chart.js charts."""
+    owner_id = logged_in_owner_id()
+    data = _build_analytics(owner_id)
+    resp = app.make_response(render_template(
+        "owner_analytics.html",
+        owner_username=logged_in_owner(),
+        analytics=data,
+    ))
+    return _no_store(resp)
+
+
+# ---------------------------------------------------------------------------
+# Customer insights
+# ---------------------------------------------------------------------------
+
+
+@app.route("/owner/customers")
+@login_required
+def owner_customers_page():
+    """Top customers by spend and order frequency."""
+    from collections import defaultdict
+    owner_id = logged_in_owner_id()
+    all_orders = load_orders()
+    orders = [o for o in all_orders if o.get("ownerId") == owner_id and o.get("status") == "completed"]
+
+    customer_spend: dict = defaultdict(float)
+    customer_count: dict = defaultdict(int)
+
+    for o in orders:
+        name = o.get("customerName") or "Guest"
+        total = float(o.get("total") or 0)
+        customer_spend[name] = round(customer_spend[name] + total, 2)
+        customer_count[name] += 1
+
+    customers = [
+        {
+            "name": name,
+            "totalSpend": customer_spend[name],
+            "orderCount": customer_count[name],
+            "avgOrder": round(customer_spend[name] / customer_count[name], 2),
+        }
+        for name in customer_spend
+    ]
+    customers.sort(key=lambda x: x["totalSpend"], reverse=True)
+
+    total_orders = len(orders)
+    repeat_customers = sum(1 for c in customers if c["orderCount"] > 1)
+    repeat_rate = round(repeat_customers / len(customers) * 100, 1) if customers else 0
+
+    resp = app.make_response(render_template(
+        "owner_customers.html",
+        owner_username=logged_in_owner(),
+        customers=customers[:20],
+        total_orders=total_orders,
+        repeat_rate=repeat_rate,
+    ))
+    return _no_store(resp)
+
+
+# ---------------------------------------------------------------------------
+# CSV export routes
+# ---------------------------------------------------------------------------
+
+
+@app.route("/owner/export/orders")
+@login_required
+def export_orders_csv():
+    """Download orders as CSV."""
+    owner_id = logged_in_owner_id()
+    date_from = request.args.get("from", "")[:10]
+    date_to = request.args.get("to", "")[:10]
+
+    all_orders = load_orders()
+    rows = [o for o in all_orders if o.get("ownerId") == owner_id]
+    if date_from:
+        rows = [o for o in rows if o.get("createdAt", "")[:10] >= date_from]
+    if date_to:
+        rows = [o for o in rows if o.get("createdAt", "")[:10] <= date_to]
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["ID", "Date", "Customer", "Table", "Items", "Subtotal", "Tip", "Total", "Status"])
+    for o in rows:
+        items_str = "; ".join(
+            f"{it.get('name')} x{it.get('quantity', 1)}" for it in o.get("items", [])
+        )
+        writer.writerow([
+            o.get("id", ""),
+            o.get("createdAt", "")[:19],
+            o.get("customerName", "Guest"),
+            o.get("tableName", ""),
+            items_str,
+            o.get("subtotal", o.get("total", 0)),
+            o.get("tip", 0),
+            o.get("total", 0),
+            o.get("status", ""),
+        ])
+
+    return Response(
+        buf.getvalue().encode("utf-8"),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=orders.csv"},
+    )
+
+
+@app.route("/owner/export/menu")
+@login_required
+def export_menu_csv():
+    """Download menu as CSV."""
+    owner_id = logged_in_owner_id()
+    menu = load_menu()
+    owner_cats = [c for c in menu.get("categories", []) if c.get("ownerId") == owner_id]
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Category", "Item ID", "Name", "Description", "Price", "Available", "Dietary Tags", "Prep Time (min)", "Modifiers"])
+    for cat in owner_cats:
+        for item in cat.get("items", []):
+            mods = "; ".join(
+                f"{m.get('name')} +{m.get('price', 0)}" for m in item.get("modifiers", [])
+            )
+            writer.writerow([
+                cat.get("name", ""),
+                item.get("id", ""),
+                item.get("name", ""),
+                item.get("description", ""),
+                item.get("price", 0),
+                item.get("available", True),
+                ", ".join(item.get("dietary_tags", [])),
+                item.get("prep_time", ""),
+                mods,
+            ])
+
+    return Response(
+        buf.getvalue().encode("utf-8"),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=menu.csv"},
+    )
 
 # ---------------------------------------------------------------------------
 # Init

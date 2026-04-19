@@ -3297,3 +3297,137 @@ body {
   .stats-grid-5 { grid-template-columns: 1fr 1fr; }
 }
 
+
+/* ===================== VARIABLE ALIASES (for new pages) ===================== */
+:root {
+  --text-1: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --text-3: var(--text-muted);
+  --surface-2: var(--surface-alt);
+}
+
+/* ===================== DARK MODE ===================== */
+html.dark {
+  color-scheme: dark;
+  --primary: #818cf8;
+  --primary-dark: #6366f1;
+  --primary-light: #1e1b4b;
+  --accent: #fbbf24;
+  --accent-light: #2d2005;
+  --success: #34d399;
+  --success-light: #022c22;
+  --danger: #f87171;
+  --danger-light: #2d0b0b;
+  --surface: #1e1e2e;
+  --surface-alt: #181825;
+  --border: #313244;
+  --border-dark: #45475a;
+  --text-primary: #cdd6f4;
+  --text-secondary: #a6adc8;
+  --text-muted: #6c7086;
+  --text-1: #cdd6f4;
+  --text-2: #a6adc8;
+  --text-3: #6c7086;
+  --surface-2: #181825;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.3);
+  --shadow: 0 4px 16px rgba(0,0,0,.3);
+  --shadow-lg: 0 10px 40px rgba(0,0,0,.4);
+}
+
+html.dark body {
+  background: #11111b;
+  color: var(--text-primary);
+}
+
+html.dark .sidebar {
+  background: #1e1e2e;
+  border-right-color: #313244;
+}
+
+html.dark .card,
+html.dark .main-content {
+  background: #1e1e2e;
+}
+
+html.dark .dashboard-wrapper {
+  background: #11111b;
+}
+
+html.dark .main-header {
+  background: #1e1e2e;
+  border-bottom-color: #313244;
+}
+
+html.dark .sidebar-link {
+  color: #a6adc8;
+}
+
+html.dark .sidebar-link:hover,
+html.dark .sidebar-link.active {
+  background: #313244;
+  color: #cdd6f4;
+}
+
+html.dark input,
+html.dark select,
+html.dark textarea {
+  background: #181825;
+  border-color: #313244;
+  color: #cdd6f4;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #6c7086;
+}
+
+html.dark .btn-ghost {
+  color: #a6adc8;
+}
+
+html.dark .btn-ghost:hover {
+  background: #313244;
+  color: #cdd6f4;
+}
+
+html.dark .btn-outline {
+  border-color: #45475a;
+  color: #a6adc8;
+}
+
+html.dark .btn-outline:hover {
+  background: #313244;
+}
+
+html.dark table th {
+  color: #a6adc8;
+  border-color: #313244;
+}
+
+html.dark table td {
+  border-color: #313244;
+  color: #cdd6f4;
+}
+
+html.dark tr:hover td {
+  background: #181825;
+}
+
+/* Dark mode toggle button */
+.dark-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  transition: background 0.15s, color 0.15s;
+}
+.dark-toggle:hover {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+}

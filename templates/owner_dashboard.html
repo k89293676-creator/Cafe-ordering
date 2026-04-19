@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard — Cafe 11:11</title>
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#4f46e5" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600;700;800&display=swap" />
@@ -52,6 +54,16 @@
         <span class="link-badge" style="background:var(--success);">{{ total_feedback }}</span>
         {% endif %}
       </button>
+
+      <div class="sidebar-section-label" style="margin-top:1rem;">Insights</div>
+      <a class="sidebar-link" href="/owner/analytics">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Analytics
+      </a>
+      <a class="sidebar-link" href="/owner/customers">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Customers
+      </a>
     </div>
 
     <div class="sidebar-footer">
@@ -258,7 +270,14 @@
             <!-- KPI Summary -->
             <div class="card">
               <div class="card-header">
-                <div><h3>Analytics</h3><div class="card-subtitle">Performance at a glance</div></div>
+                <div>
+                  <h3>Analytics</h3>
+                  <div class="card-subtitle">Performance at a glance</div>
+                </div>
+                <div style="display:flex;gap:0.5rem;">
+                  <a href="/owner/analytics" class="btn btn-outline btn-sm">Full Report</a>
+                  <a href="/owner/export/orders" class="btn btn-outline btn-sm">⬇ CSV</a>
+                </div>
               </div>
               <div class="card-body" style="padding:0;">
                 <div class="kpi-list">
@@ -812,5 +831,9 @@
 <div id="new-order-banner" style="display:none;"></div>
 
 <script src="/static/js/dashboard.js"></script>
+<script>
+// Dark mode persistence
+if (localStorage.getItem('darkMode') === '1') document.documentElement.classList.add('dark');
+</script>
 </body>
 </html>
