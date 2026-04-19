@@ -18,8 +18,6 @@ from flask import (
     session,
     url_for,
 )
-from werkzeug.security import generate_password_hash
-
 admin_bp = Blueprint(
     "admin",
     __name__,
@@ -128,30 +126,15 @@ def owners():
 def reset_password(owner_id: int):
     store = _store()
     tmp_password = secrets.token_urlsafe(12)
-    new_hash = generate_password_hash(tmp_password)
-
-    if store.USE_DB:
-        with store._get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE owners SET password_hash = %s WHERE id = %s RETURNING username",
-                    (new_hash, owner_id),
-                )
-                row = cur.fetchone()
-                if not row:
-                    abort(404)
-                username = row[0]
-        # Revoke all remember tokens for security
-        store.revoke_all_tokens_for_owner(owner_id)
-    else:
-        all_owners = store.load_owners()
-        owner = next((o for o in all_owners if o["id"] == owner_id), None)
-        if not owner:
-            abort(404)
-        username = owner["username"]
-        owner["passwordHash"] = new_hash
-        store.save_owners(all_owners)
-        store.revoke_all_tokens_for_owner(owner_id)
+    new_hash = store._make_password_hash(tmp_password)
+    all_owners = store.load_owners()
+    owner = next((o for o in all_owners if o["id"] == owner_id), None)
+    if not owner:
+        abort(404)
+    username = owner["username"]
+    owner["passwordHash"] = new_hash
+    store.save_owners(all_owners)
+    store.revoke_all_tokens_for_owner(owner_id)
 
     flash(f"Password for <strong>{username}</strong> reset. Temporary password: <code>{tmp_password}</code>", "password_reset")
     return redirect(url_for("admin.owners"))
@@ -161,27 +144,14 @@ def reset_password(owner_id: int):
 @admin_required
 def toggle_owner(owner_id: int):
     store = _store()
-
-    if store.USE_DB:
-        with store._get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE owners SET is_active = NOT is_active WHERE id = %s RETURNING username, is_active",
-                    (owner_id,),
-                )
-                row = cur.fetchone()
-                if not row:
-                    abort(404)
-                username, is_active = row[0], row[1]
-    else:
-        all_owners = store.load_owners()
-        owner = next((o for o in all_owners if o["id"] == owner_id), None)
-        if not owner:
-            abort(404)
-        owner["isActive"] = not owner.get("isActive", True)
-        is_active = owner["isActive"]
-        username = owner["username"]
-        store.save_owners(all_owners)
+    all_owners = store.load_owners()
+    owner = next((o for o in all_owners if o["id"] == owner_id), None)
+    if not owner:
+        abort(404)
+    owner["isActive"] = not owner.get("isActive", True)
+    is_active = owner["isActive"]
+    username = owner["username"]
+    store.save_owners(all_owners)
 
     status_word = "activated" if is_active else "deactivated"
     flash(f"Owner <strong>{username}</strong> has been {status_word}.", "success")
@@ -208,77 +178,39 @@ def analytics():
 
 
 def _global_stats(store) -> dict:
-    if store.USE_DB:
-        with store._get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT COUNT(*), COALESCE(SUM(total), 0) FROM orders WHERE status != 'cancelled'"
-                )
-                row = cur.fetchone()
-                return {"total_orders": row[0] or 0, "total_revenue": float(row[1] or 0)}
-    else:
-        orders = store.read_json(store.ORDERS_PATH, [])
-        active = [o for o in orders if o.get("status") != "cancelled"]
-        total_rev = sum(float(o.get("total", 0)) for o in active)
-        return {"total_orders": len(active), "total_revenue": round(total_rev, 2)}
+    orders = store.load_orders()
+    active = [o for o in orders if o.get("status") != "cancelled"]
+    total_rev = sum(float(o.get("total", 0)) for o in active)
+    return {"total_orders": len(active), "total_revenue": round(total_rev, 2)}
 
 
 def _top_items(store, limit: int = 10) -> list[dict]:
-    if store.USE_DB:
-        with store._get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT
-                        item->>'name'  AS item_name,
-                        SUM((item->>'quantity')::int) AS qty
-                    FROM orders,
-                         jsonb_array_elements(items) AS item
-                    WHERE status != 'cancelled'
-                    GROUP BY item_name
-                    ORDER BY qty DESC
-                    LIMIT %s
-                """, (limit,))
-                return [{"name": r[0], "quantity": int(r[1])} for r in cur.fetchall()]
-    else:
-        orders = store.read_json(store.ORDERS_PATH, [])
-        counts: dict[str, int] = {}
-        for o in orders:
-            if o.get("status") == "cancelled":
-                continue
-            for item in o.get("items", []):
-                name = item.get("name", "Unknown")
-                counts[name] = counts.get(name, 0) + int(item.get("quantity", 1))
-        sorted_items = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:limit]
-        return [{"name": n, "quantity": q} for n, q in sorted_items]
+    orders = store.load_orders()
+    counts: dict[str, int] = {}
+    for order in orders:
+        if order.get("status") == "cancelled":
+            continue
+        for item in order.get("items", []):
+            name = item.get("name", "Unknown")
+            counts[name] = counts.get(name, 0) + int(item.get("quantity", 1))
+    sorted_items = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+    return [{"name": name, "quantity": quantity} for name, quantity in sorted_items]
 
 
 def _daily_revenue(store, days: int = 14) -> list[dict]:
-    if store.USE_DB:
-        with store._get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT DATE(created_at) AS day, COALESCE(SUM(total), 0) AS rev
-                    FROM orders
-                    WHERE status != 'cancelled'
-                      AND created_at >= NOW() - (%s * INTERVAL '1 day')
-                    GROUP BY day
-                    ORDER BY day
-                """, (days,))
-                return [{"date": str(r[0]), "revenue": float(r[1])} for r in cur.fetchall()]
-    else:
-        orders = store.read_json(store.ORDERS_PATH, [])
-        from datetime import timedelta
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        daily: dict[str, float] = {}
-        for o in orders:
-            if o.get("status") == "cancelled":
-                continue
-            ts = o.get("createdAt", "")
-            if ts < cutoff:
-                continue
-            day = ts[:10]
-            daily[day] = daily.get(day, 0.0) + float(o.get("total", 0))
-        return [{"date": d, "revenue": round(v, 2)} for d, v in sorted(daily.items())]
+    orders = store.load_orders()
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    daily: dict[str, float] = {}
+    for order in orders:
+        if order.get("status") == "cancelled":
+            continue
+        timestamp = order.get("createdAt", "")
+        if timestamp < cutoff:
+            continue
+        day = timestamp[:10]
+        daily[day] = daily.get(day, 0.0) + float(order.get("total", 0))
+    return [{"date": day, "revenue": round(value, 2)} for day, value in sorted(daily.items())]
 
 
 # ---------------------------------------------------------------------------
@@ -303,16 +235,14 @@ def status():
 
     # DB status
     db_ok = False
-    db_msg = "JSON file storage (no DATABASE_URL)"
+    db_msg = "SQLAlchemy storage"
     if store.USE_DB:
         try:
-            with store._get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
+            store.db.session.execute(store.text("SELECT 1"))
             db_ok = True
-            db_msg = "PostgreSQL connected"
+            db_msg = "Database connected"
         except Exception as exc:
-            db_msg = f"PostgreSQL error: {exc}"
+            db_msg = f"Database error: {exc}"
 
     # Data file sizes
     file_stats = []

@@ -104,6 +104,10 @@
         <h3>Top 5 Items</h3>
         <div class="chart-wrap"><canvas id="topItemsChart"></canvas></div>
       </div>
+      <div class="chart-card">
+        <h3>Peak Order Hours</h3>
+        <div class="chart-wrap"><canvas id="peakHoursChart"></canvas></div>
+      </div>
     </div>
   </main>
 </div>
@@ -155,6 +159,28 @@ new Chart(topCtx, {
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { position: 'bottom', labels: { font: { size: 12 } } } }
+  }
+});
+
+const peakCtx = document.getElementById('peakHoursChart').getContext('2d');
+new Chart(peakCtx, {
+  type: 'line',
+  data: {
+    labels: analyticsData.peakHours.map(h => h.hour),
+    datasets: [{
+      label: 'Completed orders',
+      data: analyticsData.peakHours.map(h => h.count),
+      borderColor: '#10b981',
+      backgroundColor: 'rgba(16, 185, 129, 0.15)',
+      fill: true,
+      tension: 0.35,
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
   }
 });
 

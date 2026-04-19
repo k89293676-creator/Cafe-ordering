@@ -12,7 +12,6 @@ import tempfile
 import threading
 from logging.handlers import RotatingFileHandler
 import time
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
@@ -34,15 +33,30 @@ from flask import (
     url_for,
     stream_with_context,
 )
+from flask_bcrypt import Bcrypt
 from flask_limiter import Limiter
 from flask_compress import Compress
+from flask_login import (
+    LoginManager,
+    current_user,
+    login_required as flask_login_required,
+    login_user,
+    logout_user,
+)
+from flask_mail import Mail, Message
 from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from flask_talisman import Talisman
 from flask_wtf.csrf import CSRFProtect, CSRFError
+from sqlalchemy import inspect, text
 from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import check_password_hash
+
+try:
+    import stripe
+except ImportError:
+    stripe = None
 
 load_dotenv()
 
@@ -77,6 +91,10 @@ IS_PRODUCTION = (
     or os.environ.get("RAILWAY_ENVIRONMENT") is not None
 )
 
+_raw_db_url = os.environ.get("DATABASE_URL", "")
+if _raw_db_url.startswith("postgres://"):
+    _raw_db_url = _raw_db_url.replace("postgres://", "postgresql://", 1)
+
 # ---------------------------------------------------------------------------
 # Secret key
 # ---------------------------------------------------------------------------
@@ -106,7 +124,16 @@ app.config.update(
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
     WTF_CSRF_TIME_LIMIT=3600,
     WTF_CSRF_SSL_STRICT=False,
+    SQLALCHEMY_DATABASE_URI=(
+        _raw_db_url if _raw_db_url else f"sqlite:///{DATA_DIR / 'app.db'}"
+    ),
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
+    MAIL_SERVER=os.environ.get("MAIL_SERVER", "smtp.sendgrid.net"),
+    MAIL_PORT=int(os.environ.get("MAIL_PORT", "587")),
+    MAIL_USE_TLS=os.environ.get("MAIL_USE_TLS", "true").lower() in {"1", "true", "yes", "on"},
+    MAIL_USERNAME=os.environ.get("MAIL_USERNAME") or ("apikey" if os.environ.get("SENDGRID_API_KEY") else None),
+    MAIL_PASSWORD=os.environ.get("MAIL_PASSWORD") or os.environ.get("SENDGRID_API_KEY"),
+    MAIL_DEFAULT_SENDER=os.environ.get("MAIL_DEFAULT_SENDER"),
 )
 
 class JsonFormatter(logging.Formatter):
@@ -205,27 +232,15 @@ if IS_PRODUCTION:
             content_security_policy=_csp,
         )
 
-# ---------------------------------------------------------------------------
-# PostgreSQL setup
-# ---------------------------------------------------------------------------
-
-try:
-    import psycopg2
-    from psycopg2.pool import ThreadedConnectionPool
-    from psycopg2.extras import Json, RealDictCursor
-    _HAS_PSYCOPG2 = True
-except ImportError:
-    _HAS_PSYCOPG2 = False
-
-_raw_db_url = os.environ.get("DATABASE_URL", "")
-if _raw_db_url.startswith("postgres://"):
-    _raw_db_url = _raw_db_url.replace("postgres://", "postgresql://", 1)
-
-if _raw_db_url:
-    app.config["SQLALCHEMY_DATABASE_URI"] = _raw_db_url
-
 db = SQLAlchemy()
 migrate = Migrate()
+bcrypt = Bcrypt(app)
+mail = Mail(app)
+login_manager = LoginManager(app)
+login_manager.login_view = "owner_login"
+
+if stripe is not None and os.environ.get("STRIPE_SECRET_KEY"):
+    stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
 
 
 class Owner(db.Model):
@@ -238,6 +253,17 @@ class Owner(db.Model):
     google_place_id = db.Column(db.Text, default="")
     is_active = db.Column(db.Boolean, default=True, nullable=False, server_default="true")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    @property
+    def is_authenticated(self) -> bool:
+        return True
+
+    @property
+    def is_anonymous(self) -> bool:
+        return False
+
+    def get_id(self) -> str:
+        return str(self.id)
 
 
 class CafeTable(db.Model):
@@ -261,163 +287,71 @@ class Order(db.Model):
     table_id = db.Column(db.Text)
     table_name = db.Column(db.Text)
     customer_name = db.Column(db.Text, default="Guest")
+    customer_email = db.Column(db.Text, default="")
     items = db.Column(db.JSON, nullable=False, default=list)
+    subtotal = db.Column(db.Numeric(10, 2), default=0)
+    tip = db.Column(db.Numeric(10, 2), default=0)
     total = db.Column(db.Numeric(10, 2), default=0)
     status = db.Column(db.Text, default="pending")
     origin = db.Column(db.Text, default="table")
+    payment_intent = db.Column(db.Text, default="")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 
-USE_DB = _HAS_PSYCOPG2 and bool(_raw_db_url)
-if USE_DB:
-    db.init_app(app)
-    migrate.init_app(app, db)
-_db_pool = None
-
-if USE_DB:
-    try:
-        _db_pool = ThreadedConnectionPool(2, 20, _raw_db_url)
-        app.logger.info("PostgreSQL connection pool created.")
-    except Exception as _db_pool_err:
-        app.logger.error("DB pool creation failed: %s", _db_pool_err)
-        USE_DB = False
+class Feedback(db.Model):
+    __tablename__ = "feedback"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id"))
+    table_id = db.Column(db.Text)
+    customer_name = db.Column(db.Text, default="Guest")
+    rating = db.Column(db.Integer, nullable=False)
+    comment = db.Column(db.Text, default="")
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 
-@contextmanager
-def _get_conn():
-    conn = _db_pool.getconn()
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        _db_pool.putconn(conn)
+class RememberToken(db.Model):
+    __tablename__ = "remember_tokens"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"))
+    token_hash = db.Column(db.Text, unique=True, nullable=False)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+
+class Settings(db.Model):
+    __tablename__ = "settings"
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"), primary_key=True)
+    logo_url = db.Column(db.Text, default="")
+    brand_color = db.Column(db.Text, default="#4f46e5")
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+
+USE_DB = True
+db.init_app(app)
+migrate.init_app(app, db)
 
 
 def _init_db() -> None:
-    """Create tables, indexes, constraints and triggers if they do not exist."""
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            # ── Core tables ──────────────────────────────────────────────────
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS owners (
-                    id SERIAL PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    email TEXT UNIQUE,
-                    password_hash TEXT NOT NULL,
-                    cafe_name TEXT DEFAULT '',
-                    google_place_id TEXT DEFAULT '',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-                CREATE TABLE IF NOT EXISTS remember_tokens (
-                    id SERIAL PRIMARY KEY,
-                    owner_id INTEGER REFERENCES owners(id) ON DELETE CASCADE,
-                    token_hash TEXT UNIQUE NOT NULL,
-                    expires_at TIMESTAMPTZ NOT NULL,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS idx_tokens_owner_id ON remember_tokens(owner_id);
-                CREATE INDEX IF NOT EXISTS idx_tokens_hash ON remember_tokens(token_hash);
-                CREATE TABLE IF NOT EXISTS cafe_tables (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    owner_id INTEGER REFERENCES owners(id) ON DELETE CASCADE,
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-                CREATE TABLE IF NOT EXISTS menus (
-                    owner_id INTEGER PRIMARY KEY REFERENCES owners(id) ON DELETE CASCADE,
-                    data JSONB NOT NULL DEFAULT '{"categories": []}'
-                );
-                CREATE TABLE IF NOT EXISTS orders (
-                    id SERIAL PRIMARY KEY,
-                    owner_id INTEGER REFERENCES owners(id),
-                    table_id TEXT,
-                    table_name TEXT,
-                    customer_name TEXT DEFAULT 'Guest',
-                    items JSONB NOT NULL DEFAULT '[]',
-                    total NUMERIC(10,2) DEFAULT 0,
-                    status TEXT DEFAULT 'pending',
-                    origin TEXT DEFAULT 'table',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-                CREATE TABLE IF NOT EXISTS feedback (
-                    id SERIAL PRIMARY KEY,
-                    owner_id INTEGER REFERENCES owners(id),
-                    table_id TEXT,
-                    customer_name TEXT DEFAULT 'Guest',
-                    rating INTEGER NOT NULL,
-                    comment TEXT DEFAULT '',
-                    created_at TIMESTAMPTZ DEFAULT NOW()
-                );
-            """)
+    """Create SQLAlchemy tables and run safe additive column upgrades."""
+    with app.app_context():
+        db.create_all()
+        inspector = inspect(db.engine)
 
-            # ── Additive schema upgrades (safe to re-run) ────────────────────
-            # is_active column for owners (admin can deactivate owners)
-            cur.execute("""
-                ALTER TABLE owners
-                    ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
-            """)
-            # updated_at column for orders (tracks last status change)
-            cur.execute("""
-                ALTER TABLE orders
-                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
-            """)
+        def add_column(table_name: str, column_sql: str, column_name: str) -> None:
+            existing = {col["name"] for col in inspector.get_columns(table_name)}
+            if column_name in existing:
+                return
+            db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}"))
+            db.session.commit()
 
-            # ── Performance indexes ──────────────────────────────────────────
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_orders_owner_id     ON orders(owner_id);
-                CREATE INDEX IF NOT EXISTS idx_orders_status        ON orders(status);
-                CREATE INDEX IF NOT EXISTS idx_orders_created_at    ON orders(created_at DESC);
-                CREATE INDEX IF NOT EXISTS idx_orders_table_id      ON orders(table_id);
-                CREATE INDEX IF NOT EXISTS idx_tables_owner_id      ON cafe_tables(owner_id);
-                CREATE INDEX IF NOT EXISTS idx_feedback_owner_id    ON feedback(owner_id);
-                CREATE INDEX IF NOT EXISTS idx_orders_owner_status  ON orders(owner_id, status);
-            """)
-
-            # ── CHECK constraints (skip if already present) ──────────────────
-            cur.execute("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                        WHERE conname = 'orders_status_check'
-                    ) THEN
-                        ALTER TABLE orders
-                            ADD CONSTRAINT orders_status_check
-                            CHECK (status IN ('pending','preparing','ready','completed','cancelled'));
-                    END IF;
-
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                        WHERE conname = 'feedback_rating_range'
-                    ) THEN
-                        ALTER TABLE feedback
-                            ADD CONSTRAINT feedback_rating_range
-                            CHECK (rating BETWEEN 1 AND 5);
-                    END IF;
-                END $$;
-            """)
-
-            # ── updated_at auto-maintenance trigger ──────────────────────────
-            cur.execute("""
-                CREATE OR REPLACE FUNCTION _cafe_set_updated_at()
-                RETURNS TRIGGER LANGUAGE plpgsql AS $$
-                BEGIN
-                    NEW.updated_at = NOW();
-                    RETURN NEW;
-                END;
-                $$;
-
-                DROP TRIGGER IF EXISTS trg_orders_updated_at ON orders;
-                CREATE TRIGGER trg_orders_updated_at
-                    BEFORE UPDATE ON orders
-                    FOR EACH ROW EXECUTE FUNCTION _cafe_set_updated_at();
-            """)
-
-    app.logger.info("Database schema, indexes, constraints and triggers ready.")
+        add_column("orders", "customer_email TEXT DEFAULT ''", "customer_email")
+        add_column("orders", "subtotal NUMERIC(10, 2) DEFAULT 0", "subtotal")
+        add_column("orders", "tip NUMERIC(10, 2) DEFAULT 0", "tip")
+        add_column("orders", "payment_intent TEXT DEFAULT ''", "payment_intent")
+        add_column("orders", "updated_at TIMESTAMP", "updated_at")
+        _seed_sqlalchemy_from_json()
+    app.logger.info("SQLAlchemy database schema ready: %s", app.config["SQLALCHEMY_DATABASE_URI"])
 
 # ---------------------------------------------------------------------------
 # Security headers
@@ -565,397 +499,306 @@ def _invalidate_menu_cache() -> None:
         _menu_cache["expires_at"] = 0.0
 
 # ---------------------------------------------------------------------------
-# Data access — owners
+# Data access — SQLAlchemy
 # ---------------------------------------------------------------------------
 
+def _iso(dt) -> str:
+    return dt.isoformat() if dt else ""
+
+
+def _parse_dt(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _owner_dict(owner: Owner) -> dict:
+    return {
+        "id": owner.id,
+        "username": owner.username,
+        "email": owner.email,
+        "passwordHash": owner.password_hash,
+        "cafeName": owner.cafe_name or "",
+        "googlePlaceId": owner.google_place_id or "",
+        "isActive": bool(owner.is_active),
+        "createdAt": _iso(owner.created_at),
+    }
+
+
+def _table_dict(table: CafeTable) -> dict:
+    return {
+        "id": table.id,
+        "name": table.name,
+        "ownerId": table.owner_id,
+        "createdAt": _iso(table.created_at),
+    }
+
+
+def _order_dict(order: Order) -> dict:
+    return {
+        "id": order.id,
+        "ownerId": order.owner_id,
+        "tableId": order.table_id,
+        "tableName": order.table_name,
+        "customerName": order.customer_name or "Guest",
+        "customerEmail": order.customer_email or "",
+        "items": order.items if isinstance(order.items, list) else [],
+        "subtotal": float(order.subtotal or 0),
+        "tip": float(order.tip or 0),
+        "total": float(order.total or 0),
+        "status": order.status or "pending",
+        "origin": order.origin or "table",
+        "paymentIntent": order.payment_intent or "",
+        "createdAt": _iso(order.created_at),
+        "updatedAt": _iso(order.updated_at),
+    }
+
+
+def _feedback_dict(feedback: Feedback) -> dict:
+    return {
+        "id": feedback.id,
+        "ownerId": feedback.owner_id,
+        "tableId": feedback.table_id,
+        "customerName": feedback.customer_name or "Guest",
+        "rating": feedback.rating,
+        "comment": feedback.comment or "",
+        "createdAt": _iso(feedback.created_at),
+    }
+
+
+def _settings_dict(settings: Settings | None) -> dict:
+    if not settings:
+        return {"logoUrl": "", "brandColor": "#4f46e5"}
+    return {
+        "logoUrl": settings.logo_url or "",
+        "brandColor": settings.brand_color or "#4f46e5",
+    }
+
+
 def load_owners() -> list[dict]:
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, username, email, password_hash, cafe_name, google_place_id, is_active, created_at "
-                    "FROM owners ORDER BY id"
-                )
-                return [
-                    {
-                        "id": row[0],
-                        "username": row[1],
-                        "email": row[2],
-                        "passwordHash": row[3],
-                        "cafeName": row[4] or "",
-                        "googlePlaceId": row[5] or "",
-                        "isActive": bool(row[6]) if row[6] is not None else True,
-                        "createdAt": row[7].isoformat() if row[7] else "",
-                    }
-                    for row in cur.fetchall()
-                ]
-    owners = read_json(OWNERS_PATH, [])
-    for o in owners:
-        o.setdefault("isActive", True)
-    return owners
+    return [_owner_dict(owner) for owner in Owner.query.order_by(Owner.id).all()]
 
 
 def save_owners(owners: list[dict]) -> None:
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                for owner in owners:
-                    cur.execute(
-                        """
-                        INSERT INTO owners (id, username, email, password_hash, cafe_name, google_place_id, is_active, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE SET
-                            username = EXCLUDED.username,
-                            email = EXCLUDED.email,
-                            password_hash = EXCLUDED.password_hash,
-                            cafe_name = EXCLUDED.cafe_name,
-                            google_place_id = EXCLUDED.google_place_id,
-                            is_active = EXCLUDED.is_active
-                        """,
-                        (
-                            owner.get("id"),
-                            owner["username"],
-                            owner.get("email"),
-                            owner.get("passwordHash", ""),
-                            owner.get("cafeName", ""),
-                            owner.get("googlePlaceId", ""),
-                            owner.get("isActive", True),
-                            owner.get("createdAt", datetime.now(timezone.utc).isoformat()),
-                        ),
-                    )
-        return
-    write_json(OWNERS_PATH, owners)
+    keep_ids = {owner.get("id") for owner in owners if owner.get("id")}
+    for existing in Owner.query.all():
+        if existing.id not in keep_ids:
+            db.session.delete(existing)
+    for owner in owners:
+        record = db.session.get(Owner, owner.get("id")) if owner.get("id") else Owner()
+        record.username = owner["username"]
+        record.email = owner.get("email")
+        record.password_hash = owner.get("passwordHash", "")
+        record.cafe_name = owner.get("cafeName", "")
+        record.google_place_id = owner.get("googlePlaceId", "")
+        record.is_active = owner.get("isActive", True)
+        record.created_at = _parse_dt(owner.get("createdAt")) or record.created_at
+        db.session.add(record)
+    db.session.commit()
 
 
 def create_owner_in_db(username: str, email: str | None, password_hash: str, cafe_name: str = "") -> dict:
-    """Insert a new owner and return the full owner dict with DB-generated ID."""
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO owners (username, email, password_hash, cafe_name)
-                VALUES (%s, %s, %s, %s)
-                RETURNING id, created_at
-                """,
-                (username, email or None, password_hash, cafe_name),
-            )
-            row = cur.fetchone()
-            return {
-                "id": row[0],
-                "username": username,
-                "email": email,
-                "passwordHash": password_hash,
-                "cafeName": cafe_name,
-                "googlePlaceId": "",
-                "createdAt": row[1].isoformat(),
-            }
+    owner = Owner(username=username, email=email or None, password_hash=password_hash, cafe_name=cafe_name)
+    db.session.add(owner)
+    db.session.commit()
+    return _owner_dict(owner)
 
-# ---------------------------------------------------------------------------
-# Data access — tables
-# ---------------------------------------------------------------------------
 
 def load_tables() -> list[dict]:
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, name, owner_id, created_at FROM cafe_tables ORDER BY created_at"
-                )
-                return [
-                    {
-                        "id": row[0],
-                        "name": row[1],
-                        "ownerId": row[2],
-                        "createdAt": row[3].isoformat() if row[3] else "",
-                    }
-                    for row in cur.fetchall()
-                ]
-    return read_json(TABLES_PATH, [])
+    return [_table_dict(table) for table in CafeTable.query.order_by(CafeTable.created_at).all()]
 
 
 def save_tables(tables: list[dict]) -> None:
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM cafe_tables")
-                existing = {row[0] for row in cur.fetchall()}
-                new_ids = {t["id"] for t in tables}
-                removed = existing - new_ids
-                if removed:
-                    cur.execute("DELETE FROM cafe_tables WHERE id = ANY(%s)", (list(removed),))
-                for t in tables:
-                    cur.execute(
-                        """
-                        INSERT INTO cafe_tables (id, name, owner_id, created_at)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
-                        """,
-                        (
-                            t["id"],
-                            t["name"],
-                            t.get("ownerId"),
-                            t.get("createdAt", datetime.now(timezone.utc).isoformat()),
-                        ),
-                    )
-        return
-    write_json(TABLES_PATH, tables)
+    keep_ids = {table["id"] for table in tables}
+    for existing in CafeTable.query.all():
+        if existing.id not in keep_ids:
+            db.session.delete(existing)
+    for table in tables:
+        record = db.session.get(CafeTable, table["id"]) or CafeTable(id=table["id"])
+        record.name = table["name"]
+        record.owner_id = table.get("ownerId")
+        record.created_at = _parse_dt(table.get("createdAt")) or record.created_at
+        db.session.add(record)
+    db.session.commit()
 
-# ---------------------------------------------------------------------------
-# Data access — menu
-# ---------------------------------------------------------------------------
 
 def load_menu() -> dict:
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT owner_id, data FROM menus")
-                all_categories: list[dict] = []
-                for owner_id, data in cur.fetchall():
-                    for cat in (data or {}).get("categories", []):
-                        cat_copy = dict(cat)
-                        cat_copy["ownerId"] = owner_id
-                        all_categories.append(cat_copy)
-                return {"categories": all_categories}
     cached_menu = _get_cached_menu()
     if cached_menu is not None:
         return cached_menu
-    menu = safe_read_json(MENU_PATH, {"categories": []})
-    changed = False
-    existing_ids: set[str] = set()
-    for cat in menu.get("categories", []):
-        if not cat.get("id"):
-            cat["id"] = unique_id(normalize_id(cat.get("name", "category")), existing_ids)
-            changed = True
-        existing_ids.add(cat["id"])
-    if changed:
-        atomic_write_json(MENU_PATH, menu)
-    _set_cached_menu(menu)
-    return _clone_json_data(menu)
+    all_categories = []
+    for menu in Menu.query.all():
+        for category in (menu.data or {}).get("categories", []):
+            category_copy = dict(category)
+            category_copy["ownerId"] = menu.owner_id
+            all_categories.append(category_copy)
+    result = {"categories": all_categories}
+    _set_cached_menu(result)
+    return _clone_json_data(result)
 
 
 def save_menu(menu: dict) -> None:
-    if USE_DB:
-        by_owner: dict[int, list] = {}
-        for cat in menu.get("categories", []):
-            oid = cat.get("ownerId")
-            if oid not in by_owner:
-                by_owner[oid] = []
-            cat_copy = {k: v for k, v in cat.items() if k != "ownerId"}
-            by_owner[oid].append(cat_copy)
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                for oid, categories in by_owner.items():
-                    cur.execute(
-                        """
-                        INSERT INTO menus (owner_id, data) VALUES (%s, %s)
-                        ON CONFLICT (owner_id) DO UPDATE SET data = EXCLUDED.data
-                        """,
-                        (oid, Json({"categories": categories})),
-                    )
-        return
-    atomic_write_json(MENU_PATH, menu)
+    by_owner: dict[int, list] = {}
+    for category in menu.get("categories", []):
+        owner_id = category.get("ownerId")
+        if owner_id is None:
+            continue
+        category_copy = {k: v for k, v in category.items() if k != "ownerId"}
+        by_owner.setdefault(owner_id, []).append(category_copy)
+    owner_ids = {owner.id for owner in Owner.query.all()} | {m.owner_id for m in Menu.query.all()}
+    for owner_id in owner_ids:
+        categories = by_owner.get(owner_id, [])
+        record = db.session.get(Menu, owner_id) or Menu(owner_id=owner_id)
+        record.data = {"categories": categories}
+        db.session.add(record)
+    db.session.commit()
     _set_cached_menu(menu)
 
-# ---------------------------------------------------------------------------
-# Data access — orders
-# ---------------------------------------------------------------------------
 
 def load_orders() -> list[dict]:
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, owner_id, table_id, table_name, customer_name, "
-                    "items, total, status, origin, created_at "
-                    "FROM orders ORDER BY id"
-                )
-                return [
-                    {
-                        "id": row[0],
-                        "ownerId": row[1],
-                        "tableId": row[2],
-                        "tableName": row[3],
-                        "customerName": row[4],
-                        "items": row[5] if isinstance(row[5], list) else [],
-                        "total": float(row[6]) if row[6] is not None else 0.0,
-                        "status": row[7] or "pending",
-                        "origin": row[8] or "table",
-                        "createdAt": row[9].isoformat() if row[9] else "",
-                    }
-                    for row in cur.fetchall()
-                ]
-    return read_json(ORDERS_PATH, [])
+    return [_order_dict(order) for order in Order.query.order_by(Order.id).all()]
 
 
 def save_orders(orders: list[dict]) -> None:
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM orders")
-                existing = {row[0] for row in cur.fetchall()}
-                new_ids = {o["id"] for o in orders if isinstance(o.get("id"), int)}
-                removed = existing - new_ids
-                if removed:
-                    cur.execute("DELETE FROM orders WHERE id = ANY(%s)", (list(removed),))
-                for o in orders:
-                    cur.execute(
-                        """
-                        INSERT INTO orders
-                          (id, owner_id, table_id, table_name, customer_name,
-                           items, total, status, origin, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE SET
-                            status = EXCLUDED.status,
-                            items  = EXCLUDED.items,
-                            total  = EXCLUDED.total
-                        """,
-                        (
-                            o.get("id"),
-                            o.get("ownerId"),
-                            o.get("tableId"),
-                            o.get("tableName"),
-                            o.get("customerName", "Guest"),
-                            Json(o.get("items", [])),
-                            o.get("total", 0),
-                            o.get("status", "pending"),
-                            o.get("origin", "table"),
-                            o.get("createdAt", datetime.now(timezone.utc).isoformat()),
-                        ),
-                    )
-        return
-    write_json(ORDERS_PATH, orders)
+    keep_ids = {order.get("id") for order in orders if isinstance(order.get("id"), int)}
+    for existing in Order.query.all():
+        if existing.id not in keep_ids:
+            db.session.delete(existing)
+    for order in orders:
+        record = db.session.get(Order, order.get("id")) if order.get("id") else Order()
+        record.owner_id = order.get("ownerId")
+        record.table_id = order.get("tableId")
+        record.table_name = order.get("tableName")
+        record.customer_name = order.get("customerName", "Guest")
+        record.customer_email = order.get("customerEmail", "")
+        record.items = order.get("items", [])
+        record.subtotal = order.get("subtotal", order.get("total", 0))
+        record.tip = order.get("tip", 0)
+        record.total = order.get("total", 0)
+        record.status = order.get("status", "pending")
+        record.origin = order.get("origin", "table")
+        record.payment_intent = order.get("paymentIntent", "")
+        record.created_at = _parse_dt(order.get("createdAt")) or record.created_at
+        record.updated_at = datetime.now(timezone.utc)
+        db.session.add(record)
+    db.session.commit()
 
 
 def place_order_in_db(order: dict) -> dict:
-    """Insert a new order directly into DB and return with DB-generated ID."""
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO orders
-                  (owner_id, table_id, table_name, customer_name,
-                   items, total, status, origin, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                (
-                    order.get("ownerId"),
-                    order.get("tableId"),
-                    order.get("tableName"),
-                    order.get("customerName", "Guest"),
-                    Json(order.get("items", [])),
-                    order.get("total", 0),
-                    order.get("status", "pending"),
-                    order.get("origin", "table"),
-                    order.get("createdAt", datetime.now(timezone.utc).isoformat()),
-                ),
-            )
-            row = cur.fetchone()
-            result = dict(order)
-            result["id"] = row[0]
-            return result
+    record = Order(
+        owner_id=order.get("ownerId"),
+        table_id=order.get("tableId"),
+        table_name=order.get("tableName"),
+        customer_name=order.get("customerName", "Guest"),
+        customer_email=order.get("customerEmail", ""),
+        items=order.get("items", []),
+        subtotal=order.get("subtotal", order.get("total", 0)),
+        tip=order.get("tip", 0),
+        total=order.get("total", 0),
+        status=order.get("status", "pending"),
+        origin=order.get("origin", "table"),
+        payment_intent=order.get("paymentIntent", ""),
+        created_at=_parse_dt(order.get("createdAt")) or datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.session.add(record)
+    db.session.commit()
+    return _order_dict(record)
 
 
 def _db_update_order_status(order_id: int, new_status: str) -> bool:
-    """Efficiently update a single order's status in DB. Returns True if found."""
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE orders SET status = %s WHERE id = %s",
-                (new_status, order_id),
-            )
-            return cur.rowcount > 0
+    order = db.session.get(Order, order_id)
+    if not order:
+        return False
+    order.status = new_status
+    order.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return True
 
 
 def _db_get_order(order_id: int) -> dict | None:
-    """Fetch a single order from DB by id."""
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, owner_id, table_id, table_name, customer_name, "
-                "items, total, status, origin, created_at "
-                "FROM orders WHERE id = %s",
-                (order_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                return None
-            return {
-                "id": row[0],
-                "ownerId": row[1],
-                "tableId": row[2],
-                "tableName": row[3],
-                "customerName": row[4],
-                "items": row[5] if isinstance(row[5], list) else [],
-                "total": float(row[6]) if row[6] is not None else 0.0,
-                "status": row[7] or "pending",
-                "origin": row[8] or "table",
-                "createdAt": row[9].isoformat() if row[9] else "",
-            }
+    order = db.session.get(Order, order_id)
+    return _order_dict(order) if order else None
 
 
 def _db_delete_order(order_id: int) -> bool:
-    """Delete a single order from DB. Returns True if found."""
-    with _get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM orders WHERE id = %s", (order_id,))
-            return cur.rowcount > 0
+    order = db.session.get(Order, order_id)
+    if not order:
+        return False
+    db.session.delete(order)
+    db.session.commit()
+    return True
 
-# ---------------------------------------------------------------------------
-# Data access — feedback
-# ---------------------------------------------------------------------------
+
+def _db_set_payment_intent(order_id: int, payment_intent: str, status: str | None = None) -> dict | None:
+    order = db.session.get(Order, order_id)
+    if not order:
+        return None
+    order.payment_intent = payment_intent or order.payment_intent
+    if status:
+        order.status = status
+    order.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return _order_dict(order)
+
 
 def load_feedback() -> list[dict]:
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, owner_id, table_id, customer_name, rating, comment, created_at "
-                    "FROM feedback ORDER BY id DESC"
-                )
-                return [
-                    {
-                        "id": row[0],
-                        "ownerId": row[1],
-                        "tableId": row[2],
-                        "customerName": row[3],
-                        "rating": row[4],
-                        "comment": row[5] or "",
-                        "createdAt": row[6].isoformat() if row[6] else "",
-                    }
-                    for row in cur.fetchall()
-                ]
-    return read_json(FEEDBACK_PATH, [])
+    return [_feedback_dict(feedback) for feedback in Feedback.query.order_by(Feedback.id.desc()).all()]
 
 
 def save_feedback_entry(entry: dict) -> dict:
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO feedback (owner_id, table_id, customer_name, rating, comment, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    RETURNING id
-                    """,
-                    (
-                        entry.get("ownerId"),
-                        entry.get("tableId"),
-                        entry.get("customerName", "Guest"),
-                        entry["rating"],
-                        entry.get("comment", ""),
-                        entry.get("createdAt", datetime.now(timezone.utc).isoformat()),
-                    ),
-                )
-                row = cur.fetchone()
-                result = dict(entry)
-                result["id"] = row[0]
-                return result
-    feedbacks = read_json(FEEDBACK_PATH, [])
-    entry["id"] = max((f.get("id", 0) for f in feedbacks), default=0) + 1
-    feedbacks.append(entry)
-    write_json(FEEDBACK_PATH, feedbacks)
-    return entry
+    feedback = Feedback(
+        owner_id=entry.get("ownerId"),
+        table_id=entry.get("tableId"),
+        customer_name=entry.get("customerName", "Guest"),
+        rating=entry["rating"],
+        comment=entry.get("comment", ""),
+        created_at=_parse_dt(entry.get("createdAt")) or datetime.now(timezone.utc),
+    )
+    db.session.add(feedback)
+    db.session.commit()
+    return _feedback_dict(feedback)
+
+
+def load_settings(owner_id: int | None) -> dict:
+    if not owner_id:
+        return _settings_dict(None)
+    return _settings_dict(db.session.get(Settings, owner_id))
+
+
+def save_settings(owner_id: int, logo_url: str, brand_color: str) -> dict:
+    settings = db.session.get(Settings, owner_id) or Settings(owner_id=owner_id)
+    settings.logo_url = logo_url
+    settings.brand_color = brand_color if re.fullmatch(r"#[0-9a-fA-F]{6}", brand_color) else "#4f46e5"
+    settings.updated_at = datetime.now(timezone.utc)
+    db.session.add(settings)
+    db.session.commit()
+    return _settings_dict(settings)
+
+
+def _seed_sqlalchemy_from_json() -> None:
+    if Owner.query.count() or not OWNERS_PATH.exists():
+        return
+    owners = safe_read_json(OWNERS_PATH, [])
+    tables = safe_read_json(TABLES_PATH, [])
+    menu = safe_read_json(MENU_PATH, {"categories": []})
+    orders = safe_read_json(ORDERS_PATH, [])
+    feedback = safe_read_json(FEEDBACK_PATH, [])
+    if owners:
+        save_owners(owners)
+    if tables:
+        save_tables(tables)
+    if menu.get("categories"):
+        save_menu(menu)
+    if orders:
+        save_orders(orders)
+    for entry in feedback:
+        save_feedback_entry(entry)
 
 # ---------------------------------------------------------------------------
 # Persistent "remember me" token system
@@ -965,124 +808,57 @@ _REMEMBER_COOKIE = "cafe_remember"
 _REMEMBER_DAYS = 90
 
 def _hash_token(raw: str) -> str:
-    """SHA-256 hash a raw token string for safe DB storage."""
     import hashlib
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
 def create_remember_token(owner_id: int) -> str:
-    """Create a persistent remember-me token, store it, and return the raw value."""
     raw = secrets.token_urlsafe(48)
     token_hash = _hash_token(raw)
     expires = datetime.now(timezone.utc) + timedelta(days=_REMEMBER_DAYS)
-
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                # Limit to 5 active tokens per owner to prevent abuse
-                cur.execute(
-                    "DELETE FROM remember_tokens WHERE owner_id = %s AND id NOT IN "
-                    "(SELECT id FROM remember_tokens WHERE owner_id = %s ORDER BY created_at DESC LIMIT 4)",
-                    (owner_id, owner_id),
-                )
-                cur.execute(
-                    "INSERT INTO remember_tokens (owner_id, token_hash, expires_at) VALUES (%s, %s, %s)",
-                    (owner_id, token_hash, expires),
-                )
-    else:
-        tokens = read_json(TOKENS_PATH, [])
-        # Prune expired + limit per owner
-        now_iso = datetime.now(timezone.utc).isoformat()
-        tokens = [t for t in tokens if t.get("expiresAt", "") > now_iso]
-        owner_tokens = [t for t in tokens if t.get("ownerId") == owner_id]
-        if len(owner_tokens) >= 5:
-            oldest = sorted(owner_tokens, key=lambda t: t.get("createdAt", ""))[:len(owner_tokens) - 4]
-            old_hashes = {t["tokenHash"] for t in oldest}
-            tokens = [t for t in tokens if t.get("tokenHash") not in old_hashes]
-        tokens.append({
-            "ownerId": owner_id,
-            "tokenHash": token_hash,
-            "expiresAt": expires.isoformat(),
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-        })
-        write_json(TOKENS_PATH, tokens)
-
+    stale = (
+        RememberToken.query.filter_by(owner_id=owner_id)
+        .order_by(RememberToken.created_at.desc())
+        .offset(4)
+        .all()
+    )
+    for token in stale:
+        db.session.delete(token)
+    db.session.add(RememberToken(owner_id=owner_id, token_hash=token_hash, expires_at=expires))
+    db.session.commit()
     return raw
 
 
 def validate_remember_token(raw: str) -> dict | None:
-    """Look up a raw token and return the owner dict if valid, else None."""
     if not raw:
         return None
-    token_hash = _hash_token(raw)
+    token = RememberToken.query.filter_by(token_hash=_hash_token(raw)).first()
+    if not token:
+        return None
     now = datetime.now(timezone.utc)
-
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT owner_id, expires_at FROM remember_tokens WHERE token_hash = %s",
-                    (token_hash,),
-                )
-                row = cur.fetchone()
-                if not row:
-                    return None
-                owner_id, expires_at = row[0], row[1]
-                if expires_at and expires_at < now:
-                    cur.execute("DELETE FROM remember_tokens WHERE token_hash = %s", (token_hash,))
-                    return None
-                # Fetch owner
-                cur.execute(
-                    "SELECT id, username, email, password_hash, cafe_name, google_place_id "
-                    "FROM owners WHERE id = %s",
-                    (owner_id,),
-                )
-                orow = cur.fetchone()
-                if not orow:
-                    return None
-                return {
-                    "id": orow[0], "username": orow[1], "email": orow[2],
-                    "passwordHash": orow[3], "cafeName": orow[4] or "", "googlePlaceId": orow[5] or "",
-                }
-    else:
-        tokens = read_json(TOKENS_PATH, [])
-        now_iso = now.isoformat()
-        entry = next(
-            (t for t in tokens if t.get("tokenHash") == token_hash and t.get("expiresAt", "") > now_iso),
-            None,
-        )
-        if not entry:
-            return None
-        owners = load_owners()
-        return next((o for o in owners if o["id"] == entry["ownerId"]), None)
+    expires_at = token.expires_at
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at and expires_at < now:
+        db.session.delete(token)
+        db.session.commit()
+        return None
+    owner = db.session.get(Owner, token.owner_id)
+    return _owner_dict(owner) if owner and owner.is_active else None
 
 
 def revoke_remember_token(raw: str) -> None:
-    """Delete a specific remember-me token (on logout)."""
     if not raw:
         return
-    token_hash = _hash_token(raw)
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM remember_tokens WHERE token_hash = %s", (token_hash,))
-    else:
-        tokens = read_json(TOKENS_PATH, [])
-        tokens = [t for t in tokens if t.get("tokenHash") != token_hash]
-        write_json(TOKENS_PATH, tokens)
+    token = RememberToken.query.filter_by(token_hash=_hash_token(raw)).first()
+    if token:
+        db.session.delete(token)
+        db.session.commit()
 
 
 def revoke_all_tokens_for_owner(owner_id: int) -> None:
-    """Revoke all remember-me tokens for an owner (e.g. password change)."""
-    if USE_DB:
-        with _get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM remember_tokens WHERE owner_id = %s", (owner_id,))
-    else:
-        tokens = read_json(TOKENS_PATH, [])
-        tokens = [t for t in tokens if t.get("ownerId") != owner_id]
-        write_json(TOKENS_PATH, tokens)
-
+    RememberToken.query.filter_by(owner_id=owner_id).delete()
+    db.session.commit()
 
 # ---------------------------------------------------------------------------
 # ID generation (used in JSON fallback mode)
@@ -1128,14 +904,28 @@ def unique_id(base: str, existing: set) -> str:
 # ---------------------------------------------------------------------------
 
 def logged_in_owner() -> str | None:
+    if current_user.is_authenticated:
+        return current_user.username
     return session.get("owner_username")
 
 
 def logged_in_owner_id() -> int | None:
+    if current_user.is_authenticated:
+        return current_user.id
     return session.get("owner_id")
 
 
+@login_manager.user_loader
+def load_owner_user(owner_id: str):
+    try:
+        owner = db.session.get(Owner, int(owner_id))
+    except (TypeError, ValueError):
+        return None
+    return owner if owner and owner.is_active else None
+
+
 def login_required(view_func):
+    @flask_login_required
     @wraps(view_func)
     def wrapper(*args, **kwargs):
         if not logged_in_owner():
@@ -1151,6 +941,19 @@ def _is_strong_password(password: str) -> bool:
         and any(c.isalpha() for c in password)
         and any(c.isdigit() for c in password)
     )
+
+
+def _make_password_hash(password: str) -> str:
+    return bcrypt.generate_password_hash(password).decode("utf-8")
+
+
+def _password_matches(password_hash: str, password: str) -> bool:
+    try:
+        if password_hash.startswith("$2"):
+            return bcrypt.check_password_hash(password_hash, password)
+        return check_password_hash(password_hash, password)
+    except ValueError:
+        return False
 
 # ---------------------------------------------------------------------------
 # IP-based login lockout
@@ -1279,6 +1082,64 @@ def compute_order_summary(items: list[dict], owner_menu: dict | None = None) -> 
         )
 
     return {"items": summary, "total": round(total, 2)}
+
+
+def _mail_enabled() -> bool:
+    return bool(app.config.get("MAIL_DEFAULT_SENDER") and app.config.get("MAIL_PASSWORD"))
+
+
+def _send_order_confirmation(order: dict) -> None:
+    recipient = order.get("customerEmail")
+    if not recipient or not _mail_enabled():
+        return
+    try:
+        item_lines = "\n".join(
+            f"- {item.get('name')} x{item.get('quantity', 1)}: ₹{float(item.get('lineTotal', 0)):.2f}"
+            for item in order.get("items", [])
+        )
+        message = Message(
+            subject=f"Order #{order.get('id')} confirmation",
+            recipients=[recipient],
+            body=(
+                f"Thanks for your order, {order.get('customerName', 'Guest')}.\n\n"
+                f"{item_lines}\n\n"
+                f"Total: ₹{float(order.get('total') or 0):.2f}\n"
+                f"Status: {order.get('status', 'pending')}\n"
+            ),
+        )
+        mail.send(message)
+    except Exception as exc:
+        app.logger.warning("Order confirmation email failed: %s", exc)
+
+
+def _stripe_enabled() -> bool:
+    return stripe is not None and bool(os.environ.get("STRIPE_SECRET_KEY"))
+
+
+def _create_stripe_checkout_session(order: dict, table_id: str | None):
+    if not _stripe_enabled():
+        return None
+    success_url = url_for("table_order", table_id=table_id, _external=True) if table_id else url_for("home", _external=True)
+    cancel_url = success_url
+    return stripe.checkout.Session.create(
+        mode="payment",
+        payment_method_types=["card"],
+        customer_email=order.get("customerEmail") or None,
+        line_items=[
+            {
+                "price_data": {
+                    "currency": os.environ.get("STRIPE_CURRENCY", "inr").lower(),
+                    "product_data": {"name": f"Cafe order #{order['id']}"},
+                    "unit_amount": max(int(round(float(order.get("total") or 0) * 100)), 50),
+                },
+                "quantity": 1,
+            }
+        ],
+        metadata={"order_id": str(order["id"])},
+        payment_intent_data={"metadata": {"order_id": str(order["id"])}},
+        success_url=f"{success_url}?order={order['id']}&payment=success",
+        cancel_url=f"{cancel_url}?order={order['id']}&payment=cancelled",
+    )
 
 # ---------------------------------------------------------------------------
 # SSE — server-sent events for live order updates (owner + customer)
@@ -1550,9 +1411,12 @@ def table_order(table_id: str) -> str:
     owner = next((o for o in owners if o["id"] == owner_id), None)
     cafe_name = (owner or {}).get("cafeName", "") or "Cafe 11:11"
     google_place_id = (owner or {}).get("googlePlaceId", "")
+    branding = load_settings(owner_id)
     return render_template("table_order.html", table=table,
                            cafe_name=cafe_name,
-                           google_place_id=google_place_id)
+                           google_place_id=google_place_id,
+                           branding=branding,
+                           stripe_publishable_key=os.environ.get("STRIPE_PUBLISHABLE_KEY", ""))
 
 # ---------------------------------------------------------------------------
 # Auth routes — login
@@ -1574,6 +1438,9 @@ def _auto_login_from_token() -> None:
         session["owner_username"] = owner["username"]
         session["owner_id"] = owner["id"]
         session.permanent = True
+        owner_model = db.session.get(Owner, owner["id"])
+        if owner_model:
+            login_user(owner_model, remember=False)
         log_security("AUTO_LOGIN_TOKEN", f"user={owner['username']!r}")
 
 
@@ -1610,12 +1477,15 @@ def owner_login() -> str | Response:
             flash("This account has been suspended. Please contact support.")
             return _no_store(app.make_response(render_template("owner_login.html")))
 
-        if owner and check_password_hash(owner["passwordHash"], password):
+        if owner and _password_matches(owner["passwordHash"], password):
             _clear_failed_logins(ip)
             session.clear()
             session["owner_username"] = owner["username"]
             session["owner_id"] = owner["id"]
             session.permanent = True  # always keep session alive across browser restarts
+            owner_model = db.session.get(Owner, owner["id"])
+            if owner_model:
+                login_user(owner_model, remember=False)
             log_security("LOGIN_SUCCESS", f"user={owner['username']!r} remember={remember_me}")
 
             resp = redirect(url_for("owner_dashboard"))
@@ -1680,7 +1550,7 @@ def owner_signup() -> str | Response:
             flash("An account with that email already exists.")
             return render_template("owner_signup.html")
 
-        password_hash = generate_password_hash(password, method="scrypt")
+        password_hash = _make_password_hash(password)
 
         if USE_DB:
             try:
@@ -1706,6 +1576,9 @@ def owner_signup() -> str | Response:
         session["owner_username"] = new_owner["username"]
         session["owner_id"] = new_owner["id"]
         session.permanent = True
+        owner_model = db.session.get(Owner, new_owner["id"])
+        if owner_model:
+            login_user(owner_model, remember=False)
         log_security("SIGNUP_SUCCESS", f"user={username!r}")
         return redirect(url_for("owner_dashboard"))
 
@@ -1715,6 +1588,7 @@ def owner_signup() -> str | Response:
 @app.route("/owner/logout")
 def owner_logout() -> Response:
     username = logged_in_owner()
+    logout_user()
     session.clear()
     if username:
         log_security("LOGOUT", f"user={username!r}")
@@ -1749,6 +1623,8 @@ def owner_profile() -> str | Response:
             cafe_name = str(request.form.get("cafe_name", "")).strip()[:200]
             email = str(request.form.get("email", "")).strip()[:254] or None
             google_place_id = str(request.form.get("google_place_id", "")).strip()[:300]
+            logo_url = str(request.form.get("logo_url", "")).strip()[:500]
+            brand_color = str(request.form.get("brand_color", "#4f46e5")).strip()[:7]
 
             if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
                 flash("Please enter a valid email address.")
@@ -1766,6 +1642,7 @@ def owner_profile() -> str | Response:
             owner["email"] = email
             owner["googlePlaceId"] = google_place_id
             save_owners(owners)
+            save_settings(owner_id, logo_url, brand_color)
             flash("Profile updated successfully.")
 
         elif action == "password":
@@ -1773,7 +1650,7 @@ def owner_profile() -> str | Response:
             new_pw = str(request.form.get("new_password", ""))[:256]
             confirm_pw = str(request.form.get("confirm_password", ""))[:256]
 
-            if not check_password_hash(owner["passwordHash"], current_pw):
+            if not _password_matches(owner["passwordHash"], current_pw):
                 flash("Current password is incorrect.")
                 return redirect(url_for("owner_profile"))
 
@@ -1785,7 +1662,7 @@ def owner_profile() -> str | Response:
                 flash("Password must be at least 8 characters with a letter and digit.")
                 return redirect(url_for("owner_profile"))
 
-            owner["passwordHash"] = generate_password_hash(new_pw, method="scrypt")
+            owner["passwordHash"] = _make_password_hash(new_pw)
             save_owners(owners)
             # Revoke all persistent tokens — force relogin on all devices after password change
             try:
@@ -1801,6 +1678,7 @@ def owner_profile() -> str | Response:
         "owner_profile.html",
         owner=owner,
         owner_username=logged_in_owner(),
+        branding=load_settings(owner_id),
     ))
     return _no_store(resp)
 
@@ -2417,8 +2295,12 @@ def checkout() -> tuple[dict, int]:
         abort(400, description="JSON required.")
     payload = request.get_json(silent=True) or {}
     customer_name = str(payload.get("customerName", "Guest")).strip()[:100] or "Guest"
+    customer_email = str(payload.get("customerEmail", "")).strip()[:254]
     table_id = str(payload.get("tableId", "")).strip()[:64] if payload.get("tableId") else None
     items = payload.get("items", [])
+
+    if customer_email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", customer_email):
+        abort(400, description="Invalid email address.")
 
     if table_id and not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
         abort(400, description="Invalid table ID.")
@@ -2457,6 +2339,7 @@ def checkout() -> tuple[dict, int]:
 
     order_data = {
         "customerName": customer_name,
+        "customerEmail": customer_email,
         "tableId": table_id,
         "tableName": table_name,
         "ownerId": owner_id,
@@ -2490,7 +2373,62 @@ def checkout() -> tuple[dict, int]:
         })
 
     log_security("ORDER_PLACED", f"table={table_id!r} total={order_record['total']}")
+    try:
+        checkout_session = _create_stripe_checkout_session(order_record, table_id)
+    except Exception as exc:
+        app.logger.error("Stripe Checkout creation failed: %s", exc)
+        return {"description": "Payment could not be started. Please try again."}, 502
+
+    if checkout_session:
+        payment_intent = checkout_session.get("payment_intent") or ""
+        if payment_intent:
+            updated = _db_set_payment_intent(order_record["id"], payment_intent)
+            if updated:
+                order_record = updated
+        return {
+            "message": "Order created. Redirecting to payment.",
+            "order": order_record,
+            "checkoutUrl": checkout_session.url,
+        }, 201
+
+    _send_order_confirmation(order_record)
     return {"message": "Order placed successfully.", "order": order_record}, 201
+
+
+@app.route("/stripe/webhook", methods=["POST"])
+@csrf.exempt
+@limiter.exempt
+def stripe_webhook() -> tuple[dict, int]:
+    if stripe is None:
+        return {"received": True}, 200
+    payload = request.get_data()
+    signature = request.headers.get("Stripe-Signature", "")
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
+    try:
+        if webhook_secret:
+            event = stripe.Webhook.construct_event(payload, signature, webhook_secret)
+        else:
+            event = json.loads(payload.decode("utf-8"))
+    except Exception as exc:
+        app.logger.warning("Invalid Stripe webhook: %s", exc)
+        return {"description": "Invalid webhook."}, 400
+
+    event_type = event.get("type")
+    data = event.get("data", {}).get("object", {})
+    if event_type == "checkout.session.completed":
+        order_id = data.get("metadata", {}).get("order_id")
+        payment_intent = data.get("payment_intent") or ""
+        if order_id and str(order_id).isdigit():
+            order = _db_set_payment_intent(int(order_id), payment_intent, "pending")
+            if order:
+                _send_order_confirmation(order)
+                if order.get("ownerId"):
+                    _notify_owner(order["ownerId"], "order_paid", {"id": order["id"], "status": order["status"]})
+    elif event_type == "payment_intent.succeeded":
+        order_id = data.get("metadata", {}).get("order_id")
+        if order_id and str(order_id).isdigit():
+            _db_set_payment_intent(int(order_id), data.get("id") or "", "pending")
+    return {"received": True}, 200
 
 
 @app.route("/api/orders", methods=["GET"])
@@ -2724,10 +2662,16 @@ def _build_analytics(owner_id: int) -> dict:
 
     daily: dict = defaultdict(float)
     item_counts: dict = defaultdict(int)
+    hourly: dict = defaultdict(int)
 
     for o in orders:
         created = o.get("createdAt", "")[:10]
         daily[created] = round(daily[created] + float(o.get("total") or 0), 2)
+        try:
+            hour = datetime.fromisoformat(o.get("createdAt", "").replace("Z", "+00:00")).hour
+            hourly[hour] += 1
+        except (ValueError, TypeError):
+            pass
         for it in o.get("items", []):
             item_counts[it.get("name", "?")] += it.get("quantity", 1)
 
@@ -2736,6 +2680,10 @@ def _build_analytics(owner_id: int) -> dict:
 
     top_items = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)[:5]
     top_items_data = [{"name": n, "count": c} for n, c in top_items]
+    peak_hours = [
+        {"hour": f"{hour:02d}:00", "count": hourly.get(hour, 0)}
+        for hour in range(24)
+    ]
 
     total_revenue = round(sum(float(o.get("total") or 0) for o in orders), 2)
     total_orders = len(orders)
@@ -2744,6 +2692,7 @@ def _build_analytics(owner_id: int) -> dict:
     return {
         "revenueByDay": revenue_by_day,
         "topItems": top_items_data,
+        "peakHours": peak_hours,
         "totalRevenue": total_revenue,
         "totalOrders": total_orders,
         "avgOrderValue": avg_order,
@@ -2933,36 +2882,12 @@ except Exception as _admin_import_err:  # noqa: BLE001
 # Init
 # ---------------------------------------------------------------------------
 
-def _init_data_files() -> None:
-    if not ORDERS_PATH.exists():
-        write_json(ORDERS_PATH, [])
-    if not OWNERS_PATH.exists():
-        write_json(OWNERS_PATH, [])
-    if not TABLES_PATH.exists():
-        write_json(TABLES_PATH, [])
-    if not MENU_PATH.exists():
-        write_json(MENU_PATH, {"categories": []})
-    if not FEEDBACK_PATH.exists():
-        write_json(FEEDBACK_PATH, [])
-    if not TOKENS_PATH.exists():
-        write_json(TOKENS_PATH, [])
-
-
 try:
-    if USE_DB:
-        _init_db()
-    else:
-        _init_data_files()
+    _init_db()
 except Exception as exc:
     import sys as _sys
-    print(f"WARNING: Could not initialise data store: {exc}", file=_sys.stderr, flush=True)
-    if USE_DB:
-        USE_DB = False
-        print("WARNING: Falling back to JSON file storage.", file=_sys.stderr, flush=True)
-        try:
-            _init_data_files()
-        except Exception as exc2:
-            print(f"WARNING: Could not initialise JSON files either: {exc2}", file=_sys.stderr, flush=True)
+    print(f"ERROR: Could not initialise SQLAlchemy data store: {exc}", file=_sys.stderr, flush=True)
+    raise
 
 # ---------------------------------------------------------------------------
 # Entry point
