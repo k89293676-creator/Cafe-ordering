@@ -23,6 +23,10 @@ const $  = id  => document.getElementById(id);
 const qs = sel => document.querySelector(sel);
 
 function fmt(n) { return parseFloat(n || 0).toFixed(2); }
+function csrfHeaders(extra = {}) {
+  const token = document.querySelector('meta[name="csrf-token"]')?.content || "";
+  return token ? { ...extra, "X-CSRFToken": token } : extra;
+}
 
 function totalQty()   { return Object.values(cart).reduce((s, e) => s + e.qty, 0); }
 function totalPrice() { return Object.values(cart).reduce((s, e) => s + e.item.price * e.qty, 0); }
@@ -316,7 +320,7 @@ async function placeOrder(name) {
   try {
     const res  = await fetch("/api/checkout", {
       method:  "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
       body:    JSON.stringify(payload),
     });
     const data = await res.json();
@@ -496,7 +500,7 @@ async function cancelOrder(orderId) {
   if (btn) { btn.disabled = true; btn.textContent = "Cancelling…"; }
   try {
     const res = await fetch(`/api/orders/${orderId}/cancel`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
+      method: "POST", headers: csrfHeaders({ "Content-Type": "application/json" }), body: "{}"
     });
     const data = await res.json();
     if (res.ok) {
@@ -701,7 +705,7 @@ document.addEventListener("click", async e => {
       comment:      ($("feedback-comment")?.value || "").trim(),
     };
     try {
-      const res  = await fetch("/api/feedback", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload) });
+      const res  = await fetch("/api/feedback", { method:"POST", headers: csrfHeaders({"Content-Type":"application/json"}), body: JSON.stringify(payload) });
       const data = await res.json();
       if (res.ok) {
         if (resp) resp.textContent = "✓ Thank you for your feedback!";

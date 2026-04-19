@@ -4,18 +4,22 @@ import base64
 import io
 import json
 import logging
+import mimetypes
 import os
 import re
 import secrets
 import tempfile
 import threading
+from logging.handlers import RotatingFileHandler
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
+import portalocker
 import qrcode
+from dotenv import load_dotenv
 from flask import (
     Flask,
     Response,
@@ -30,11 +34,16 @@ from flask import (
     stream_with_context,
 )
 from flask_limiter import Limiter
+from flask_compress import Compress
 from flask_limiter.util import get_remote_address
+from flask_migrate import Migrate
+from flask_sqlalchemy import SQLAlchemy
 from flask_talisman import Talisman
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Paths (used as fallback when DATABASE_URL is not set)
@@ -62,7 +71,8 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 IS_PRODUCTION = (
-    os.environ.get("FLASK_ENV") == "production"
+    os.environ.get("IS_PRODUCTION", "").lower() in {"1", "true", "yes", "on"}
+    or os.environ.get("FLASK_ENV") == "production"
     or os.environ.get("RAILWAY_ENVIRONMENT") is not None
 )
 
@@ -74,6 +84,8 @@ _secret_key = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET")
 if _secret_key:
     app.secret_key = _secret_key
 else:
+    if IS_PRODUCTION:
+        raise RuntimeError("SECRET_KEY is required when IS_PRODUCTION=true or FLASK_ENV=production.")
     app.secret_key = secrets.token_hex(32)
     print(
         "WARNING: SECRET_KEY not set. Sessions will not survive restarts. "
@@ -90,22 +102,63 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=IS_PRODUCTION,
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
-    MAX_CONTENT_LENGTH=16 * 1024 * 1024,  # 16 MB for image/PDF uploads
+    MAX_CONTENT_LENGTH=16 * 1024 * 1024,
     WTF_CSRF_TIME_LIMIT=3600,
     WTF_CSRF_SSL_STRICT=False,
+    SQLALCHEMY_TRACK_MODIFICATIONS=False,
 )
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload)
+
+
+def configure_logging() -> None:
+    level = logging.INFO if IS_PRODUCTION else logging.DEBUG
+    if IS_PRODUCTION:
+        log_path = Path(os.environ.get("LOG_FILE", DATA_DIR / "logs" / "app.log"))
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(log_path, maxBytes=10 * 1024 * 1024, backupCount=5)
+        handler.setFormatter(JsonFormatter())
+    else:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(level)
+    app.logger.handlers.clear()
+    app.logger.addHandler(handler)
+    app.logger.setLevel(level)
+    app.logger.propagate = False
+
+
+configure_logging()
 
 # ---------------------------------------------------------------------------
 # Security extensions
 # ---------------------------------------------------------------------------
 
+Compress(app)
 csrf = CSRFProtect(app)
+
+_rate_limit_storage_uri = os.environ.get("REDIS_URL") or "memory://"
+if _rate_limit_storage_uri == "memory://":
+    app.logger.warning("REDIS_URL not set; using in-memory rate limiting storage.")
 
 limiter = Limiter(
     key_func=get_remote_address,
     app=app,
     default_limits=["300 per day", "60 per hour"],
-    storage_uri="memory://",
+    storage_uri=_rate_limit_storage_uri,
 )
 
 _csp = {
@@ -121,34 +174,35 @@ _csp = {
     "base-uri": "'self'",
 }
 
-try:
-    Talisman(
-        app,
-        force_https=False,
-        strict_transport_security=IS_PRODUCTION,
-        strict_transport_security_max_age=31536000,
-        strict_transport_security_include_subdomains=True,
-        session_cookie_secure=IS_PRODUCTION,
-        content_security_policy=_csp,
-        content_security_policy_nonce_in=None,
-        permissions_policy={
-            "geolocation": "()",
-            "camera": "()",
-            "microphone": "()",
-            "payment": "()",
-            "usb": "()",
-        },
-    )
-except TypeError:
-    Talisman(
-        app,
-        force_https=False,
-        strict_transport_security=IS_PRODUCTION,
-        strict_transport_security_max_age=31536000,
-        strict_transport_security_include_subdomains=True,
-        session_cookie_secure=IS_PRODUCTION,
-        content_security_policy=_csp,
-    )
+if IS_PRODUCTION:
+    try:
+        Talisman(
+            app,
+            force_https=False,
+            strict_transport_security=IS_PRODUCTION,
+            strict_transport_security_max_age=31536000,
+            strict_transport_security_include_subdomains=True,
+            session_cookie_secure=IS_PRODUCTION,
+            content_security_policy=_csp,
+            content_security_policy_nonce_in=None,
+            permissions_policy={
+                "geolocation": "()",
+                "camera": "()",
+                "microphone": "()",
+                "payment": "()",
+                "usb": "()",
+            },
+        )
+    except TypeError:
+        Talisman(
+            app,
+            force_https=False,
+            strict_transport_security=IS_PRODUCTION,
+            strict_transport_security_max_age=31536000,
+            strict_transport_security_include_subdomains=True,
+            session_cookie_secure=IS_PRODUCTION,
+            content_security_policy=_csp,
+        )
 
 # ---------------------------------------------------------------------------
 # PostgreSQL setup
@@ -166,7 +220,57 @@ _raw_db_url = os.environ.get("DATABASE_URL", "")
 if _raw_db_url.startswith("postgres://"):
     _raw_db_url = _raw_db_url.replace("postgres://", "postgresql://", 1)
 
+if _raw_db_url:
+    app.config["SQLALCHEMY_DATABASE_URI"] = _raw_db_url
+
+db = SQLAlchemy()
+migrate = Migrate()
+
+
+class Owner(db.Model):
+    __tablename__ = "owners"
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.Text, unique=True, nullable=False)
+    email = db.Column(db.Text, unique=True)
+    password_hash = db.Column(db.Text, nullable=False)
+    cafe_name = db.Column(db.Text, default="")
+    google_place_id = db.Column(db.Text, default="")
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+
+class CafeTable(db.Model):
+    __tablename__ = "cafe_tables"
+    id = db.Column(db.Text, primary_key=True)
+    name = db.Column(db.Text, nullable=False)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"))
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+
+class Menu(db.Model):
+    __tablename__ = "menus"
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"), primary_key=True)
+    data = db.Column(db.JSON, nullable=False, default=lambda: {"categories": []})
+
+
+class Order(db.Model):
+    __tablename__ = "orders"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id"))
+    table_id = db.Column(db.Text)
+    table_name = db.Column(db.Text)
+    customer_name = db.Column(db.Text, default="Guest")
+    items = db.Column(db.JSON, nullable=False, default=list)
+    total = db.Column(db.Numeric(10, 2), default=0)
+    status = db.Column(db.Text, default="pending")
+    origin = db.Column(db.Text, default="table")
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+
 USE_DB = _HAS_PSYCOPG2 and bool(_raw_db_url)
+if USE_DB:
+    db.init_app(app)
+    migrate.init_app(app, db)
 _db_pool = None
 
 if USE_DB:
@@ -333,7 +437,32 @@ if not security_log.handlers:
     _handler.setFormatter(logging.Formatter("[SECURITY] %(asctime)s %(levelname)s %(message)s"))
     security_log.addHandler(_handler)
     security_log.setLevel(logging.INFO)
+    security_log.propagate = False
 
+
+_ALLOWED_UPLOADS = {
+    ".json": {"application/json", "text/json"},
+    ".jpg": {"image/jpeg"},
+    ".jpeg": {"image/jpeg"},
+    ".png": {"image/png"},
+}
+
+
+def validate_uploaded_file(uploaded_file, file_bytes: bytes) -> tuple[str | None, str | None]:
+    filename = (uploaded_file.filename or "").lower()
+    ext = Path(filename).suffix
+    if ext not in _ALLOWED_UPLOADS:
+        return "Unsupported file type. Upload .json, .jpg, or .png only.", None
+    guessed_type = (mimetypes.guess_type(filename)[0] or "").lower()
+    provided_type = (uploaded_file.mimetype or "").split(";", 1)[0].lower()
+    allowed_types = _ALLOWED_UPLOADS[ext]
+    if guessed_type not in allowed_types:
+        return "Uploaded file extension does not match an allowed MIME type.", None
+    if provided_type and provided_type not in allowed_types and provided_type != "application/octet-stream":
+        return "Uploaded file MIME type is not allowed.", None
+    if not file_bytes:
+        return "Uploaded file is empty.", None
+    return None, "image" if ext in {".jpg", ".jpeg", ".png"} else "json"
 
 def _client_ip() -> str:
     return request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
@@ -346,43 +475,87 @@ def log_security(event: str, detail: str = "") -> None:
 # JSON file helpers (fallback when no DATABASE_URL)
 # ---------------------------------------------------------------------------
 
-def read_json(path: Path, default):
-    if not path.exists():
-        return default
+def _json_lock_path(path: Path) -> str:
+    return str(path) + ".lock"
+
+
+def safe_read_json(path: Path, default):
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        return data
+        with portalocker.Lock(_json_lock_path(path), timeout=10):
+            if not path.exists():
+                return default
+            with path.open("r", encoding="utf-8") as handle:
+                return json.load(handle)
     except json.JSONDecodeError as exc:
         app.logger.error("Corrupt JSON in %s (%s) — returning default", path, exc)
         try:
-            corrupt = path.with_suffix(".corrupt")
-            path.rename(corrupt)
+            corrupt = path.with_suffix(path.suffix + f".corrupt.{int(time.time())}")
+            path.replace(corrupt)
         except OSError:
             pass
         return default
-    except OSError as exc:
+    except (OSError, portalocker.exceptions.LockException) as exc:
         app.logger.error("Failed to read %s: %s", path, exc)
         return default
 
 
-def write_json(path: Path, data) -> None:
+def atomic_write_json(path: Path, data) -> None:
+    tmp_path = None
     try:
-        dir_ = path.parent
-        fd, tmp_path = tempfile.mkstemp(dir=dir_, prefix=".~", suffix=".json")
-        try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with portalocker.Lock(_json_lock_path(path), timeout=10):
+            fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=".~", suffix=".json")
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(data, handle, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
             os.replace(tmp_path, path)
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-    except OSError as exc:
+    except (OSError, portalocker.exceptions.LockException) as exc:
         app.logger.error("Failed to write %s: %s", path, exc)
         raise
+    finally:
+        if tmp_path:
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def read_json(path: Path, default):
+    return safe_read_json(path, default)
+
+
+def write_json(path: Path, data) -> None:
+    atomic_write_json(path, data)
+
+
+_MENU_CACHE_TTL_SECONDS = 30
+_menu_cache: dict[str, object] = {"expires_at": 0.0, "data": None}
+_menu_cache_lock = threading.Lock()
+
+
+def _clone_json_data(data):
+    return json.loads(json.dumps(data))
+
+
+def _get_cached_menu():
+    with _menu_cache_lock:
+        if _menu_cache["data"] is not None and time.monotonic() < float(_menu_cache["expires_at"]):
+            return _clone_json_data(_menu_cache["data"])
+    return None
+
+
+def _set_cached_menu(menu: dict) -> None:
+    with _menu_cache_lock:
+        _menu_cache["data"] = _clone_json_data(menu)
+        _menu_cache["expires_at"] = time.monotonic() + _MENU_CACHE_TTL_SECONDS
+
+
+def _invalidate_menu_cache() -> None:
+    with _menu_cache_lock:
+        _menu_cache["data"] = None
+        _menu_cache["expires_at"] = 0.0
 
 # ---------------------------------------------------------------------------
 # Data access — owners
@@ -530,7 +703,10 @@ def load_menu() -> dict:
                         cat_copy["ownerId"] = owner_id
                         all_categories.append(cat_copy)
                 return {"categories": all_categories}
-    menu = read_json(MENU_PATH, {"categories": []})
+    cached_menu = _get_cached_menu()
+    if cached_menu is not None:
+        return cached_menu
+    menu = safe_read_json(MENU_PATH, {"categories": []})
     changed = False
     existing_ids: set[str] = set()
     for cat in menu.get("categories", []):
@@ -539,8 +715,9 @@ def load_menu() -> dict:
             changed = True
         existing_ids.add(cat["id"])
     if changed:
-        write_json(MENU_PATH, menu)
-    return menu
+        atomic_write_json(MENU_PATH, menu)
+    _set_cached_menu(menu)
+    return _clone_json_data(menu)
 
 
 def save_menu(menu: dict) -> None:
@@ -563,7 +740,8 @@ def save_menu(menu: dict) -> None:
                         (oid, Json({"categories": categories})),
                     )
         return
-    write_json(MENU_PATH, menu)
+    atomic_write_json(MENU_PATH, menu)
+    _set_cached_menu(menu)
 
 # ---------------------------------------------------------------------------
 # Data access — orders
@@ -1113,7 +1291,7 @@ def _notify_order_status(order_id: int, status: str) -> None:
             queues.remove(q)
 
 # ---------------------------------------------------------------------------
-# Menu AI extraction (image/PDF)
+# Menu AI extraction
 # ---------------------------------------------------------------------------
 
 def _extract_menu_from_pdf_bytes(pdf_bytes: bytes) -> dict | None:
@@ -2052,51 +2230,36 @@ def download_menu() -> Response:
 @login_required
 @limiter.limit("10 per hour")
 def update_menu() -> Response:
-    """Import a menu from pasted JSON, uploaded menu.json, or image/PDF."""
+    """Import a menu from pasted JSON, uploaded menu.json, or JPG/PNG."""
     owner_id = logged_in_owner_id()
     raw_json: str | None = None
     imported_from_image = False
 
     uploaded_file = request.files.get("menu_file")
     if uploaded_file and uploaded_file.filename:
-        filename = uploaded_file.filename.lower()
         file_bytes = uploaded_file.read(16 * 1024 * 1024)
+        upload_error, upload_kind = validate_uploaded_file(uploaded_file, file_bytes)
+        if upload_error:
+            flash(upload_error)
+            return redirect(url_for("owner_dashboard") + "#menu")
 
-        # Handle image/PDF uploads for menu extraction
-        if filename.endswith((".jpg", ".jpeg", ".png", ".webp", ".pdf")):
+        if upload_kind == "image":
             imported_from_image = True
-            if filename.endswith(".pdf"):
-                extracted_menu = _extract_menu_from_pdf_bytes(file_bytes)
-                if not extracted_menu:
-                    flash(
-                        "Could not extract items from the PDF. "
-                        "Make sure the PDF contains selectable text (not a scanned image). "
-                        "Alternatively, take a photo of the menu and upload a JPG/PNG, "
-                        "or set a GEMINI_API_KEY environment variable for AI-powered image extraction."
+            mime_type = mimetypes.guess_type(uploaded_file.filename or "")[0] or "image/jpeg"
+            extracted_menu = _extract_menu_from_image_bytes(file_bytes, mime_type)
+            if not extracted_menu:
+                has_gemini_key = bool(os.environ.get("GEMINI_API_KEY"))
+                if has_gemini_key:
+                    tip = "Gemini API is configured but extraction failed. Try a clearer, well-lit photo."
+                else:
+                    tip = (
+                        "To enable AI image extraction, add a GEMINI_API_KEY environment variable. "
+                        "Until then, paste your menu as JSON or upload a .json file."
                     )
-                    return redirect(url_for("owner_dashboard") + "#menu")
-            else:
-                # Image upload
-                mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                            ".png": "image/png", ".webp": "image/webp"}
-                ext = next((e for e in mime_map if filename.endswith(e)), ".jpg")
-                mime_type = mime_map[ext]
-                extracted_menu = _extract_menu_from_image_bytes(file_bytes, mime_type)
-                if not extracted_menu:
-                    has_gemini_key = bool(os.environ.get("GEMINI_API_KEY"))
-                    if has_gemini_key:
-                        tip = "Gemini API is configured but extraction failed. Try a clearer, well-lit photo."
-                    else:
-                        tip = (
-                            "To enable AI image extraction, add a GEMINI_API_KEY environment variable. "
-                            "Until then, use a text-based PDF or paste your menu as JSON."
-                        )
-                    flash(f"Could not extract menu from image. {tip}")
-                    return redirect(url_for("owner_dashboard") + "#menu")
-
+                flash(f"Could not extract menu from image. {tip}")
+                return redirect(url_for("owner_dashboard") + "#menu")
             imported = extracted_menu
         else:
-            # JSON file
             try:
                 raw_json = file_bytes.decode("utf-8")
             except Exception:
@@ -2194,7 +2357,6 @@ def menu_api() -> Response:
 
 
 @app.route("/api/order-preview", methods=["POST"])
-@csrf.exempt
 @limiter.limit("30 per minute")
 def order_preview() -> tuple[dict, int]:
     if not request.is_json:
@@ -2216,7 +2378,6 @@ def order_preview() -> tuple[dict, int]:
 
 
 @app.route("/api/checkout", methods=["POST"])
-@csrf.exempt
 @limiter.limit("20 per minute; 100 per hour")
 def checkout() -> tuple[dict, int]:
     if not request.is_json:
@@ -2381,7 +2542,6 @@ def customer_order_stream(order_id: int) -> Response:
 _CANCEL_GRACE_SECONDS = 120  # 2 minutes
 
 @app.route("/api/orders/<int:order_id>/cancel", methods=["POST"])
-@csrf.exempt
 @limiter.limit("10 per minute")
 def customer_cancel_order(order_id: int) -> tuple[dict, int]:
     """Allow a customer to cancel their own order within the grace period."""
@@ -2438,7 +2598,6 @@ def customer_cancel_order(order_id: int) -> tuple[dict, int]:
 # ---------------------------------------------------------------------------
 
 @app.route("/api/feedback", methods=["POST"])
-@csrf.exempt
 @limiter.limit("5 per minute; 20 per hour")
 def submit_feedback() -> tuple[dict, int]:
     if not request.is_json:

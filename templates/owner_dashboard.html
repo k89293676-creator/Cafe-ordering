@@ -524,22 +524,22 @@
               <div class="card-header"><h3>Upload Menu</h3></div>
               <div class="card-body">
                 <div class="upload-tabs">
-                  <button class="upload-tab-btn active" data-upload-tab="image">Image / PDF</button>
+                  <button class="upload-tab-btn active" data-upload-tab="image">Image</button>
                   <button class="upload-tab-btn" data-upload-tab="json">JSON</button>
                 </div>
 
-                <!-- Image/PDF Upload -->
+                <!-- Image Upload -->
                 <div id="upload-tab-image" class="upload-tab-panel active">
-                  <p class="text-muted" style="margin:0 0 1rem;font-size:0.875rem;">Upload a photo of your printed menu or a PDF. The system will extract items automatically.</p>
+                  <p class="text-muted" style="margin:0 0 1rem;font-size:0.875rem;">Upload a JPG or PNG photo of your printed menu. The system will extract items automatically.</p>
                   <form action="{{ url_for('update_menu') }}" method="post" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                     <div class="file-drop-zone" id="file-drop-zone">
                       <div class="file-drop-icon">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                       </div>
-                      <p class="file-drop-text">Drop your menu image or PDF here</p>
-                      <p class="file-drop-hint">JPG, PNG, WEBP or PDF — up to 16 MB</p>
-                      <input type="file" name="menu_file" id="menu-file-input" accept=".jpg,.jpeg,.png,.webp,.pdf" class="file-drop-input" />
+                      <p class="file-drop-text">Drop your menu image here</p>
+                      <p class="file-drop-hint">JPG or PNG — up to 16 MB</p>
+                      <input type="file" name="menu_file" id="menu-file-input" accept=".jpg,.jpeg,.png" class="file-drop-input" />
                       <label for="menu-file-input" class="btn btn-secondary btn-sm" style="margin-top:0.75rem;cursor:pointer;">Browse Files</label>
                       <div id="file-selected-name" style="display:none;margin-top:0.5rem;font-size:0.875rem;color:var(--primary);font-weight:500;"></div>
                     </div>
