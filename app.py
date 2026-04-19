@@ -236,6 +236,7 @@ class Owner(db.Model):
     password_hash = db.Column(db.Text, nullable=False)
     cafe_name = db.Column(db.Text, default="")
     google_place_id = db.Column(db.Text, default="")
+    is_active = db.Column(db.Boolean, default=True, nullable=False, server_default="true")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 
@@ -354,6 +355,11 @@ def _init_db() -> None:
             """)
 
             # ── Additive schema upgrades (safe to re-run) ────────────────────
+            # is_active column for owners (admin can deactivate owners)
+            cur.execute("""
+                ALTER TABLE owners
+                    ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+            """)
             # updated_at column for orders (tracks last status change)
             cur.execute("""
                 ALTER TABLE orders
@@ -567,7 +573,7 @@ def load_owners() -> list[dict]:
         with _get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id, username, email, password_hash, cafe_name, google_place_id, created_at "
+                    "SELECT id, username, email, password_hash, cafe_name, google_place_id, is_active, created_at "
                     "FROM owners ORDER BY id"
                 )
                 return [
@@ -578,11 +584,15 @@ def load_owners() -> list[dict]:
                         "passwordHash": row[3],
                         "cafeName": row[4] or "",
                         "googlePlaceId": row[5] or "",
-                        "createdAt": row[6].isoformat() if row[6] else "",
+                        "isActive": bool(row[6]) if row[6] is not None else True,
+                        "createdAt": row[7].isoformat() if row[7] else "",
                     }
                     for row in cur.fetchall()
                 ]
-    return read_json(OWNERS_PATH, [])
+    owners = read_json(OWNERS_PATH, [])
+    for o in owners:
+        o.setdefault("isActive", True)
+    return owners
 
 
 def save_owners(owners: list[dict]) -> None:
@@ -592,14 +602,15 @@ def save_owners(owners: list[dict]) -> None:
                 for owner in owners:
                     cur.execute(
                         """
-                        INSERT INTO owners (id, username, email, password_hash, cafe_name, google_place_id, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO owners (id, username, email, password_hash, cafe_name, google_place_id, is_active, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (id) DO UPDATE SET
                             username = EXCLUDED.username,
                             email = EXCLUDED.email,
                             password_hash = EXCLUDED.password_hash,
                             cafe_name = EXCLUDED.cafe_name,
-                            google_place_id = EXCLUDED.google_place_id
+                            google_place_id = EXCLUDED.google_place_id,
+                            is_active = EXCLUDED.is_active
                         """,
                         (
                             owner.get("id"),
@@ -608,6 +619,7 @@ def save_owners(owners: list[dict]) -> None:
                             owner.get("passwordHash", ""),
                             owner.get("cafeName", ""),
                             owner.get("googlePlaceId", ""),
+                            owner.get("isActive", True),
                             owner.get("createdAt", datetime.now(timezone.utc).isoformat()),
                         ),
                     )
@@ -1592,6 +1604,11 @@ def owner_login() -> str | Response:
             ),
             None,
         )
+
+        if owner and not owner.get("isActive", True):
+            log_security("LOGIN_BLOCKED_INACTIVE", f"user={owner['username']!r} ip={ip!r}")
+            flash("This account has been suspended. Please contact support.")
+            return _no_store(app.make_response(render_template("owner_login.html")))
 
         if owner and check_password_hash(owner["passwordHash"], password):
             _clear_failed_logins(ip)
@@ -2890,6 +2907,19 @@ def export_menu_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=menu.csv"},
     )
+
+# ---------------------------------------------------------------------------
+# Admin blueprint
+# ---------------------------------------------------------------------------
+
+from admin.routes import admin_bp  # noqa: E402 (after app setup)
+app.register_blueprint(admin_bp)
+
+
+@admin_bp.context_processor
+def _inject_now():
+    return {"now": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
+
 
 # ---------------------------------------------------------------------------
 # Init
