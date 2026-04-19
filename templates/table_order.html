@@ -11,6 +11,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="/static/css/order.css" />
+  <style>
+    :root { --gold: {{ branding.brandColor | default('#4f46e5') }}; --gold-border: {{ branding.brandColor | default('#4f46e5') }}33; --gold-bg: {{ branding.brandColor | default('#4f46e5') }}12; }
+  </style>
 </head>
 <body class="order-body">
 
@@ -21,7 +24,11 @@
   <div class="o-header__inner">
 
     <div class="o-header__brand">
+      {% if branding.logoUrl %}
+      <img class="o-header__logo" src="{{ branding.logoUrl }}" alt="{{ cafe_name }} logo" />
+      {% else %}
       <div class="o-header__logo" aria-hidden="true">11:11</div>
+      {% endif %}
       <div>
         <span class="o-header__cafe">{{ cafe_name }}</span>
         <h1 class="o-header__table">{{ table.name }}</h1>
@@ -169,6 +176,16 @@
           maxlength="80"
           aria-label="Your name (optional)"
         />
+        <input
+          id="customer-email"
+          class="o-name-input"
+          type="email"
+          name="customerEmail"
+          placeholder="Email for receipt (optional)"
+          autocomplete="email"
+          maxlength="254"
+          aria-label="Email for receipt (optional)"
+        />
         <button type="submit" class="o-place-btn" id="place-order-btn">
           Place Order →
         </button>
@@ -270,6 +287,7 @@
 <script>
   window.CAFE_TABLE_ID = "{{ table.id | e }}";
   window.CAFE_NAME     = "{{ cafe_name | e }}";
+  window.STRIPE_PUBLISHABLE_KEY = "{{ stripe_publishable_key | e }}";
 </script>
 <script src="/static/js/table.js" defer></script>
 

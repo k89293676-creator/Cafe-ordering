@@ -123,6 +123,14 @@
                   Find your Place ID at <a href="https://developers.google.com/maps/documentation/places/web-service/place-id" target="_blank" rel="noopener" style="color:var(--primary);">Google's Place ID finder</a>
                 </div>
               </div>
+              <div class="field">
+                <label>Logo URL</label>
+                <input name="logo_url" value="{{ branding.logoUrl or '' }}" placeholder="https://example.com/logo.png" maxlength="500" />
+              </div>
+              <div class="field">
+                <label>Brand Color</label>
+                <input type="color" name="brand_color" value="{{ branding.brandColor or '#4f46e5' }}" />
+              </div>
               <button class="btn btn-primary btn-full" type="submit">Save Changes</button>
             </form>
           </div>

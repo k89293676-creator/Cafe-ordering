@@ -15,3 +15,7 @@ Flask-Compress~=1.15
 Flask-SQLAlchemy~=3.1.1
 Flask-Migrate~=4.0.7
 redis~=5.2.1
+Flask-Login~=0.6.3
+Flask-Bcrypt~=1.0.1
+Flask-Mail~=0.10.0
+stripe~=11.6.0

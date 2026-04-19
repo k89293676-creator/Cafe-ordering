@@ -341,6 +341,7 @@ async function placeOrder(name) {
   const payload = {
     tableId:      TABLE_ID,
     customerName: lastName,
+    customerEmail: ($("customer-email")?.value || "").trim(),
     tip:          Math.round(tipAmt * 100) / 100,
     items: Object.entries(cart).map(([id, { qty }]) => ({ id, quantity: qty })),
   };
@@ -352,6 +353,11 @@ async function placeOrder(name) {
       body:    JSON.stringify(payload),
     });
     const data = await res.json();
+
+    if (res.ok && data.checkoutUrl) {
+      window.location.href = data.checkoutUrl;
+      return;
+    }
 
     if (res.ok && data.order) {
       currentOrderId = data.order.id;
@@ -598,6 +604,14 @@ function resetToOrdering() {
           placeholder="Your name (optional)"
           autocomplete="name"
           maxlength="80"
+        />
+        <input
+          id="customer-email"
+          class="o-name-input"
+          type="email"
+          placeholder="Email for receipt (optional)"
+          autocomplete="email"
+          maxlength="254"
         />
         <button type="submit" class="o-place-btn" id="place-order-btn">Place Order →</button>
       </form>
