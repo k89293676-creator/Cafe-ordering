@@ -2912,13 +2912,21 @@ def export_menu_csv():
 # Admin blueprint
 # ---------------------------------------------------------------------------
 
-from admin.routes import admin_bp  # noqa: E402 (after app setup)
-app.register_blueprint(admin_bp)
+try:
+    from admin.routes import admin_bp  # noqa: E402 (after app setup)
 
+    @admin_bp.context_processor
+    def _inject_now():
+        return {"now": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
 
-@admin_bp.context_processor
-def _inject_now():
-    return {"now": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
+    app.register_blueprint(admin_bp)
+    app.logger.info("Super Admin blueprint registered at /admin")
+except Exception as _admin_import_err:  # noqa: BLE001
+    app.logger.error(
+        "Failed to load admin blueprint — /admin will not be available: %s",
+        _admin_import_err,
+        exc_info=True,
+    )
 
 
 # ---------------------------------------------------------------------------
