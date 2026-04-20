@@ -49,6 +49,8 @@ The app will run at `http://127.0.0.1:8000` with PostgreSQL available in the `db
 6. In Stripe, create a webhook endpoint pointing to `https://YOUR_DOMAIN/stripe/webhook` and subscribe to `checkout.session.completed` and `payment_intent.succeeded`.
 7. Open `/owner/signup`, create an owner account, configure branding in Profile, then create tables and menu items.
 
+Railway uses `/health` as a liveness check. Use `/ready` to verify database readiness after deployment.
+
 ## Environment Variables
 
 ### Required for production

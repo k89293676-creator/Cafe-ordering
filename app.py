@@ -1247,11 +1247,17 @@ def err_server(e):
 @app.route("/health")
 @limiter.exempt
 def health_check():
+    return jsonify(status="ok", service="cafe-ordering-saas"), 200
+
+
+@app.route("/ready")
+@limiter.exempt
+def readiness_check():
     db_status = "ok"
     try:
         db.session.execute(text("SELECT 1"))
     except Exception as exc:
-        app.logger.warning("Health check database probe failed: %s", exc)
+        app.logger.warning("Readiness database probe failed: %s", exc)
         db_status = "error"
     status_code = 200 if db_status == "ok" else 503
     return jsonify(status="ok" if db_status == "ok" else "degraded",
