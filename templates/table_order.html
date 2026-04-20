@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#faf8f4" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <title>{{ table.name }} — {{ cafe_name }}</title>
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#1c1c1e" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="/static/css/order.css" />
+  <style>
+    :root { --gold: {{ branding.brandColor | default('#4f46e5') }}; --gold-border: {{ branding.brandColor | default('#4f46e5') }}33; --gold-bg: {{ branding.brandColor | default('#4f46e5') }}12; }
+  </style>
+</head>
+<body class="order-body">
+
+<!-- ═══════════════════════════════════════
+     HEADER
+     ═══════════════════════════════════════ -->
+<header class="o-header">
+  <div class="o-header__inner">
+
+    <div class="o-header__brand">
+      {% if branding.logoUrl %}
+      <img class="o-header__logo" src="{{ branding.logoUrl }}" alt="{{ cafe_name }} logo" />
+      {% else %}
+      <div class="o-header__logo" aria-hidden="true">11:11</div>
+      {% endif %}
+      <div>
+        <span class="o-header__cafe">{{ cafe_name }}</span>
+        <h1 class="o-header__table">{{ table.name }}</h1>
+      </div>
+    </div>
+
+    <button class="o-cart-btn is-empty" id="header-cart-btn" aria-label="View your order" aria-haspopup="dialog">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18M16 10a4 4 0 01-8 0"/></svg>
+      Order
+      <span class="o-cart-btn__badge" id="cart-badge">0</span>
+    </button>
+
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════
+     SEARCH + CATEGORIES
+     ═══════════════════════════════════════ -->
+<div class="o-subnav">
+  <div class="o-subnav__inner">
+
+    <div class="o-search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input
+        id="search-input"
+        class="o-search__input"
+        type="search"
+        placeholder="Search menu…"
+        autocomplete="off"
+        aria-label="Search menu items"
+      />
+    </div>
+
+    <nav class="o-cats" id="cat-nav" aria-label="Menu categories"></nav>
+
+    <div class="o-diet-filters" aria-label="Dietary filters">
+      <button class="o-cat js-diet-filter" data-filter="vegan">🌱 Vegan</button>
+      <button class="o-cat js-diet-filter" data-filter="gluten-free">🌾 GF</button>
+      <button class="o-cat js-diet-filter" data-filter="nut-free">🥜 Nut-free</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- Cart backdrop (mobile) -->
+<div class="o-backdrop" id="cart-backdrop" aria-hidden="true"></div>
+
+<!-- ═══════════════════════════════════════
+     MAIN LAYOUT
+     ═══════════════════════════════════════ -->
+<div class="o-layout">
+
+  <!-- Menu -->
+  <main class="o-menu" id="menu-panel" aria-label="Menu">
+    <div id="menu-container">
+      <div class="o-loading">
+        <div class="o-spinner" role="status" aria-label="Loading menu"></div>
+        <span>Loading menu…</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- Cart panel -->
+  <aside class="o-cart" id="cart-panel" role="complementary" aria-label="Your order">
+
+    <div class="o-drag-handle" aria-hidden="true"></div>
+
+    <div class="o-cart__head">
+      <h2 class="o-cart__title">
+        Your Order
+        <span class="o-cart__count-pill" id="cart-count-pill" style="display:none;"></span>
+      </h2>
+      <button class="o-cart__close" id="cart-close-btn" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="o-cart__body" id="cart-body">
+      <div class="o-cart__items" id="cart-items">
+        <div class="o-cart__empty">
+          <div class="o-cart__empty-icon">🛒</div>
+          <p>Nothing added yet</p>
+          <span>Browse the menu and tap + Add</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="o-cart__foot" id="cart-foot">
+      <div class="o-cart__totals">
+        <div class="o-cart__row">
+          <span>Items</span>
+          <span id="cart-item-count">0</span>
+        </div>
+        <div class="o-cart__row">
+          <span>Subtotal</span>
+          <span>₹<span id="cart-subtotal">0.00</span></span>
+        </div>
+        <div class="o-cart__row">
+          <span>Tip</span>
+          <span id="cart-tip-amount">—</span>
+        </div>
+        <div class="o-cart__row o-cart__row--total">
+          <span>Total</span>
+          <span class="o-cart__total-val">₹<span id="cart-total">0.00</span></span>
+        </div>
+      </div>
+
+      <!-- Tip selector -->
+      <div class="o-tip-selector">
+        <div class="o-tip-label">Add a tip?</div>
+        <div class="o-tip-btns">
+          <button class="o-tip-btn js-tip-btn" data-tip="0">No tip</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="10">10%</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="15">15%</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="20">20%</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="custom">Custom</button>
+        </div>
+        <input id="tip-custom-input" type="number" min="0" step="1" placeholder="Custom tip ₹" class="o-tip-custom" style="display:none;" />
+      </div>
+
+      <div class="o-cart__actions">
+        <button id="clear-cart-btn" class="o-clear-btn" type="button" aria-label="Clear cart">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+          Clear cart
+        </button>
+        <button id="save-fav-btn" class="o-clear-btn" type="button" aria-label="Save as favourite">
+          ♥ Save
+        </button>
+      </div>
+
+      <!-- Favourites -->
+      <div class="o-favourites">
+        <div class="o-fav-label">Saved Orders</div>
+        <div id="favourites-list"></div>
+      </div>
+
+      <form id="checkout-form" novalidate>
+        <input
+          id="customer-name"
+          class="o-name-input"
+          type="text"
+          name="customerName"
+          placeholder="Your name (optional)"
+          autocomplete="name"
+          maxlength="80"
+          aria-label="Your name (optional)"
+        />
+        <input
+          id="customer-email"
+          class="o-name-input"
+          type="email"
+          name="customerEmail"
+          placeholder="Email for receipt (optional)"
+          autocomplete="email"
+          maxlength="254"
+          aria-label="Email for receipt (optional)"
+        />
+        <input
+          id="customer-phone"
+          class="o-name-input"
+          type="tel"
+          name="customerPhone"
+          placeholder="Phone for reorder (optional)"
+          autocomplete="tel"
+          maxlength="30"
+          aria-label="Phone number (optional)"
+        />
+        <textarea
+          id="order-notes"
+          class="o-name-input"
+          name="notes"
+          placeholder="Special requests / notes (optional)"
+          rows="2"
+          maxlength="500"
+          style="resize:vertical;font-family:inherit;padding:.65rem 1rem;"
+          aria-label="Order notes"
+        ></textarea>
+
+        <div style="background:var(--gold-bg,#f3f4f6);border:1.5px solid var(--gold-border,#e5e7eb);border-radius:.75rem;padding:.75rem 1rem;margin-bottom:.75rem;font-size:.85rem;color:var(--gold,#4f46e5);font-weight:600;display:flex;align-items:center;gap:.5rem;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+          Pay at Counter — receive your pickup code instantly
+        </div>
+
+        <button type="submit" class="o-place-btn" id="place-order-btn">
+          Place Order →
+        </button>
+      </form>
+
+      <!-- Pickup code success screen -->
+      <div id="pickup-success" style="display:none;text-align:center;padding:1.5rem;background:var(--gold-bg,#f0fdf4);border:2px solid var(--gold,#10b981);border-radius:1rem;margin-top:1rem;">
+        <div style="font-size:2.5rem;margin-bottom:.5rem;">✅</div>
+        <h3 style="margin:0 0 .25rem;color:#065f46;">Order Placed!</h3>
+        <p style="color:#374151;font-size:.9rem;margin-bottom:1rem;">Show this code at the counter when paying.</p>
+        <div style="font-size:3rem;font-weight:900;font-family:monospace;letter-spacing:.2em;color:var(--gold,#4f46e5);background:#fff;border:2px dashed currentColor;border-radius:.75rem;padding:.5rem 1rem;margin-bottom:1rem;" id="pickup-code-display">——</div>
+        <div style="font-size:.8rem;color:#6b7280;" id="pickup-order-id"></div>
+        <div id="order-status-tracker" style="margin-top:1rem;font-size:.85rem;"></div>
+      </div>
+
+      <div id="checkout-resp" class="o-resp" role="alert" aria-live="assertive"></div>
+    </div>
+
+  </aside>
+
+</div><!-- /.o-layout -->
+
+<!-- ═══════════════════════════════════════
+     MOBILE FAB
+     ═══════════════════════════════════════ -->
+<button class="o-fab" id="cart-fab" aria-label="View your order" aria-haspopup="dialog">
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18M16 10a4 4 0 01-8 0"/></svg>
+  <span class="o-fab__badge" id="fab-badge">0</span>
+  <span>View Order</span>
+  <span class="o-fab__sep">·</span>
+  <span class="o-fab__price">₹<span id="fab-price">0.00</span></span>
+</button>
+
+<!-- ═══════════════════════════════════════
+     REVIEWS SECTION (hidden until order complete)
+     ═══════════════════════════════════════ -->
+<section class="o-reviews o-reviews--hidden" id="reviews-section" aria-label="Guest reviews">
+  <div class="o-reviews__inner">
+
+    <div class="o-reviews__head">
+      <div>
+        <h2 class="o-reviews__title">What guests say</h2>
+        <p class="o-reviews__sub">Real feedback from our customers</p>
+      </div>
+      <div id="reviews-summary"></div>
+    </div>
+
+    <div class="o-review-list" id="review-list" aria-live="polite">
+      <p style="text-align:center;color:var(--text-3);font-size:0.9rem;">Loading reviews…</p>
+    </div>
+
+    {% if google_place_id %}
+    <div style="text-align:center;margin-bottom:1.5rem;">
+      <a href="https://search.google.com/local/reviews?placeid={{ google_place_id }}"
+         target="_blank" rel="noopener noreferrer"
+         style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.625rem 1.25rem;border:1.5px solid var(--gold-border);border-radius:var(--radius-s);color:var(--gold);font-weight:600;font-size:0.875rem;text-decoration:none;background:var(--gold-bg);">
+        ★ Leave a Google Review
+      </a>
+    </div>
+    {% endif %}
+
+    <div class="o-reviews__cta">
+      <p>Enjoyed your visit?</p>
+      <button class="o-leave-review-btn" id="open-feedback-btn">Share Your Thoughts</button>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════
+     FEEDBACK MODAL
+     ═══════════════════════════════════════ -->
+<div class="o-modal-bg" id="feedback-modal-bg" role="dialog" aria-modal="true" aria-labelledby="feedback-title">
+  <div class="o-modal">
+
+    <button class="o-modal__close" id="feedback-close-btn" aria-label="Close">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+
+    <div class="o-modal__icon" aria-hidden="true">☕</div>
+    <h3 class="o-modal__title" id="feedback-title">How was your experience?</h3>
+    <p class="o-modal__sub">Your feedback helps us improve</p>
+
+    <div class="o-star-row" id="feedback-stars" role="group" aria-label="Rating">
+      <button class="o-star-btn" data-val="1" aria-label="1 star">★</button>
+      <button class="o-star-btn" data-val="2" aria-label="2 stars">★</button>
+      <button class="o-star-btn" data-val="3" aria-label="3 stars">★</button>
+      <button class="o-star-btn" data-val="4" aria-label="4 stars">★</button>
+      <button class="o-star-btn" data-val="5" aria-label="5 stars">★</button>
+    </div>
+
+    <textarea
+      id="feedback-comment"
+      class="o-modal__textarea"
+      placeholder="Tell us more (optional)…"
+      rows="3"
+      aria-label="Additional comments"
+    ></textarea>
+
+    <button class="o-modal__submit" id="feedback-submit-btn">Send Feedback</button>
+    <div id="feedback-resp" class="o-modal__resp" role="alert" aria-live="polite"></div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════
+     SCRIPTS
+     ═══════════════════════════════════════ -->
+<script>
+  window.CAFE_TABLE_ID = "{{ table.id | e }}";
+  window.CAFE_NAME     = "{{ cafe_name | e }}";
+  window.STRIPE_PUBLISHABLE_KEY = "";
+</script>
+<script src="/static/js/table.js" defer></script>
+<script>
+// ── Pickup-code checkout override ──────────────────────────────
+(function() {
+  const CSRF_META = document.querySelector('meta[name="csrf-token"]');
+  const CSRF = CSRF_META ? CSRF_META.getAttribute('content') : '';
+  const TABLE_ID = window.CAFE_TABLE_ID;
+
+  function getCart() {
+    try { return JSON.parse(localStorage.getItem('cafe_cart_' + TABLE_ID) || '[]'); } catch(e) { return []; }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('checkout-form');
+    if (!form) return;
+
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const btn = document.getElementById('place-order-btn');
+      const resp = document.getElementById('checkout-resp');
+      const items = getCart();
+
+      if (!items.length) {
+        if (resp) { resp.textContent = 'Your cart is empty.'; resp.className = 'o-resp o-resp--error'; }
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Placing order…';
+
+      const payload = {
+        tableId: TABLE_ID,
+        customerName: (form.querySelector('[name=customerName]') || {}).value || 'Guest',
+        customerEmail: (form.querySelector('[name=customerEmail]') || {}).value || '',
+        customerPhone: (form.querySelector('[name=customerPhone]') || {}).value || '',
+        notes: (form.querySelector('[name=notes]') || {}).value || '',
+        items: items,
+        tip: window._currentTip || 0,
+      };
+
+      try {
+        const r = await fetch('/api/checkout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': CSRF,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await r.json();
+
+        if (r.ok && data.pickupCode) {
+          form.style.display = 'none';
+          const successEl = document.getElementById('pickup-success');
+          if (successEl) {
+            successEl.style.display = 'block';
+            document.getElementById('pickup-code-display').textContent = data.pickupCode;
+            document.getElementById('pickup-order-id').textContent = 'Order #' + data.order.id + ' · Total: ₹' + (data.order.total || 0).toFixed(2);
+          }
+          // Clear cart
+          localStorage.removeItem('cafe_cart_' + TABLE_ID);
+          // Subscribe to order status updates
+          _subscribeOrderStatus(data.order.id);
+          // Show feedback section after delay
+          setTimeout(function() {
+            const rev = document.getElementById('reviews-section');
+            if (rev) { rev.classList.remove('o-reviews--hidden'); }
+            // Store order id for feedback
+            window._lastOrderId = data.order.id;
+          }, 4000);
+        } else {
+          if (resp) {
+            resp.textContent = data.description || 'Failed to place order.';
+            resp.className = 'o-resp o-resp--error';
+          }
+          btn.disabled = false;
+          btn.textContent = 'Place Order →';
+        }
+      } catch(err) {
+        if (resp) {
+          resp.textContent = 'Network error. Please try again.';
+          resp.className = 'o-resp o-resp--error';
+        }
+        btn.disabled = false;
+        btn.textContent = 'Place Order →';
+      }
+    });
+  });
+
+  function _subscribeOrderStatus(orderId) {
+    const tracker = document.getElementById('order-status-tracker');
+    if (!tracker || !window.EventSource) return;
+    const es = new EventSource('/api/orders/' + orderId + '/stream');
+    es.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        const statusMap = {
+          pending: '⏳ Pending',
+          confirmed: '✅ Confirmed',
+          preparing: '👨‍🍳 Being prepared',
+          ready: '🔔 Ready for pickup!',
+          completed: '✅ Completed — enjoy!',
+          cancelled: '❌ Cancelled',
+        };
+        tracker.innerHTML = '<strong>Status:</strong> ' + (statusMap[data.status] || data.status);
+        if (data.status === 'completed' || data.status === 'cancelled') {
+          es.close();
+        }
+      } catch(e) {}
+    };
+    es.onerror = function() { es.close(); };
+  }
+
+  // Patch feedback submit to include order id
+  document.addEventListener('DOMContentLoaded', function() {
+    const submitBtn = document.getElementById('feedback-submit-btn');
+    if (!submitBtn) return;
+    const origClick = submitBtn.onclick;
+    submitBtn.addEventListener('click', function() {
+      if (window._lastOrderId && !document.getElementById('feedback-order-id-hidden')) {
+        const inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.id = 'feedback-order-id-hidden';
+        inp.name = 'orderId';
+        inp.value = window._lastOrderId;
+        submitBtn.parentNode.appendChild(inp);
+      }
+    });
+  });
+})();
+</script>
+
+<script>
+// Dark mode persistence
+if (localStorage.getItem('darkMode') === '1') document.documentElement.classList.add('dark');
+
+// Register service worker for PWA
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/js/sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>

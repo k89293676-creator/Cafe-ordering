@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cafe Ordering App</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: Inter, system-ui, sans-serif;
+        background: #f8fafc;
+        color: #111827;
+      }
+      .card {
+        max-width: 680px;
+        margin: 1rem;
+        padding: 2rem;
+        border-radius: 24px;
+        background: white;
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.08);
+      }
+      h1 {
+        margin-top: 0;
+      }
+      a {
+        color: #3b82f6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Cafe Ordering App</h1>
+      <p>Owner signup, login, table management, and QR-based table ordering system.</p>
+      
+      <h2>Deployment Status</h2>
+      <p id="status">🔄 Checking deployment status...</p>
+      
+      <h2>Quick Start</h2>
+      <p>Follow the <a href="https://github.com/k89293676-creator/Cafe-ordering/blob/main/DEPLOYMENT.md">Deployment Guide</a> to deploy to Render.</p>
+      
+      <h2>How It Works</h2>
+      <ol>
+        <li>Owner signs up at <code>/owner/signup</code></li>
+        <li>Owner creates tables in the dashboard</li>
+        <li>Each table gets a unique QR code</li>
+        <li>Customers scan QR to order from their table</li>
+        <li>Orders appear in owner dashboard in real-time</li>
+      </ol>
+      
+      <h2>Key Features</h2>
+      <ul>
+        <li>Owner authentication and session management</li>
+        <li>Dynamic QR code generation per table</li>
+        <li>Table-specific ordering experience</li>
+        <li>Order status tracking (pending/completed)</li>
+        <li>Customizable menu</li>
+      </ul>
+      
+      <p><strong>Live App:</strong> <code id="live-url">Deploying...</code></p>
+    </div>
+    
+    <script>
+      // Check if app is deployed and update status
+      async function checkDeployment() {
+        try {
+          // Replace with your actual Render URL when deployed
+          const deployedUrl = localStorage.getItem('cafeAppUrl');
+          if (deployedUrl) {
+            document.getElementById('status').innerHTML = '✅ App is live!';
+            document.getElementById('live-url').textContent = deployedUrl;
+            // Create button to navigate to app
+            const btn = document.createElement('a');
+            btn.href = deployedUrl + '/owner/signup';
+            btn.className = 'btn';
+            btn.textContent = 'Go to Owner Portal';
+            btn.style.display = 'inline-block';
+            btn.style.marginTop = '1rem';
+            btn.style.padding = '0.75rem 1.5rem';
+            btn.style.background = '#3b82f6';
+            btn.style.color = 'white';
+            btn.style.textDecoration = 'none';
+            btn.style.borderRadius = '12px';
+            document.querySelector('.card').appendChild(btn);
+          } else {
+            document.getElementById('status').innerHTML = '⏳ App not yet deployed. See the deployment guide above.';
+            document.getElementById('live-url').textContent = 'Check back after deployment';
+          }
+        } catch (e) {
+          document.getElementById('status').innerHTML = '❌ Deployment status unavailable';
+        }
+      }
+      checkDeployment();
+    </script>
+  </body>
+</html>

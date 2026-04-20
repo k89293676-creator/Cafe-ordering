@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create Account — Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-logo">
+    <div class="auth-logo-wordmark">11:11</div>
+    <h1>Cafe 11:11</h1>
+    <p>Owner Management</p>
+  </div>
+
+  <div class="auth-card">
+    <h2>Create your account</h2>
+    <p class="subtitle">Set up your owner credentials</p>
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for message in messages %}
+      <div class="alert alert-error">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <form method="post" autocomplete="on">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="form-group">
+        <label for="cafe_name">Cafe Name <span style="font-weight:300;color:var(--text-muted);">(optional)</span></label>
+        <input id="cafe_name" name="cafe_name" placeholder="e.g. Cafe 11:11" autocomplete="organization" maxlength="200" />
+      </div>
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input id="username" name="username" placeholder="Letters, digits, _ - . (3–64 chars)" autocomplete="username" required />
+      </div>
+      <div class="form-group">
+        <label for="email">Email <span style="font-weight:300;color:var(--text-muted);">(optional)</span></label>
+        <input id="email" type="email" name="email" placeholder="you@example.com" autocomplete="email" />
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <div class="input-with-toggle">
+          <input id="password" type="password" name="password" placeholder="Min. 8 chars, 1 letter &amp; 1 digit" autocomplete="new-password" required minlength="8" />
+          <button type="button" class="password-toggle" aria-label="Toggle password visibility" onclick="togglePw(this,'password')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-full" type="submit" style="margin-top:0.75rem;">Create Account</button>
+    </form>
+
+    <p class="auth-footer">
+      Already have an account? <a href="{{ url_for('owner_login') }}">Sign in</a>
+    </p>
+  </div>
+</div>
+<script>
+function togglePw(btn, id) {
+  const inp = document.getElementById(id);
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+  btn.style.opacity = inp.type === 'text' ? '0.4' : '1';
+}
+</script>
+</body>
+</html>
