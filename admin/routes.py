@@ -45,7 +45,7 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         if session.get("admin_authenticated"):
             return f(*args, **kwargs)
-        key = request.args.get("key", "") or request.headers.get("X-Admin-Key", "")
+        key = request.headers.get("X-Admin-Key", "")
         if _key_valid(key):
             session["admin_authenticated"] = True
             return f(*args, **kwargs)

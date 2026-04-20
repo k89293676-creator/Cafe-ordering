@@ -19,27 +19,31 @@ Set these in the Railway project's **Variables** tab:
 | Variable | Required | Notes |
 |---|---|---|
 | `SECRET_KEY` | ✅ | Long random string for session/CSRF |
-| `SUPERADMIN_USERNAME` | ✅ | Superadmin login username |
-| `SUPERADMIN_PASSWORD` | ✅ | Superadmin login password |
-| `DATABASE_URL` | Optional | SQLite used by default; set for Postgres |
-| `IS_PRODUCTION` | Optional | Set to `true` to enable production mode |
+| `SUPERADMIN_USERNAME` | Optional | Superadmin login username, defaults to `superadmin` |
+| `SUPERADMIN_PASSWORD` | Optional | When set, creates or promotes the superadmin account |
+| `DATABASE_URL` | ✅ | Railway Postgres connection string; required in production for durable data |
+| `REDIS_URL` | Recommended | Shared rate-limit storage; in-memory storage is only for single-process deployments |
+| `IS_PRODUCTION` | Optional | Railway is detected automatically, but `true` is acceptable |
 
 ## 3. Start command (auto-configured via railway.json)
 
 ```bash
-FLASK_APP=app flask db upgrade && gunicorn app:app --bind 0.0.0.0:$PORT --worker-class gevent --workers 1 --threads 4
+python start.py
 ```
 
-- Migrations run automatically before the server starts.
+- The app initializes tables and additive upgrade columns on startup.
+- Production startup fails fast without `DATABASE_URL` so orders are not accidentally stored on Railway's ephemeral filesystem.
+- `start.py` reads Railway's `PORT` environment variable directly, avoiding shell-specific parsing issues.
 - Health check is at `/health`.
 
 ## 4. First-time setup
 
-1. Log in at `/superadmin` with the `SUPERADMIN_USERNAME` / `SUPERADMIN_PASSWORD` you set.
-2. Create one or more Cafe / Owner accounts from the superadmin dashboard.
-3. Log in as an Owner at `/owner/login`.
-4. Add menu items, tables, and ingredients.
-5. Share the table QR codes with customers.
+1. Add a Railway PostgreSQL service and confirm `DATABASE_URL` is present in the app service variables.
+2. Set `ADMIN_SECRET_KEY` for `/admin/login`.
+3. Optionally set `SUPERADMIN_USERNAME` and `SUPERADMIN_PASSWORD` before first boot to create a superadmin owner.
+4. Log in as an Owner at `/owner/login`, or create an owner at `/owner/signup`.
+5. Add menu items, tables, and ingredients.
+6. Share the table QR codes with customers.
 
 ## 5. Feature overview
 

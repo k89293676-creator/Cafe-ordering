@@ -2,7 +2,6 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    FLASK_APP=app \
     PORT=8000
 
 WORKDIR /app
@@ -18,4 +17,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD flask db upgrade && gunicorn --bind 0.0.0.0:${PORT} --worker-class gevent --workers 1 --threads 4 app:app
+CMD ["python", "start.py"]

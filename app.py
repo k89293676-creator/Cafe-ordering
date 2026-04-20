@@ -11,6 +11,7 @@ import random
 import re
 import secrets
 import string
+import sys
 import tempfile
 import threading
 from logging.handlers import RotatingFileHandler
@@ -18,6 +19,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
 import portalocker
 import pyotp
@@ -86,6 +88,14 @@ _raw_db_url = os.environ.get("DATABASE_URL", "")
 if _raw_db_url.startswith("postgres://"):
     _raw_db_url = _raw_db_url.replace("postgres://", "postgresql://", 1)
 
+_allow_sqlite_in_production = os.environ.get("ALLOW_SQLITE_IN_PRODUCTION", "").lower() in {"1", "true", "yes", "on"}
+if IS_PRODUCTION and not _raw_db_url and not _allow_sqlite_in_production:
+    raise RuntimeError(
+        "DATABASE_URL is required in production for durable data persistence. "
+        "Attach a Railway PostgreSQL database or explicitly set "
+        "ALLOW_SQLITE_IN_PRODUCTION=true for temporary testing only."
+    )
+
 _secret_key = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET")
 if _secret_key:
     app.secret_key = _secret_key
@@ -110,8 +120,8 @@ app.config.update(
     MAIL_SERVER=os.environ.get("MAIL_SERVER", "smtp.sendgrid.net"),
     MAIL_PORT=int(os.environ.get("MAIL_PORT", "587")),
     MAIL_USE_TLS=os.environ.get("MAIL_USE_TLS", "true").lower() in {"1", "true", "yes", "on"},
-    MAIL_USERNAME=os.environ.get("MAIL_USERNAME"),
-    MAIL_PASSWORD=os.environ.get("MAIL_PASSWORD"),
+    MAIL_USERNAME=os.environ.get("MAIL_USERNAME") or ("apikey" if os.environ.get("SENDGRID_API_KEY") else None),
+    MAIL_PASSWORD=os.environ.get("MAIL_PASSWORD") or os.environ.get("SENDGRID_API_KEY"),
     MAIL_DEFAULT_SENDER=os.environ.get("MAIL_DEFAULT_SENDER"),
 )
 
@@ -131,13 +141,14 @@ class JsonFormatter(logging.Formatter):
 
 def configure_logging() -> None:
     level = logging.INFO if IS_PRODUCTION else logging.DEBUG
-    if IS_PRODUCTION:
-        log_path = Path(os.environ.get("LOG_FILE", DATA_DIR / "logs" / "app.log"))
+    log_file = os.environ.get("LOG_FILE")
+    if IS_PRODUCTION and log_file:
+        log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(log_path, maxBytes=10 * 1024 * 1024, backupCount=5)
         handler.setFormatter(JsonFormatter())
     else:
-        handler = logging.StreamHandler()
+        handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
     root = logging.getLogger()
     root.handlers.clear()
@@ -187,9 +198,24 @@ if IS_PRODUCTION:
             strict_transport_security_include_subdomains=True,
             session_cookie_secure=IS_PRODUCTION,
             content_security_policy=_csp,
+            permissions_policy={
+                "geolocation": "()",
+                "camera": "()",
+                "microphone": "()",
+                "payment": "()",
+                "usb": "()",
+            },
         )
     except TypeError:
-        pass
+        Talisman(
+            app,
+            force_https=False,
+            strict_transport_security=IS_PRODUCTION,
+            strict_transport_security_max_age=31536000,
+            strict_transport_security_include_subdomains=True,
+            session_cookie_secure=IS_PRODUCTION,
+            content_security_policy=_csp,
+        )
 
 db = SQLAlchemy()
 migrate = Migrate()
@@ -1160,6 +1186,16 @@ def _wants_json() -> bool:
     return best == "application/json"
 
 
+def _safe_redirect_target(target: str | None, fallback: str) -> str:
+    if not target:
+        return fallback
+    host_url = urlparse(request.host_url)
+    test_url = urlparse(urljoin(request.host_url, target))
+    if test_url.scheme in {"http", "https"} and test_url.netloc == host_url.netloc:
+        return target
+    return fallback
+
+
 @app.errorhandler(400)
 def err_bad_request(e):
     if _wants_json():
@@ -1185,7 +1221,7 @@ def err_not_found(e):
 def err_csrf(e):
     log_security("CSRF_VIOLATION", f"path={request.path}")
     flash("Your session has expired. Please try again.")
-    return redirect(request.referrer or url_for("home")), 302
+    return redirect(_safe_redirect_target(request.referrer, url_for("home"))), 302
 
 
 @app.errorhandler(429)
@@ -1215,7 +1251,8 @@ def health_check():
     try:
         db.session.execute(text("SELECT 1"))
     except Exception as exc:
-        db_status = f"error: {exc}"
+        app.logger.warning("Health check database probe failed: %s", exc)
+        db_status = "error"
     status_code = 200 if db_status == "ok" else 503
     return jsonify(status="ok" if db_status == "ok" else "degraded",
                    service="cafe-ordering-saas",
@@ -2312,7 +2349,7 @@ def update_order_status(order_id: int) -> Response:
     _db_update_order_status(order_id, new_status)
     _notify_owner(owner_id, "order_updated", {"id": order_id, "status": new_status})
     _notify_order_status(order_id, new_status)
-    return redirect(request.referrer or url_for("owner_dashboard") + "#orders")
+    return redirect(_safe_redirect_target(request.referrer, url_for("owner_dashboard") + "#orders"))
 
 
 @app.route("/owner/order/<int:order_id>/complete", methods=["POST"])
@@ -2939,3 +2976,9 @@ def _make_superadmin_if_missing() -> None:
 with app.app_context():
     _init_db()
     _make_superadmin_if_missing()
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "5000"))
+    debug = os.environ.get("FLASK_ENV") == "development"
+    app.run(host="0.0.0.0", port=port, debug=debug)
