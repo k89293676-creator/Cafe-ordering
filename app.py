@@ -89,12 +89,7 @@ if _raw_db_url.startswith("postgres://"):
     _raw_db_url = _raw_db_url.replace("postgres://", "postgresql://", 1)
 
 _allow_sqlite_in_production = os.environ.get("ALLOW_SQLITE_IN_PRODUCTION", "").lower() in {"1", "true", "yes", "on"}
-if IS_PRODUCTION and not _raw_db_url and not _allow_sqlite_in_production:
-    raise RuntimeError(
-        "DATABASE_URL is required in production for durable data persistence. "
-        "Attach a Railway PostgreSQL database or explicitly set "
-        "ALLOW_SQLITE_IN_PRODUCTION=true for temporary testing only."
-    )
+_using_ephemeral_production_sqlite = IS_PRODUCTION and not _raw_db_url and not _allow_sqlite_in_production
 
 _secret_key = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET")
 if _secret_key:
@@ -354,9 +349,19 @@ USE_DB = True
 db.init_app(app)
 migrate.init_app(app, db)
 
+_DB_READY = False
+_DB_INIT_ERROR = "Database has not been initialized yet."
+_DB_INIT_LAST_ATTEMPT = 0.0
+_DB_INIT_LOCK = threading.Lock()
+
 
 def _init_db() -> None:
     with app.app_context():
+        if _using_ephemeral_production_sqlite:
+            app.logger.error(
+                "DATABASE_URL is not set in production. Running with SQLite fallback; "
+                "data may be lost on Railway redeploys. Attach Railway PostgreSQL for durable persistence."
+            )
         db.create_all()
         inspector = inspect(db.engine)
 
@@ -383,6 +388,32 @@ def _init_db() -> None:
         add_column_if_missing("feedback", "cafe_id INTEGER", "cafe_id")
         _seed_sqlalchemy_from_json()
     app.logger.info("DB schema ready: %s", app.config["SQLALCHEMY_DATABASE_URI"])
+
+
+def _initialize_runtime_state(force: bool = False) -> bool:
+    global _DB_READY, _DB_INIT_ERROR, _DB_INIT_LAST_ATTEMPT
+    if _DB_READY:
+        return True
+    now = time.monotonic()
+    if not force and now - _DB_INIT_LAST_ATTEMPT < 5:
+        return False
+    with _DB_INIT_LOCK:
+        if _DB_READY:
+            return True
+        now = time.monotonic()
+        if not force and now - _DB_INIT_LAST_ATTEMPT < 5:
+            return False
+        _DB_INIT_LAST_ATTEMPT = now
+        try:
+            _init_db()
+            _make_superadmin_if_missing()
+            _DB_READY = True
+            _DB_INIT_ERROR = ""
+            return True
+        except Exception as exc:
+            _DB_INIT_ERROR = str(exc)
+            app.logger.exception("Database initialization failed; app will keep serving /health and retry.")
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -1253,6 +1284,11 @@ def health_check():
 @app.route("/ready")
 @limiter.exempt
 def readiness_check():
+    if not _initialize_runtime_state(force=True):
+        return jsonify(status="degraded",
+                       service="cafe-ordering-saas",
+                       db="error",
+                       db_error=_DB_INIT_ERROR), 503
     db_status = "ok"
     try:
         db.session.execute(text("SELECT 1"))
@@ -1305,6 +1341,18 @@ def table_order(table_id: str) -> str:
 # ---------------------------------------------------------------------------
 # Auth routes
 # ---------------------------------------------------------------------------
+
+@app.before_request
+def _ensure_runtime_ready():
+    if request.endpoint in {"health_check", "readiness_check", "static"}:
+        return None
+    if _initialize_runtime_state():
+        return None
+    message = "Service is starting. Database is not ready yet."
+    if _wants_json():
+        return jsonify(status="starting", description=message, db_error=_DB_INIT_ERROR), 503
+    return message, 503
+
 
 @app.before_request
 def _auto_login_from_token() -> None:
@@ -2979,9 +3027,10 @@ def _make_superadmin_if_missing() -> None:
         app.logger.info("Superadmin '%s' created.", sa_user)
 
 
-with app.app_context():
-    _init_db()
-    _make_superadmin_if_missing()
+if not IS_PRODUCTION:
+    _initialize_runtime_state(force=True)
+else:
+    app.logger.info("Deferring database initialization until first non-health request.")
 
 
 if __name__ == "__main__":
