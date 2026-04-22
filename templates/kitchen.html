@@ -131,15 +131,23 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
   const CSRF = '{{ csrf_token() }}';
+
+  // ── Status progression map ──────────────────────────────────────────────
   const STATUS_FLOW = {
-    pending:    { next: 'confirmed',  cls: 'btn-outline-primary',  label: 'Confirm'    },
-    confirmed:  { next: 'preparing',  cls: 'btn-outline-warning',  label: 'Start prep' },
-    preparing:  { next: 'ready',      cls: 'btn-outline-success',  label: 'Mark ready' },
-    ready:      { next: 'completed',  cls: 'btn-success',          label: 'Complete'   },
+    pending:   { next: 'confirmed', cls: 'btn-outline-primary',  label: 'Confirm'    },
+    confirmed: { next: 'preparing', cls: 'btn-outline-warning',  label: 'Start prep' },
+    preparing: { next: 'ready',     cls: 'btn-outline-success',  label: 'Mark ready' },
+    ready:     { next: 'completed', cls: 'btn-success',          label: 'Complete'   },
   };
-  let lastIds = new Set({{ orders|map(attribute='id')|list|tojson if orders else '[]' }});
-  let firstLoad = true;
-  let soundOn = localStorage.getItem('kitchen-sound') !== '0';
+
+  // ── State ───────────────────────────────────────────────────────────────
+  let lastIds    = new Set({{ orders|map(attribute='id')|list|tojson if orders else '[]' }});
+  let firstLoad  = true;
+  let soundOn    = localStorage.getItem('kitchen-sound') !== '0';
+  let ageTick    = null;   // interval that ticks age badges every second
+  let ageBase    = {};     // orderId → { base: ageSeconds, at: Date.now() }
+
+  // ── Sound toggle ─────────────────────────────────────────────────────────
   const soundBtn = document.getElementById('sound-btn');
   function refreshSoundBtn() {
     soundBtn.classList.toggle('muted', !soundOn);
@@ -150,43 +158,40 @@
     soundOn = !soundOn;
     localStorage.setItem('kitchen-sound', soundOn ? '1' : '0');
     refreshSoundBtn();
-    if (soundOn) chime(); // confirm
+    if (soundOn) chime();
   });
 
+  // ── Audio chime ──────────────────────────────────────────────────────────
   let audioCtx = null;
   function chime() {
     if (!soundOn) return;
     try {
       audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
-      const o = audioCtx.createOscillator();
-      const g = audioCtx.createGain();
-      o.connect(g); g.connect(audioCtx.destination);
-      o.type = 'sine'; o.frequency.value = 880;
-      g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.5);
-      o.start(); o.stop(audioCtx.currentTime + 0.55);
-      setTimeout(() => {
-        const o2 = audioCtx.createOscillator(); const g2 = audioCtx.createGain();
-        o2.connect(g2); g2.connect(audioCtx.destination);
-        o2.type = 'sine'; o2.frequency.value = 1175;
-        g2.gain.setValueAtTime(0.0001, audioCtx.currentTime);
-        g2.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime + 0.02);
-        g2.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.5);
-        o2.start(); o2.stop(audioCtx.currentTime + 0.55);
-      }, 250);
-    } catch (e) { /* ignore */ }
+      [[880, 0], [1175, 250]].forEach(([freq, delay]) => {
+        setTimeout(() => {
+          const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+          o.connect(g); g.connect(audioCtx.destination);
+          o.type = 'sine'; o.frequency.value = freq;
+          g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+          g.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.5);
+          o.start(); o.stop(audioCtx.currentTime + 0.55);
+        }, delay);
+      });
+    } catch (_) { /* audio not available */ }
   }
 
+  // ── Time helpers ─────────────────────────────────────────────────────────
   function fmtAge(s) {
+    s = Math.max(0, Math.round(s));
     const m = Math.floor(s / 60), sec = s % 60;
-    if (m < 1) return sec + 's';
-    if (m < 60) return m + 'm ' + (sec ? sec + 's' : '');
-    const h = Math.floor(m / 60); return h + 'h ' + (m % 60) + 'm';
+    if (m < 1)  return sec + 's';
+    if (m < 60) return m + 'm' + (sec ? ' ' + sec + 's' : '');
+    return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
   }
-  function ageClass(s) {
-    if (s > 900) return 'late';      // > 15 min
-    if (s > 480) return 'urgent';    // > 8 min
+  function ageCardClass(s) {
+    if (s > 900) return 'late';
+    if (s > 480) return 'urgent';
     return '';
   }
   function ageBadgeClass(s) {
@@ -195,33 +200,69 @@
     return '';
   }
 
+  // ── HTML helpers ─────────────────────────────────────────────────────────
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+      ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  }
+
+  // Buttons use data-oid + data-status — wired via event delegation, no form POST.
   function actionsHTML(order) {
+    const parts = [];
     const flow = STATUS_FLOW[order.status];
-    const buttons = [];
     if (flow) {
-      buttons.push(`
-        <form method="post" action="/owner/order/${order.id}/status" class="d-inline">
-          <input type="hidden" name="csrf_token" value="${CSRF}"/>
-          <input type="hidden" name="status" value="${flow.next}"/>
-          <button class="btn btn-sm ${flow.cls} btn-stage">${flow.label} →</button>
-        </form>`);
+      parts.push(
+        `<button class="btn btn-sm ${flow.cls} btn-stage" ` +
+        `data-oid="${order.id}" data-status="${flow.next}">${flow.label} →</button>`
+      );
     }
-    buttons.push(`
-      <form method="post" action="/owner/order/${order.id}/status" class="d-inline" onsubmit="return confirm('Cancel order #${order.id}?')">
-        <input type="hidden" name="csrf_token" value="${CSRF}"/>
-        <input type="hidden" name="status" value="cancelled"/>
-        <button class="btn btn-sm btn-outline-danger btn-stage"><i class="bi bi-x"></i></button>
-      </form>`);
-    return buttons.join('');
+    if (order.status !== 'completed' && order.status !== 'cancelled') {
+      parts.push(
+        `<button class="btn btn-sm btn-outline-danger btn-stage" ` +
+        `data-oid="${order.id}" data-status="cancelled" ` +
+        `data-confirm="Cancel order #${order.id}?"><i class="bi bi-x"></i></button>`
+      );
+    }
+    return parts.join('');
   }
 
-  function escapeHTML(s) {
-    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
+  // ── Event delegation for AJAX status updates ─────────────────────────────
+  document.getElementById('orders-grid').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-oid][data-status]');
+    if (!btn) return;
+    if (btn.dataset.confirm && !confirm(btn.dataset.confirm)) return;
 
+    const orderId = btn.dataset.oid;
+    const status  = btn.dataset.status;
+
+    // Visual feedback while in-flight
+    btn.disabled = true;
+    const original = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    try {
+      const r = await fetch(`/api/kitchen/orders/${orderId}/status`, {
+        method:      'POST',
+        credentials: 'same-origin',
+        headers:     { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+        body:        JSON.stringify({ status }),
+      });
+      if (!r.ok) throw new Error(r.status);
+      // Refresh the grid with up-to-date data from server
+      await loadOrders(true);
+    } catch (_) {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      alert('Could not update status — please try again.');
+    }
+  });
+
+  // ── Render orders grid ───────────────────────────────────────────────────
   function renderOrders(orders) {
     const grid = document.getElementById('orders-grid');
+
     if (!orders.length) {
+      if (ageTick) { clearInterval(ageTick); ageTick = null; }
       grid.innerHTML = `
         <div class="col-12">
           <div class="text-center py-5">
@@ -235,52 +276,66 @@
       const tpl = document.getElementById('card-template');
       orders.forEach(o => {
         const node = tpl.content.cloneNode(true);
+        const col  = node.querySelector('.col-md-6');
         const card = node.querySelector('.kitchen-card');
-        node.querySelector('.col-md-6').dataset.orderId = o.id;
-        card.classList.add(ageClass(o.ageSeconds));
+
+        col.dataset.orderId = o.id;
+        const ac = ageCardClass(o.ageSeconds);
+        if (ac) card.classList.add(ac);
+
         node.querySelector('.card-title').textContent = `#${o.id} — ${o.tableName || '—'}`;
         node.querySelector('.card-customer').textContent = o.customerName || 'Guest';
+
         if (o.pickupCode) {
           node.querySelector('.card-pickup').innerHTML =
-            `<span class="badge bg-warning text-dark">Pickup: ${escapeHTML(o.pickupCode)}</span>`;
+            `<span class="badge bg-warning text-dark fw-bold fs-6">📦 ${esc(o.pickupCode)}</span>`;
         }
+
         const sb = node.querySelector('.card-status');
         sb.classList.add('status-' + o.status);
         sb.textContent = o.status.toUpperCase();
+
         const ab = node.querySelector('.card-age');
-        ab.classList.add(ageBadgeClass(o.ageSeconds));
+        const bc = ageBadgeClass(o.ageSeconds);
+        if (bc) ab.classList.add(bc);
         node.querySelector('.card-age-text').textContent = fmtAge(o.ageSeconds);
+
         const itemsHtml = (o.items || []).map(it => `
           <div class="order-item-row d-flex justify-content-between">
-            <span class="fw-bold text-white">${it.quantity}× ${escapeHTML(it.name)}</span>
+            <span class="fw-bold text-white">${it.quantity}× ${esc(it.name)}</span>
             <span class="text-muted small">₹${Number(it.lineTotal || 0).toFixed(0)}</span>
           </div>
-          ${it.size ? `<div class="text-muted small ps-2">Size: ${escapeHTML(it.size)}</div>` : ''}
-          ${it.notes ? `<div class="text-warning small ps-2">📝 ${escapeHTML(it.notes)}</div>` : ''}
-          ${(it.modifiers && it.modifiers.length) ? `<div class="text-muted small ps-2">${it.modifiers.map(m => escapeHTML(m.name)).join(', ')}</div>` : ''}
+          ${it.size   ? `<div class="text-muted small ps-2">Size: ${esc(it.size)}</div>` : ''}
+          ${it.notes  ? `<div class="text-warning small ps-2">📝 ${esc(it.notes)}</div>` : ''}
+          ${(it.modifiers && it.modifiers.length)
+            ? `<div class="text-muted small ps-2">${it.modifiers.map(m => esc(m.name)).join(', ')}</div>`
+            : ''}
         `).join('');
         node.querySelector('.card-items').innerHTML = itemsHtml;
+
         if (o.notes) {
           node.querySelector('.card-notes').innerHTML =
-            `<div class="alert alert-warning py-1 px-2 small mb-2"><i class="bi bi-chat-left-text me-1"></i>${escapeHTML(o.notes)}</div>`;
+            `<div class="alert alert-warning py-1 px-2 small mb-2">` +
+            `<i class="bi bi-chat-left-text me-1"></i>${esc(o.notes)}</div>`;
         }
+
         node.querySelector('.card-actions').innerHTML = actionsHTML(o);
-        node.querySelector('.card-time').textContent = (o.createdAt || '').slice(11, 16) || '—';
+        node.querySelector('.card-time').textContent  = (o.createdAt || '').slice(11, 16) || '—';
         node.querySelector('.card-total').textContent = '₹' + Number(o.total || 0).toFixed(0);
         grid.appendChild(node);
       });
     }
 
-    // Stats
-    const counts = { pending:0, confirmed:0, preparing:0, ready:0 };
-    orders.forEach(o => { if (counts[o.status] !== undefined) counts[o.status]++; });
+    // ── Topbar stats ──────────────────────────────────────────────────────
+    const counts = { pending: 0, confirmed: 0, preparing: 0, ready: 0 };
+    orders.forEach(o => { if (o.status in counts) counts[o.status]++; });
     document.getElementById('stat-active').textContent    = orders.length;
     document.getElementById('stat-pending').textContent   = counts.pending;
     document.getElementById('stat-preparing').textContent = counts.preparing;
     document.getElementById('stat-ready').textContent     = counts.ready;
     document.title = (orders.length ? `(${orders.length}) ` : '') + 'Kitchen — Cafe 11:11';
 
-    // Detect new orders & flash + chime
+    // ── New order detection → chime + flash ───────────────────────────────
     const currentIds = new Set(orders.map(o => o.id));
     if (!firstLoad) {
       const newIds = [...currentIds].filter(id => !lastIds.has(id));
@@ -288,37 +343,77 @@
         chime();
         newIds.forEach(id => {
           const card = grid.querySelector(`[data-order-id="${id}"] .kitchen-card`);
-          if (card) card.classList.add('flash');
+          if (card) { card.classList.add('flash'); }
         });
       }
     }
-    lastIds = currentIds;
+    lastIds   = currentIds;
     firstLoad = false;
+
+    // ── Start live age ticker ─────────────────────────────────────────────
+    startAgeTick(orders);
   }
 
+  // ── Live age ticker — updates every second between polls ─────────────────
+  function startAgeTick(orders) {
+    if (ageTick) clearInterval(ageTick);
+    ageBase = {};
+    const now = Date.now();
+    orders.forEach(o => { ageBase[o.id] = { base: o.ageSeconds, at: now }; });
+
+    ageTick = setInterval(() => {
+      const grid = document.getElementById('orders-grid');
+      Object.entries(ageBase).forEach(([id, rec]) => {
+        const col = grid.querySelector(`[data-order-id="${id}"]`);
+        if (!col) return;
+        const elapsed = Math.floor((Date.now() - rec.at) / 1000);
+        const age     = rec.base + elapsed;
+
+        const ageTextEl = col.querySelector('.card-age-text');
+        if (ageTextEl) ageTextEl.textContent = fmtAge(age);
+
+        const agePill = col.querySelector('.card-age');
+        if (agePill) {
+          agePill.classList.remove('warn', 'bad');
+          const bc = ageBadgeClass(age);
+          if (bc) agePill.classList.add(bc);
+        }
+
+        const card = col.querySelector('.kitchen-card');
+        if (card) {
+          card.classList.remove('urgent', 'late');
+          const cc = ageCardClass(age);
+          if (cc) card.classList.add(cc);
+        }
+      });
+    }, 1000);
+  }
+
+  // ── Connection indicator ─────────────────────────────────────────────────
   function setConn(ok) {
     document.getElementById('conn-dot').classList.toggle('off', !ok);
     document.getElementById('conn-label').textContent = ok ? 'Live' : 'Offline';
   }
 
+  // ── Main data fetch ──────────────────────────────────────────────────────
   async function loadOrders(force = false) {
-    if (!force && document.hidden) return; // skip when tab inactive
+    if (!force && document.hidden) return;
     try {
       const r = await fetch('/api/kitchen/orders', { credentials: 'same-origin' });
       if (!r.ok) throw new Error(r.status);
       const data = await r.json();
       renderOrders(data.orders || []);
       setConn(true);
-    } catch (e) {
+    } catch (_) {
       setConn(false);
     }
   }
 
-  // Initial load to upgrade server-rendered cards with full interactivity
+  // Initial load — replaces server-rendered skeleton with fully interactive cards
   loadOrders(true);
-  // Poll every 10s
+  // Poll every 10 s
   setInterval(loadOrders, 10000);
-  // Refresh immediately when tab becomes visible
+  // Re-fetch immediately when the browser tab becomes active again
   document.addEventListener('visibilitychange', () => { if (!document.hidden) loadOrders(true); });
 </script>
 </body>

@@ -2082,6 +2082,30 @@ def kitchen_orders_json():
     return jsonify(orders=payload, fetchedAt=_iso(now_ts))
 
 
+@app.route("/api/kitchen/orders/<int:order_id>/status", methods=["POST"])
+@login_required
+def kitchen_update_order_status(order_id: int):
+    """JSON endpoint so the kitchen view can advance order status without a full page reload."""
+    owner_id = logged_in_owner_id()
+    payload = request.get_json(silent=True) or {}
+    new_status = str(payload.get("status", "")).strip()[:32]
+    allowed = {"pending", "confirmed", "preparing", "ready", "completed", "cancelled"}
+    if new_status not in allowed:
+        return jsonify(error="Invalid status"), 400
+    order = _db_get_order(order_id)
+    if not order:
+        return jsonify(error="Order not found"), 404
+    if order.get("ownerId") != owner_id:
+        abort(403)
+    prev_status = order.get("status", "pending")
+    _db_update_order_status(order_id, new_status)
+    if new_status == "cancelled" and prev_status != "cancelled":
+        _restore_inventory(order)
+    _notify_owner(owner_id, "order_updated", {"id": order_id, "status": new_status})
+    _notify_order_status(order_id, new_status)
+    return jsonify(ok=True, orderId=order_id, status=new_status)
+
+
 # ---------------------------------------------------------------------------
 # CSV Export
 # ---------------------------------------------------------------------------
@@ -2666,6 +2690,26 @@ def delete_order(order_id: int) -> Response:
 # Analytics
 # ---------------------------------------------------------------------------
 
+@app.route("/api/owner/analytics/day-orders")
+@login_required
+def analytics_day_orders():
+    """Return a JSON list of orders for a given date (YYYY-MM-DD) for chart drill-down."""
+    owner_id = logged_in_owner_id()
+    date_str = (request.args.get("date") or "").strip()[:10]
+    try:
+        day = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return jsonify(error="Invalid date, expected YYYY-MM-DD"), 400
+    day_end = day.replace(hour=23, minute=59, second=59)
+    orders = (Order.query
+              .filter(Order.owner_id == owner_id,
+                      Order.created_at >= day,
+                      Order.created_at <= day_end)
+              .order_by(Order.created_at.asc())
+              .all())
+    return jsonify(date=date_str, orders=[_order_dict(o) for o in orders])
+
+
 @app.route("/owner/analytics")
 @login_required
 def owner_analytics():
@@ -2736,8 +2780,8 @@ def owner_analytics():
         "avgOrderValue": avg_order_value,
         "avgRating": avg_rating,
         "feedbackCount": len(feedback_list),
-        "revenueByDay": [{"date": d[5:], "revenue": round(v, 2)} for d, v in rev_by_day.items()],
-        "ordersByDay": [{"date": d[5:], "count": c} for d, c in ord_by_day.items()],
+        "revenueByDay": [{"date": d[5:], "fullDate": d, "revenue": round(v, 2)} for d, v in rev_by_day.items()],
+        "ordersByDay": [{"date": d[5:], "fullDate": d, "count": c} for d, c in ord_by_day.items()],
         "topItems": [
             {"name": n, "count": c, "revenue": round(item_revenue.get(n, 0.0), 2)}
             for n, c in top_items_pairs

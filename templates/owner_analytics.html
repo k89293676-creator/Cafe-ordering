@@ -34,6 +34,9 @@
     .quick-actions { display:flex; gap:.5rem; flex-wrap:wrap; }
     .quick-actions a { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:.5rem .85rem; font-size:.85rem; font-weight:600; color:#0f172a; text-decoration:none; display:inline-flex; align-items:center; gap:.4rem; }
     .quick-actions a:hover { border-color:#4f46e5; color:#4f46e5; }
+    .chart-card[data-drillable] { cursor: pointer; }
+    .chart-card[data-drillable] h3::after { content: ' ↗'; font-size:.7em; opacity:.4; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -134,7 +137,7 @@
 
     <!-- Charts -->
     <div class="analytics-grid">
-      <div class="chart-card">
+      <div class="chart-card" data-drillable>
         <h3>Daily Revenue (Last 30 Days)</h3>
         <div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
       </div>
@@ -142,7 +145,7 @@
         <h3>Top 5 Items (by quantity)</h3>
         <div class="chart-wrap"><canvas id="topItemsChart"></canvas></div>
       </div>
-      <div class="chart-card">
+      <div class="chart-card" data-drillable>
         <h3>Orders per Day (Last 30 Days)</h3>
         <div class="chart-wrap"><canvas id="ordersChart"></canvas></div>
       </div>
@@ -166,16 +169,25 @@ new Chart(document.getElementById('revenueChart'), {
       label: 'Revenue (₹)',
       data: A.revenueByDay.map(d => d.revenue),
       backgroundColor: 'rgba(79,70,229,.85)',
+      hoverBackgroundColor: 'rgba(79,70,229,1)',
       borderRadius: 4,
     }]
   },
   options: {
     responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
+    plugins: { legend: { display: false },
+               tooltip: { callbacks: { footer: () => 'Click to see orders' } } },
     scales: {
       x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 10 } } },
       y: { beginAtZero: true, ticks: { callback: v => '₹' + v } }
-    }
+    },
+    onClick(evt, elements) {
+      if (!elements.length) return;
+      openDayDrillDown(revFullDates[elements[0].index]);
+    },
+    onHover(evt, elements) {
+      evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+    },
   }
 });
 
@@ -207,16 +219,26 @@ new Chart(document.getElementById('ordersChart'), {
       backgroundColor: 'rgba(16,185,129,.18)',
       fill: true,
       tension: 0.3,
-      pointRadius: 2,
+      pointRadius: 5,
+      pointHoverRadius: 8,
+      pointBackgroundColor: '#10b981',
     }]
   },
   options: {
     responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
+    plugins: { legend: { display: false },
+               tooltip: { callbacks: { footer: () => 'Click to see orders' } } },
     scales: {
       x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 10 } } },
       y: { beginAtZero: true, ticks: { precision: 0 } }
-    }
+    },
+    onClick(evt, elements) {
+      if (!elements.length) return;
+      openDayDrillDown(ordFullDates[elements[0].index]);
+    },
+    onHover(evt, elements) {
+      evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+    },
   }
 });
 
@@ -241,7 +263,63 @@ new Chart(document.getElementById('peakHoursChart'), {
   }
 });
 
-// Date-range presets
+// ── Full dates for drill-down ───────────────────────────────────────────────
+const revFullDates = A.revenueByDay.map(d => d.fullDate);
+const ordFullDates = A.ordersByDay.map(d => d.fullDate);
+
+// ── Drill-down helpers ──────────────────────────────────────────────────────
+const STATUS_LABEL = {pending:'Pending', confirmed:'Confirmed', preparing:'Preparing',
+                      ready:'Ready', completed:'Completed', cancelled:'Cancelled'};
+const STATUS_COLOR = {pending:'#f59e0b', confirmed:'#3b82f6', preparing:'#f59e0b',
+                      ready:'#10b981', completed:'#4f46e5', cancelled:'#ef4444'};
+
+async function openDayDrillDown(date) {
+  if (!date) return;
+  const modal = document.getElementById('drillModal');
+  const title = document.getElementById('drillTitle');
+  const body  = document.getElementById('drillBody');
+  title.textContent = 'Orders for ' + date;
+  body.innerHTML = '<div style="text-align:center;padding:2rem;"><div style="width:36px;height:36px;border:4px solid #e5e7eb;border-top-color:#4f46e5;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto;"></div></div>';
+  modal.style.display = 'flex';
+
+  try {
+    const r = await fetch('/api/owner/analytics/day-orders?date=' + date, {credentials:'same-origin'});
+    if (!r.ok) throw new Error(r.status);
+    const data = await r.json();
+    const orders = data.orders || [];
+    if (!orders.length) {
+      body.innerHTML = '<p class="text-center text-muted py-3">No orders on this day.</p>';
+      return;
+    }
+    body.innerHTML = orders.map(o => {
+      const items = (o.items || []).map(i => `<span class="badge bg-light text-dark border me-1">${i.quantity}× ${esc(i.name)}</span>`).join('');
+      const sc = STATUS_COLOR[o.status] || '#6b7280';
+      const sl = STATUS_LABEL[o.status] || o.status;
+      return `<div style="border:1px solid #e5e7eb;border-radius:10px;padding:.75rem 1rem;margin-bottom:.65rem;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;flex-wrap:wrap;">
+          <strong>#${o.id} — ${esc(o.tableName || o.tableId || '—')}</strong>
+          <span style="font-size:.75rem;color:${sc};font-weight:700;">${sl}</span>
+        </div>
+        <div style="font-size:.8rem;color:#6b7280;margin:.2rem 0;">${esc(o.customerName || 'Guest')} · ${(o.createdAt||'').slice(11,16)}</div>
+        <div style="margin:.3rem 0;">${items}</div>
+        <div style="font-size:.82rem;font-weight:700;color:#0f172a;">₹${Number(o.total||0).toFixed(2)}</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    body.innerHTML = '<p class="text-center text-danger py-3">Failed to load orders.</p>';
+  }
+}
+
+function esc(s) { return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function closeDrillModal() {
+  document.getElementById('drillModal').style.display = 'none';
+}
+document.getElementById('drillModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('drillModal')) closeDrillModal();
+});
+
+// ── Date-range presets ──────────────────────────────────────────────────────
 function applyPreset(range) {
   const today = new Date();
   const fmt = d => d.toISOString().slice(0, 10);
@@ -258,7 +336,7 @@ document.querySelectorAll('.preset-btn[data-range]').forEach(b =>
   b.addEventListener('click', () => applyPreset(b.dataset.range))
 );
 
-// Carry date range into export links
+// ── Carry date range into export links ──────────────────────────────────────
 function syncExports() {
   const from = document.getElementById('dateFrom').value;
   const to = document.getElementById('dateTo').value;
@@ -277,5 +355,16 @@ document.getElementById('dateFrom').addEventListener('change', syncExports);
 document.getElementById('dateTo').addEventListener('change', syncExports);
 syncExports();
 </script>
+
+<!-- Drill-down modal -->
+<div id="drillModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;padding:1rem;">
+  <div style="background:#fff;border-radius:16px;width:100%;max-width:520px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25);">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:1rem 1.25rem;border-bottom:1px solid #e5e7eb;">
+      <strong id="drillTitle" style="font-size:1rem;">Orders</strong>
+      <button onclick="closeDrillModal()" style="background:none;border:0;font-size:1.4rem;cursor:pointer;color:#6b7280;line-height:1;">×</button>
+    </div>
+    <div id="drillBody" style="overflow-y:auto;padding:1rem 1.25rem;"></div>
+  </div>
+</div>
 </body>
 </html>
