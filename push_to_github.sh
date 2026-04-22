@@ -1,55 +1,68 @@
 #!/usr/bin/env bash
-# Push the saas-upgrade branch to GitHub.
-# Usage: GITHUB_PAT=<token> bash push_to_github.sh
-set -e
+# ============================================================
+# Cafe 11:11 — push the current workspace to GitHub `main`.
+#
+# Usage:
+#   bash push_to_github.sh                     # uses default commit message
+#   bash push_to_github.sh "your message"      # custom commit message
+#
+# Reads the GitHub Personal Access Token from the GB_PAT secret
+# already configured in this Replit. Pushes to:
+#   https://github.com/k89293676-creator/Cafe-ordering  (branch: main)
+#
+# After a successful push, Railway will auto-deploy the new commit.
+# ============================================================
+set -euo pipefail
 
-BRANCH="saas-upgrade"
-REMOTE="https://${GITHUB_PAT}@github.com/k89293676-creator/Cafe-ordering.git"
+REPO_DIR="/home/runner/workspace"
+GH_USER="k89293676-creator"
+GH_REPO="Cafe-ordering"
+BRANCH="main"
 
-echo "==> Initialising git repo in current directory..."
-git init
+DEFAULT_MSG="feat: table calls tab, kitchen fixes, auto images, printable receipts, health checks (/health, /ready, /health/full, /metrics)"
+COMMIT_MSG="${1:-$DEFAULT_MSG}"
+
+cd "$REPO_DIR"
+
+if [ -z "${GB_PAT:-}" ]; then
+  echo "ERROR: GB_PAT secret is not set. Add it in Tools → Secrets." >&2
+  exit 1
+fi
+
+# Clear any stale lock from previous aborted runs.
+rm -f .git/index.lock
+
 git config user.email "agent@replit.com"
-git config user.name "Replit Agent"
+git config user.name  "Replit Agent"
 
-echo "==> Configuring remote..."
-git remote remove origin 2>/dev/null || true
-git remote add origin "$REMOTE"
+REMOTE_URL="https://${GB_PAT}@github.com/${GH_USER}/${GH_REPO}.git"
+git remote set-url origin "$REMOTE_URL"
 
-echo "==> Creating branch: $BRANCH"
-git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
+# Make sure we're on `main`. If the local branch has another name,
+# create/switch to main pointing at the current HEAD.
+CURRENT="$(git symbolic-ref --quiet --short HEAD || echo '')"
+if [ "$CURRENT" != "$BRANCH" ]; then
+  git checkout -B "$BRANCH"
+fi
 
-echo "==> Staging all files..."
 git add -A
 
-echo "==> Committing..."
-git commit -m "feat: SaaS upgrade - multi-tenant, pay-at-counter, 2FA, kitchen, inventory, reports
+# Commit only when there are staged changes; allow the script to
+# re-push existing commits (e.g. after a previous failed push).
+if ! git diff --cached --quiet; then
+  git commit -m "$COMMIT_MSG"
+  echo "==> Committed: $COMMIT_MSG"
+else
+  echo "==> No new changes to commit; pushing existing HEAD."
+fi
 
-- Remove Stripe; add Pay at Counter with 6-digit pickup codes
-- Order lifecycle: pending -> confirmed -> preparing -> ready -> completed
-- Add Superadmin with /superadmin dashboard (owner/cafe CRUD, analytics)
-- Multi-tenant Cafe model scoping all data by cafe_id
-- Railway /health endpoint returning DB status
-- TOTP 2FA (pyotp + QR code) with /owner/2fa/setup
-- Menu modifiers (size, extras, notes per item)
-- Kitchen view with 30s auto-refresh and print CSS
-- Ingredient inventory with auto-deduct and low-stock alerts
-- Phone-based reorder at /owner/reorder
-- CSV export with date filter (/owner/export/orders)
-- PDF daily report via reportlab (/owner/report/daily)
-- 1-5 star feedback with averages
-- Flask-Migrate migrations (idempotent initial schema)
-- FLASK_APP=app set in Procfile, railway.json, Dockerfile
-- Updated requirements.txt (pyotp, reportlab, pandas, waitress)"
-
-echo "==> Pushing to origin/$BRANCH..."
-git push -u origin "$BRANCH" --force
+echo "==> Pushing to ${GH_USER}/${GH_REPO}@${BRANCH} ..."
+git push origin "HEAD:${BRANCH}"
 
 echo ""
-echo "Done! Pushed to: $BRANCH"
-echo "Railway will auto-deploy from the saas-upgrade branch."
-echo ""
-echo "Required Railway env vars:"
-echo "  SECRET_KEY           = <long random string>"
-echo "  SUPERADMIN_USERNAME  = <your superadmin username>"
-echo "  SUPERADMIN_PASSWORD  = <your superadmin password>"
-echo "  IS_PRODUCTION        = true"
+echo "✓ Push complete. Railway will pick up the new commit and redeploy."
+echo "  Health endpoints once live:"
+echo "    /health        liveness (cheap)"
+echo "    /ready         DB readiness"
+echo "    /health/full   deep diagnostics (DB, disk, redis, runtime)"
+echo "    /metrics       aggregate runtime metrics"
