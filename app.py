@@ -92,6 +92,17 @@ if _raw_db_url.startswith("postgres://"):
 _allow_sqlite_in_production = os.environ.get("ALLOW_SQLITE_IN_PRODUCTION", "").lower() in {"1", "true", "yes", "on"}
 _using_ephemeral_production_sqlite = IS_PRODUCTION and not _raw_db_url and not _allow_sqlite_in_production
 
+if _using_ephemeral_production_sqlite:
+    raise RuntimeError(
+        "DATABASE_URL is not configured in production. Refusing to start with an "
+        "ephemeral SQLite database — Railway's container filesystem is wiped on "
+        "every redeploy, which would silently destroy all owners, cafes and orders.\n\n"
+        "Fix: in your Railway project, click 'New' → 'Database' → 'Add PostgreSQL'. "
+        "Railway will inject DATABASE_URL automatically and the app will reuse it.\n\n"
+        "If you understand the data-loss risk and explicitly want SQLite anyway, "
+        "set ALLOW_SQLITE_IN_PRODUCTION=1."
+    )
+
 _secret_key = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET")
 if _secret_key:
     app.secret_key = _secret_key
