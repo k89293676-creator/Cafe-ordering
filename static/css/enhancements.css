@@ -684,43 +684,109 @@ body { background: var(--enh-bg); }
 
 .qty-btn:active { transform: scale(.92); }
 
-/* Floating cart bar */
-.o-cart-bar,
-.cart-bar,
-.floating-cart {
-  position: fixed;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
-  z-index: 90;
-  background: var(--text, #1c1510);
-  color: #fff;
-  padding: .85rem 1.1rem;
-  border-radius: 999px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, .25);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .75rem;
-  max-width: 720px;
-  margin: 0 auto;
-  font-weight: 700;
-  letter-spacing: .01em;
+/* (Removed generic floating cart bar — site uses .o-fab from order.css) */
+
+/* ==========================================================
+   MOBILE CART SHEET — fix unreachable Place Order button
+   ==========================================================
+   On small screens the cart bottom sheet was split into:
+     head (fixed) + body (scrollable) + foot (flex-shrink:0).
+   The foot grew taller than the viewport (it contains totals,
+   tip selector, saved orders, form fields AND the place button),
+   so the Place Order button got pushed under iOS Safari chrome
+   and became unreachable. Below we let the whole sheet scroll
+   as one piece, with safe-area padding at the bottom.
+   ========================================================== */
+
+@media (max-width: 768px) {
+  .o-cart {
+    /* Use dynamic viewport so iOS browser chrome is accounted for */
+    max-height: 88dvh !important;
+    max-height: 88vh !important;
+    display: block !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  /* Sticky header inside the now fully-scrolling sheet */
+  .o-cart__head {
+    position: sticky !important;
+    top: 0;
+    z-index: 5;
+    background: var(--bg-alt, #f5f1ea);
+    box-shadow: 0 1px 0 var(--border, #e2d9cd);
+  }
+
+  /* Body no longer needs its own scroll */
+  .o-cart__body {
+    overflow: visible !important;
+    flex: none !important;
+    min-height: 0 !important;
+  }
+
+  /* Generous bottom padding so Place Order clears iOS bottom bar */
+  .o-cart__foot {
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 16px) + 24px) !important;
+  }
+
+  /* Place Order button: full width, comfortable hit target */
+  .o-place-btn {
+    width: 100%;
+    min-height: 54px !important;
+    font-size: 1.0625rem !important;
+    border-radius: 14px !important;
+    margin-top: .25rem;
+  }
+
+  /* Tip chips: wrap nicely, decent touch targets */
+  .o-tip-chips,
+  .tip-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+  }
+  .o-tip-chip,
+  .tip-chip {
+    min-height: 36px;
+    padding: .4rem .7rem !important;
+  }
+
+  /* Customer info inputs — prevent iOS zoom & give breathing room */
+  .o-name-input,
+  .o-cart__foot input,
+  .o-cart__foot textarea {
+    font-size: 16px !important;
+    padding: .8rem .9rem !important;
+    border-radius: 12px !important;
+  }
+
+  /* Hide the FAB once the cart is open (defensive — class already exists) */
+  body.cart-is-open .o-fab,
+  body.cart-is-open .floating-cart-btn { display: none !important; }
+
+  /* FAB itself — keep above iOS bottom chrome */
+  .o-fab {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px) !important;
+  }
+
+  /* Backdrop scrim for the open cart so taps outside close it */
+  body.cart-is-open::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, .45);
+    z-index: 350;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+  .o-cart.is-open { z-index: 401 !important; }
 }
 
-.o-cart-bar:hover,
-.cart-bar:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, .3);
-}
-
-.o-cart-bar .o-cart-cta,
-.cart-bar .cta {
-  background: var(--gold-2, #d4a017);
-  color: #1c1510;
-  padding: .5rem .95rem;
-  border-radius: 999px;
-}
+/* Defensive: if the site ever renders a non-mobile layout under a touch UA,
+   ensure the place button is never clipped */
+.o-place-btn { position: relative; z-index: 1; }
 
 /* Order success / pickup card */
 .pickup-card,
