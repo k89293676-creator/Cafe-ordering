@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>Dashboard — Cafe 11:11</title>
   <link rel="manifest" href="/static/manifest.json" />
   <meta name="theme-color" content="#4f46e5" />
@@ -1237,8 +1238,11 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
         // Surface a quick toast — most likely a stale state-machine error.
         let msg = 'Action failed.';
         try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (_) {}
+        if (r.status === 400 && !csrf) msg = 'Security token missing — please refresh the page.';
+        if (r.status === 400 && csrf)  msg = 'Security token expired — please refresh the page.';
         if (r.status === 401) msg = 'Session expired — please refresh.';
         if (r.status === 410) msg = 'Undo window expired.';
+        try { console.error('[table-call] action failed', { id, action, status: r.status }); } catch (_) {}
         showToast(msg, '#b91c1c');
         if (btn) {
           btn.disabled = false;
@@ -1556,7 +1560,10 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
         b.addEventListener('click', () => _doCallAction(b.dataset.id, b.dataset.action, b));
       });
     } catch (e) {
-      tcList.innerHTML = '<div style="grid-column:1/-1;color:#b91c1c;text-align:center;padding:2rem;">Could not load table calls. Try refresh.</div>';
+      try { console.error('[table-call] refreshTab failed', e); } catch (_) {}
+      tcList.innerHTML = '<div style="grid-column:1/-1;color:#b91c1c;text-align:center;padding:2rem;">Could not load table calls. <button id="tc-retry" class="btn btn-sm" style="margin-left:.5rem;">Retry</button></div>';
+      const retry = document.getElementById('tc-retry');
+      if (retry) retry.addEventListener('click', () => refreshAll());
     }
   }
 
