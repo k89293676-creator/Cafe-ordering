@@ -50,9 +50,10 @@ function esc(s) {
 
 /* ── Auto image generator ──
  * When an item has no explicit image_url, generate one from the item's name
- * so the menu always has visuals. Uses Loremflickr (real food photos by keyword)
- * with a deterministic lock seed so the same item always shows the same image.
- * On error, falls back to a Pollinations AI-generated photo prompt.
+ * so the menu always has visuals. Uses Pollinations AI (which understands the
+ * item name directly) with a deterministic seed so the same item always shows
+ * the same image. On error, falls back to a clean SVG placeholder that shows
+ * the item name — never random unrelated photos.
  */
 function _slug(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -65,24 +66,43 @@ function _hash(s) {
 function autoImageUrl(item) {
   // Use Pollinations AI: it understands the item name directly and generates
   // an image that actually matches the dish. Seed is deterministic per item.
+  // `model=flux` and explicit dimensions give the most reliable, on-topic results.
   const prompt = encodeURIComponent(
-    `${item.name}, professional food photography, restaurant dish, natural light, close-up, appetizing`
+    `${item.name}, professional food photography, restaurant dish, natural light, close-up, appetizing, high detail`
   );
   const seed = _hash(item.id || item.name) % 999983;
-  return `https://image.pollinations.ai/prompt/${prompt}?width=400&height=250&nologo=true&seed=${seed}`;
+  return `https://image.pollinations.ai/prompt/${prompt}?width=400&height=250&nologo=true&model=flux&seed=${seed}`;
 }
 function fallbackImageUrl(item) {
-  // Split name into individual words so Flickr has better keyword matches
-  // (e.g. "Butter Chicken" → "butter,chicken,food" not "butter-chicken,food")
-  const words = String(item.name || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter(w => w.length > 1)
-    .slice(0, 3)
-    .join(",");
-  const lock = _hash(item.id || item.name) % 10;   // small lock = popular results
-  return `https://loremflickr.com/400/250/${encodeURIComponent(words + ",food")}/all?lock=${lock}`;
+  // Deterministic SVG placeholder: a soft gradient (color picked from the item
+  // name hash) with the item name centered. This is reliable, always on-topic,
+  // and never shows unrelated photos. Returned as a data URI so it works offline.
+  const name = String(item.name || "Menu Item");
+  const palettes = [
+    ["#fde2e4", "#fad2e1"], ["#e2ece9", "#bee1e6"], ["#fff1e6", "#f7d6a4"],
+    ["#dbeafe", "#bfdbfe"], ["#ede9fe", "#ddd6fe"], ["#dcfce7", "#bbf7d0"],
+    ["#fef3c7", "#fde68a"], ["#fee2e2", "#fecaca"], ["#e0f2fe", "#bae6fd"],
+    ["#f5d0fe", "#f0abfc"]
+  ];
+  const [c1, c2] = palettes[_hash(name) % palettes.length];
+  // Wrap long names onto two lines
+  const words = name.split(/\s+/);
+  let line1 = name, line2 = "";
+  if (name.length > 14 && words.length > 1) {
+    const mid = Math.ceil(words.length / 2);
+    line1 = words.slice(0, mid).join(" ");
+    line2 = words.slice(mid).join(" ");
+  }
+  const safe = (s) => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 250'>
+    <defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
+      <stop offset='0%' stop-color='${c1}'/><stop offset='100%' stop-color='${c2}'/>
+    </linearGradient></defs>
+    <rect width='400' height='250' fill='url(#g)'/>
+    <text x='200' y='${line2 ? 118 : 135}' text-anchor='middle' font-family='-apple-system,Segoe UI,Roboto,sans-serif' font-size='26' font-weight='700' fill='#1f2937'>${safe(line1)}</text>
+    ${line2 ? `<text x='200' y='150' text-anchor='middle' font-family='-apple-system,Segoe UI,Roboto,sans-serif' font-size='26' font-weight='700' fill='#1f2937'>${safe(line2)}</text>` : ""}
+  </svg>`;
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
 }
 
 function showToast(msg, ms = 2800) {
