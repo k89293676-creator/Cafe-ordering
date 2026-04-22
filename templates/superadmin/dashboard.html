@@ -52,6 +52,8 @@
       <a class="sidebar-link active" href="{{ url_for('superadmin_dashboard') }}"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a>
       <a class="sidebar-link" href="{{ url_for('superadmin_analytics') }}"><i class="bi bi-bar-chart-line-fill"></i> Analytics</a>
       <a class="sidebar-link" href="{{ url_for('superadmin_extras.insights_view') }}"><i class="bi bi-graph-up-arrow"></i> Insights</a>
+      <div class="sidebar-label mt-2">Security</div>
+      <a class="sidebar-link" href="{{ url_for('superadmin_admin_keys') }}"><i class="bi bi-key-fill"></i> Admin Access Keys</a>
       <div class="sidebar-label mt-2">Switch to</div>
       <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}"><i class="bi bi-arrow-left-circle"></i> Owner Dashboard</a>
       <div style="padding:1rem 1.25rem;border-top:1px solid rgba(255,255,255,.07);margin-top:auto;">

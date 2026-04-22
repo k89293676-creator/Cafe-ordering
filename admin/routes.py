@@ -35,9 +35,35 @@ def _admin_key() -> str:
     return os.environ.get("ADMIN_SECRET_KEY", "")
 
 
-def _key_valid(key: str) -> bool:
+def _key_match(key: str) -> tuple[bool, int | None]:
+    """Return (matched, owner_id). owner_id is None for legacy env-based key."""
+    if not key:
+        return (False, None)
     secret = _admin_key()
-    return bool(secret) and bool(key) and secrets.compare_digest(secret, key)
+    if secret and secrets.compare_digest(secret, key):
+        return (True, None)
+    try:
+        store = _store()
+        owner_id = store.find_admin_key_owner(key)
+        if owner_id is not None:
+            return (True, owner_id)
+    except Exception:
+        pass
+    return (False, None)
+
+
+def _key_valid(key: str) -> bool:
+    matched, _ = _key_match(key)
+    return matched
+
+
+def _has_any_admin_key() -> bool:
+    if _admin_key():
+        return True
+    try:
+        return bool(_store().load_admin_keys())
+    except Exception:
+        return False
 
 
 def admin_required(f):
@@ -46,8 +72,11 @@ def admin_required(f):
         if session.get("admin_authenticated"):
             return f(*args, **kwargs)
         key = request.headers.get("X-Admin-Key", "")
-        if _key_valid(key):
+        matched, owner_id = _key_match(key)
+        if matched:
             session["admin_authenticated"] = True
+            if owner_id is not None:
+                session["admin_owner_id"] = owner_id
             return f(*args, **kwargs)
         return redirect(url_for("admin.login"))
     return decorated
@@ -55,16 +84,25 @@ def admin_required(f):
 
 @admin_bp.route("/login", methods=["GET", "POST"])
 def login():
-    if not _admin_key():
-        return render_template("admin/error.html",
-                               message="ADMIN_SECRET_KEY is not configured on this server."), 503
+    if not _has_any_admin_key():
+        return render_template(
+            "admin/error.html",
+            message=(
+                "No admin access key has been configured. Ask a superadmin to "
+                "generate one for you from the Superadmin → Admin Access Keys page, "
+                "or set the ADMIN_SECRET_KEY environment variable."
+            ),
+        ), 503
     if session.get("admin_authenticated"):
         return redirect(url_for("admin.dashboard"))
     error = None
     if request.method == "POST":
         key = request.form.get("key", "")
-        if _key_valid(key):
+        matched, owner_id = _key_match(key)
+        if matched:
             session["admin_authenticated"] = True
+            if owner_id is not None:
+                session["admin_owner_id"] = owner_id
             session.permanent = True
             return redirect(url_for("admin.dashboard"))
         error = "Invalid admin key. Please try again."

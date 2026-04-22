@@ -71,6 +71,7 @@ OWNERS_PATH = DATA_DIR / "owners.json"
 TABLES_PATH = DATA_DIR / "tables.json"
 FEEDBACK_PATH = DATA_DIR / "feedback.json"
 TOKENS_PATH = DATA_DIR / "tokens.json"
+ADMIN_KEYS_PATH = DATA_DIR / "admin_keys.json"
 
 _orders_lock = threading.Lock()
 _menu_lock = threading.Lock()
@@ -650,6 +651,81 @@ def _settings_dict(settings: Settings | None) -> dict:
 
 def load_owners() -> list[dict]:
     return [_owner_dict(o) for o in Owner.query.order_by(Owner.id).all()]
+
+
+# ---------------------------------------------------------------------------
+# Admin access keys (server-stored secret keys per authorised owner)
+# ---------------------------------------------------------------------------
+
+_admin_keys_lock = threading.Lock()
+
+
+def load_admin_keys() -> list[dict]:
+    """Return all stored admin access keys (without plaintext)."""
+    if not ADMIN_KEYS_PATH.exists():
+        return []
+    try:
+        with open(ADMIN_KEYS_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict) and "keys" in data:
+            return list(data.get("keys") or [])
+        if isinstance(data, list):
+            return data
+        return []
+    except Exception:
+        return []
+
+
+def _save_admin_keys(keys: list[dict]) -> None:
+    with _admin_keys_lock:
+        tmp = ADMIN_KEYS_PATH.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"keys": keys}, fh, indent=2)
+        os.replace(tmp, ADMIN_KEYS_PATH)
+
+
+def generate_admin_key_for_owner(owner_id: int, username: str = "") -> str:
+    """Generate a new admin secret key for the given owner.
+
+    The plaintext is returned (shown to the superadmin once); only a bcrypt
+    hash is persisted on the server alongside the owner_id.
+    """
+    plaintext = secrets.token_urlsafe(32)
+    key_hash = bcrypt.generate_password_hash(plaintext).decode("utf-8")
+    keys = [k for k in load_admin_keys() if int(k.get("owner_id", -1)) != int(owner_id)]
+    keys.append({
+        "owner_id": int(owner_id),
+        "username": username,
+        "key_hash": key_hash,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    })
+    _save_admin_keys(keys)
+    return plaintext
+
+
+def revoke_admin_key_for_owner(owner_id: int) -> bool:
+    keys = load_admin_keys()
+    new_keys = [k for k in keys if int(k.get("owner_id", -1)) != int(owner_id)]
+    if len(new_keys) == len(keys):
+        return False
+    _save_admin_keys(new_keys)
+    return True
+
+
+def find_admin_key_owner(plaintext: str) -> int | None:
+    """If plaintext matches a stored key, return the owner_id it belongs to."""
+    if not plaintext:
+        return None
+    for record in load_admin_keys():
+        key_hash = record.get("key_hash", "")
+        if not key_hash:
+            continue
+        try:
+            if bcrypt.check_password_hash(key_hash, plaintext):
+                return int(record.get("owner_id"))
+        except Exception:
+            continue
+    return None
 
 
 def load_cafes() -> list[dict]:
@@ -3313,6 +3389,80 @@ def superadmin_delete_owner(owner_id: int):
     db.session.commit()
     flash(f"Owner '{owner.username}' deleted.")
     return redirect(url_for("superadmin_dashboard"))
+
+
+@app.route("/superadmin/admin-keys", methods=["GET"])
+@login_required
+@superadmin_required
+def superadmin_admin_keys():
+    keys = load_admin_keys()
+    keys_by_owner = {int(k.get("owner_id", -1)): k for k in keys}
+    owners = Owner.query.order_by(Owner.username).all()
+    rows = []
+    for owner in owners:
+        record = keys_by_owner.get(int(owner.id))
+        rows.append({
+            "owner_id": owner.id,
+            "username": owner.username,
+            "email": owner.email,
+            "is_superadmin": bool(owner.is_superadmin),
+            "is_active": bool(owner.is_active),
+            "has_key": record is not None,
+            "generated_at": (record or {}).get("generated_at"),
+        })
+    new_key = session.pop("_new_admin_key", None)
+    new_key_owner = session.pop("_new_admin_key_owner", None)
+    return render_template(
+        "superadmin/admin_keys.html",
+        rows=rows,
+        new_key=new_key,
+        new_key_owner=new_key_owner,
+        owner_username=logged_in_owner(),
+    )
+
+
+@app.route("/superadmin/admin-keys/generate", methods=["POST"])
+@login_required
+@superadmin_required
+def superadmin_generate_admin_key():
+    owner_id_raw = request.form.get("owner_id", "").strip()
+    if not owner_id_raw.isdigit():
+        flash("Please choose an authorised owner.", "danger")
+        return redirect(url_for("superadmin_admin_keys"))
+    owner = db.session.get(Owner, int(owner_id_raw))
+    if not owner:
+        flash("Owner not found.", "danger")
+        return redirect(url_for("superadmin_admin_keys"))
+    if not owner.is_active:
+        flash(f"Owner '{owner.username}' is deactivated. Activate them first.", "danger")
+        return redirect(url_for("superadmin_admin_keys"))
+    plaintext = generate_admin_key_for_owner(owner.id, owner.username)
+    log_security("ADMIN_KEY_GENERATED", f"by={logged_in_owner()} for_owner_id={owner.id}")
+    session["_new_admin_key"] = plaintext
+    session["_new_admin_key_owner"] = {"id": owner.id, "username": owner.username}
+    flash(
+        f"New admin access key generated for <strong>{owner.username}</strong>. "
+        "Copy it now — it will not be shown again.",
+        "success",
+    )
+    return redirect(url_for("superadmin_admin_keys"))
+
+
+@app.route("/superadmin/admin-keys/revoke", methods=["POST"])
+@login_required
+@superadmin_required
+def superadmin_revoke_admin_key():
+    owner_id_raw = request.form.get("owner_id", "").strip()
+    if not owner_id_raw.isdigit():
+        flash("Invalid owner.", "danger")
+        return redirect(url_for("superadmin_admin_keys"))
+    owner_id = int(owner_id_raw)
+    if revoke_admin_key_for_owner(owner_id):
+        log_security("ADMIN_KEY_REVOKED", f"by={logged_in_owner()} for_owner_id={owner_id}")
+        flash("Admin access key revoked.", "success")
+    else:
+        flash("No key existed for that owner.", "info")
+    return redirect(url_for("superadmin_admin_keys"))
 
 
 @app.route("/superadmin/analytics")
