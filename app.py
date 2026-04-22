@@ -1387,15 +1387,20 @@ def _local_dispatch_table(table_id: str, payload: str) -> None:
     """Fan out a table-call SSE payload to every customer device watching
     this table_id (typically just one phone, but could be many)."""
     with _sse_lock:
-        queues = _sse_table_subs.get(table_id, [])
+        entries = _sse_table_subs.get(table_id, [])
         dead = []
-        for q in queues:
+        for entry in entries:
             try:
-                q.append(payload)
+                if isinstance(entry, tuple):
+                    q, ev = entry
+                    q.append(payload)
+                    ev.set()
+                else:
+                    entry.append(payload)
             except Exception:
-                dead.append(q)
-        for q in dead:
-            queues.remove(q)
+                dead.append(entry)
+        for entry in dead:
+            entries.remove(entry)
 
 
 # Optional Redis pub/sub fan-out for multi-worker deployments.

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading as _threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -371,8 +372,10 @@ def table_call_stream(table_id: str):
     _validated_table(table_id)
 
     my_queue: list[str] = []
+    my_event = _threading.Event()
+    _sub_entry = (my_queue, my_event)
     with _sse_lock:
-        _sse_table_subs.setdefault(table_id, []).append(my_queue)
+        _sse_table_subs.setdefault(table_id, []).append(_sub_entry)
 
     # Snapshot the current live call so the very first event reflects truth.
     snapshot = (
@@ -398,14 +401,17 @@ def table_call_stream(table_id: str):
                 if time.time() - last_heartbeat >= 25:
                     yield "event: ping\ndata: heartbeat\n\n"
                     last_heartbeat = time.time()
-                time.sleep(0.5)
+                # Wake immediately on notify; fall back to heartbeat cadence
+                _wait_secs = max(0.1, 25.0 - (time.time() - last_heartbeat))
+                my_event.wait(timeout=_wait_secs)
+                my_event.clear()
         except GeneratorExit:
             pass
         finally:
             with _sse_lock:
                 subs = _sse_table_subs.get(table_id, [])
                 try:
-                    subs.remove(my_queue)
+                    subs.remove(_sub_entry)
                 except ValueError:
                     pass
 

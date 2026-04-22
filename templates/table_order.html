@@ -151,7 +151,7 @@
       service:'🛎️ Call server', bill:'💳 Ask for the bill',
       water:'💧 Water refill', cutlery:'🍴 Cutlery', help:'❓ Need help'
     };
-    const POLL_INTERVAL_MS  = 6000;
+    const POLL_INTERVAL_MS  = 4000;
     const STATUS_URL        = `/api/table/${encodeURIComponent(tableId)}/call-status`;
     const CALL_URL          = `/api/table/${encodeURIComponent(tableId)}/call`;
     const CANCEL_URL        = `/api/table/${encodeURIComponent(tableId)}/call/cancel`;
@@ -289,7 +289,7 @@
           // legacy frames — treat that as an update too.
           const data = payload.data === undefined ? payload : payload.data;
           applyCallState(data || null);
-        } catch (_) {}
+      } catch (err) {
       };
 
       _sse.onerror = () => {
@@ -319,7 +319,7 @@
         if (!r.ok) return;
         const { call } = await r.json();
         applyCallState(call);
-      } catch (_) {
+      } catch (err) {
         // network blip — keep polling on the next tick
       } finally {
         _inFlightStatus = null;
@@ -385,7 +385,9 @@
         const r = await fetch(CANCEL_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+          signal: _ac ? _ac.signal : undefined,
         });
+        if (_timeoutId) clearTimeout(_timeoutId);
         const j = await r.json().catch(() => ({}));
         if (r.ok) {
           if (j.cancelled) {
@@ -411,7 +413,7 @@
         } else {
           setQuickStatus('Could not cancel — try again.', '#b91c1c');
         }
-      } catch (_) {
+      } catch (err) {
         setQuickStatus('Network error — try again.', '#b91c1c');
       } finally {
         _cancelInFlight = false;
@@ -433,17 +435,21 @@
       const reason = selectedReason;
       const label  = REASON_LABELS[reason] || reason;
       try {
+        const _ac = ('AbortController' in window) ? new AbortController() : null;
+        const _timeoutId = _ac ? setTimeout(() => _ac.abort(), 10000) : null;
         const r = await fetch(CALL_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+          signal: _ac ? _ac.signal : undefined,
           body: JSON.stringify({ reason, note: noteInput.value.trim() }),
         });
+        if (_timeoutId) clearTimeout(_timeoutId);
         const j = await r.json().catch(() => ({}));
         if (r.ok && j.ok !== false) {
           closePanel();
           // Hold our optimistic message visible for ~3s so the next poll
           // doesn't immediately replace "✓ on the way!" with "Waiting…".
-          _suppressAckMsgUntil = Date.now() + 3000;
+          _suppressAckMsgUntil = Date.now() + 1500;
           _activeCallId        = (j.call && j.call.id) || _activeCallId || -1;
           setQuickStatus(
             j.deduped ? `🔔 Reminder sent for "${label}"!` : `✓ ${label} — on the way!`,
@@ -459,8 +465,9 @@
           statusEl.textContent = (j && j.error) || 'Could not send. Please flag down a server.';
           statusEl.style.color = '#b91c1c';
         }
-      } catch (_) {
-        statusEl.textContent = 'Network error — try again.';
+      } catch (err) {
+        if (_timeoutId) clearTimeout(_timeoutId);
+        statusEl.textContent = (err && err.name === 'AbortError') ? 'Request timed out — try again.' : 'Network error — try again.';
         statusEl.style.color = '#b91c1c';
       } finally {
         _sendInFlight = false;
@@ -498,7 +505,7 @@
             if (!r.ok) return;
             const { call } = await r.json();
             if (call) { applyCallState(call); startPoll(); }
-          } catch (_) {}
+      } catch (err) {
         })();
       }
     })();

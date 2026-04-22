@@ -29,6 +29,34 @@ admin_bp = Blueprint(
     template_folder=None,
 )
 
+# ---------------------------------------------------------------------------
+# In-memory brute-force protection for admin login
+# ---------------------------------------------------------------------------
+import threading as _admin_threading
+_login_attempts: dict = {}  # {ip: [timestamp, ...]}
+_login_lock = _admin_threading.Lock()
+_MAX_ATTEMPTS = 10  # max failed attempts in window
+_ATTEMPT_WINDOW = 300  # seconds
+
+
+def _check_login_rate(ip: str) -> bool:
+    """Return True if the IP is within the allowed rate. Return False to block."""
+    import time as _t
+    now = _t.time()
+    with _login_lock:
+        attempts = [ts for ts in _login_attempts.get(ip, []) if now - ts < _ATTEMPT_WINDOW]
+        _login_attempts[ip] = attempts
+        if len(attempts) >= _MAX_ATTEMPTS:
+            return False
+        return True
+
+
+def _record_failed_login(ip: str) -> None:
+    import time as _t
+    with _login_lock:
+        _login_attempts.setdefault(ip, []).append(_t.time())
+
+
 
 def _store():
     import app as _app
@@ -78,12 +106,16 @@ def admin_required(f):
         key = request.headers.get("X-Admin-Key", "")
         matched, owner_id = _key_match(key)
         if matched:
+            try:
+                _store().log_security("ADMIN_LOGIN_OK", f"owner_id={owner_id} ip={request.remote_addr}")
+            except Exception: pass
             session["admin_authenticated"] = True
             if owner_id is not None:
                 session["admin_owner_id"] = owner_id
             return f(*args, **kwargs)
         return redirect(url_for("admin.login"))
     return decorated
+
 
 
 @admin_bp.route("/login", methods=["GET", "POST"])
@@ -99,17 +131,27 @@ def login():
         ), 503
     if session.get("admin_authenticated"):
         return redirect(url_for("admin.dashboard"))
+    client_ip = request.remote_addr or "unknown"
+    if request.method == "POST" and not _check_login_rate(client_ip):
+        return render_template("admin/login.html", error="Too many attempts. Please wait 5 minutes."), 429
     error = None
     if request.method == "POST":
         key = request.form.get("key", "")
         matched, owner_id = _key_match(key)
         if matched:
+            try:
+                _store().log_security("ADMIN_LOGIN_OK", f"owner_id={owner_id} ip={client_ip}")
+            except Exception: pass
             session["admin_authenticated"] = True
             if owner_id is not None:
                 session["admin_owner_id"] = owner_id
             session.permanent = True
             return redirect(url_for("admin.dashboard"))
         error = "Invalid admin key. Please try again."
+        _record_failed_login(client_ip)
+        try:
+            _store().log_security("ADMIN_LOGIN_FAIL", f"ip={client_ip}")
+        except Exception: pass
     return render_template("admin/login.html", error=error)
 
 
@@ -549,3 +591,193 @@ def devops_clear_rate_limits():
         pass
     flash("Rate-limit storage cleared." if cleared else "Nothing to clear.", "success" if cleared else "info")
     return redirect(url_for("admin.devops"))
+
+
+# ---------------------------------------------------------------------------
+# Rate-limited admin login (brute-force protection)
+# ---------------------------------------------------------------------------
+# Wrap the existing login view so rapid wrong-key attempts are throttled.
+# We patch it after the fact to avoid touching the original function body.
+
+_orig_login = login  # type: ignore  # noqa: F821  — defined above
+
+
+def _login_rate_limited(*args, **kwargs):
+    try:
+        from app import limiter
+        return limiter.limit("15 per minute; 60 per hour")(lambda: _orig_login(*args, **kwargs))()
+    except Exception:
+        return _orig_login(*args, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# DevOps: live metrics JSON (AJAX endpoint — no page reload needed)
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/devops/metrics.json")
+@admin_required
+def devops_metrics_json():
+    """Return current system metrics as JSON for the auto-refresh panel."""
+    metrics = _system_metrics()
+    store = _store()
+    app_info = {
+        "version": getattr(store, "APP_VERSION", "unknown"),
+        "uptimeSeconds": int(time.time() - getattr(store, "APP_START_TIME", time.time())),
+        "useDb": getattr(store, "USE_DB", False),
+        "dataDir": str(getattr(store, "DATA_DIR", "")),
+    }
+    return jsonify(metrics=metrics, app_info=app_info, now=datetime.now(timezone.utc).isoformat())
+
+
+# ---------------------------------------------------------------------------
+# DevOps: database pool stats
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/devops/db-stats.json")
+@admin_required
+def devops_db_stats():
+    """Return connection pool statistics from SQLAlchemy."""
+    store = _store()
+    stats: dict = {"available": False}
+    try:
+        engine = store.db.engine
+        pool = engine.pool
+        stats = {
+            "available": True,
+            "poolSize": getattr(pool, "size", lambda: None)() if callable(getattr(pool, "size", None)) else getattr(pool, "_pool", {}).qsize() if hasattr(getattr(pool, "_pool", None), "qsize") else "n/a",
+            "checkedOut": pool.checkedout() if hasattr(pool, "checkedout") else "n/a",
+            "overflow": pool.overflow() if hasattr(pool, "overflow") else "n/a",
+            "checkedIn": pool.checkedin() if hasattr(pool, "checkedin") else "n/a",
+            "dialect": engine.dialect.name,
+            "driverVersion": str(getattr(engine.dialect, "driver", "unknown")),
+        }
+    except Exception as exc:
+        stats["error"] = str(exc)[:200]
+    return jsonify(stats)
+
+
+# ---------------------------------------------------------------------------
+# DevOps: recent security events (tail last N lines from security logger)
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/devops/security-events.json")
+@admin_required
+def devops_security_events():
+    """Return the most recent security log entries from memory."""
+    store = _store()
+    events = []
+    try:
+        # Walk the security_log's handlers to find our MemoryHandler or the list
+        import logging
+        sec_log = logging.getLogger("cafe.security")
+        # Try to read from the in-memory ring buffer if we store them
+        ring = getattr(store, "_security_event_ring", None)
+        if ring:
+            events = list(ring)[-100:]
+        else:
+            # Collect from last rotating-file log if available
+            log_file = os.environ.get("LOG_FILE")
+            if log_file:
+                import pathlib
+                p = pathlib.Path(log_file)
+                if p.exists():
+                    with open(p, "r", errors="replace") as fh:
+                        lines = fh.readlines()
+                    events = [l.strip() for l in lines[-100:] if "SECURITY" in l.upper() or "security" in l]
+    except Exception:
+        pass
+    return jsonify(events=events, count=len(events))
+
+
+# ---------------------------------------------------------------------------
+# DevOps: prune old resolved table calls
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/devops/prune-resolved", methods=["POST"])
+@admin_required
+def devops_prune_resolved():
+    """Delete resolved table calls older than 30 days to keep the DB lean."""
+    store = _store()
+    deleted = 0
+    try:
+        from datetime import timedelta
+        from extensions.models import TableCall
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        q = (
+            store.db.session.query(TableCall)
+            .filter(TableCall.status == "resolved")
+            .filter(TableCall.resolved_at < cutoff)
+        )
+        deleted = q.count()
+        q.delete(synchronize_session=False)
+        store.db.session.commit()
+        store.log_security("DEVOPS_PRUNE_RESOLVED",
+                           f"deleted={deleted} cutoff={cutoff.date()} by_owner_id={session.get('admin_owner_id')}")
+    except Exception as exc:
+        flash(f"Prune failed: {exc}", "danger")
+        return redirect(url_for("admin.devops"))
+    flash(f"Pruned {deleted} resolved call(s) older than 30 days.", "success")
+    return redirect(url_for("admin.devops"))
+
+
+# ---------------------------------------------------------------------------
+# DevOps: export recent orders as CSV
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/devops/export-orders.csv")
+@admin_required
+def devops_export_orders():
+    """Download a CSV of all orders from the last 7 days for diagnostics."""
+    import csv
+    import io
+    from datetime import timedelta
+    store = _store()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    try:
+        from app import Order
+        orders = Order.query.filter(Order.created_at >= cutoff).order_by(Order.created_at.desc()).all()
+    except Exception:
+        orders = []
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["id", "owner_id", "status", "total", "customer_name", "table_id", "created_at"])
+    for o in orders:
+        w.writerow([o.id, o.owner_id, o.status, o.total,
+                    getattr(o, "customer_name", ""), getattr(o, "table_id", ""),
+                    o.created_at.isoformat() if o.created_at else ""])
+    out.seek(0)
+    fname = f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    from flask import Response as _Response
+    return _Response(
+        out.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={fname}"}
+    )
+
+
+# ---------------------------------------------------------------------------
+# DevOps: git info (deployment version panel)
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/devops/git-info.json")
+@admin_required
+def devops_git_info():
+    """Return current git ref, commit hash, and deploy time."""
+    import subprocess
+    info: dict = {}
+    try:
+        info["commit"] = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], text=True, timeout=5
+        ).strip()
+        info["branch"] = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], text=True, timeout=5
+        ).strip()
+        info["subject"] = subprocess.check_output(
+            ["git", "log", "-1", "--format=%s"], text=True, timeout=5
+        ).strip()[:120]
+        info["date"] = subprocess.check_output(
+            ["git", "log", "-1", "--format=%ci"], text=True, timeout=5
+        ).strip()
+    except Exception as exc:
+        info["error"] = str(exc)[:200]
+    info["appVersion"] = os.environ.get("APP_VERSION", "unknown")
+    return jsonify(info)

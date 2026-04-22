@@ -183,4 +183,125 @@
     <li>Server secrets are never echoed back to this page — only their presence is shown.</li>
   </ul>
 </div>
+
+<!-- ── Git / Deployment Info ─────────────────────────────── -->
+<div class="stat-card mb-4" id="git-info-panel">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h6 class="mb-0"><i class="bi bi-git me-2 text-primary"></i>Deployment info</h6>
+    <span class="text-muted small" id="git-last-refreshed"></span>
+  </div>
+  <div id="git-info-body">
+    <div class="text-muted small">Loading…</div>
+  </div>
+</div>
+
+<!-- ── Live DB Pool Stats ─────────────────────────────────── -->
+<div class="stat-card mb-4" id="db-stats-panel">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h6 class="mb-0"><i class="bi bi-database-fill me-2 text-primary"></i>Database pool</h6>
+    <button class="btn btn-sm btn-outline-secondary" onclick="refreshDbStats()"><i class="bi bi-arrow-repeat me-1"></i>Refresh</button>
+  </div>
+  <div id="db-stats-body">
+    <div class="text-muted small">Loading…</div>
+  </div>
+</div>
+
+<!-- ── Maintenance Tools ─────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="stat-card h-100">
+      <h6 class="mb-2"><i class="bi bi-trash3 me-2 text-danger"></i>Prune resolved table calls</h6>
+      <p class="text-muted small mb-3">Delete resolved service-call records older than 30 days to reduce database size.</p>
+      <form method="post" action="{{ url_for('admin.devops_prune_resolved') }}" onsubmit="return confirm('Permanently delete resolved table calls older than 30 days?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash3 me-1"></i>Prune old resolved calls</button>
+      </form>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="stat-card h-100">
+      <h6 class="mb-2"><i class="bi bi-download me-2 text-primary"></i>Export orders (last 7 days)</h6>
+      <p class="text-muted small mb-3">Download a CSV of all orders from the last 7 days for diagnostics or audit.</p>
+      <a href="{{ url_for('admin.devops_export_orders') }}" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-file-earmark-csv me-1"></i>Download CSV
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- ── Auto-refresh metrics JS ──────────────────────────── -->
+<script>
+(function () {
+  function refreshGitInfo() {
+    fetch('{{ url_for("admin.devops_git_info") }}', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => {
+        const el = document.getElementById('git-info-body');
+        if (!el) return;
+        if (d.error) { el.innerHTML = '<span class="text-muted small">Git info unavailable: ' + d.error + '</span>'; return; }
+        el.innerHTML = `<table class="meta-table w-100">
+          <tr><td>Branch</td><td><code>${d.branch || '—'}</code></td></tr>
+          <tr><td>Commit</td><td><code>${d.commit || '—'}</code></td></tr>
+          <tr><td>Message</td><td>${d.subject || '—'}</td></tr>
+          <tr><td>Date</td><td class="text-muted small">${d.date || '—'}</td></tr>
+          <tr><td>App version</td><td><code>${d.appVersion || '—'}</code></td></tr>
+        </table>`;
+        const ts = document.getElementById('git-last-refreshed');
+        if (ts) ts.textContent = 'as of ' + new Date().toLocaleTimeString();
+      })
+      .catch(() => {
+        const el = document.getElementById('git-info-body');
+        if (el) el.innerHTML = '<span class="text-muted small">Could not fetch git info.</span>';
+      });
+  }
+
+  function refreshDbStats() {
+    fetch('{{ url_for("admin.devops_db_stats") }}', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => {
+        const el = document.getElementById('db-stats-body');
+        if (!el) return;
+        if (!d.available) { el.innerHTML = '<span class="text-muted small">DB stats unavailable' + (d.error ? ': ' + d.error : '') + '</span>'; return; }
+        el.innerHTML = `<table class="meta-table w-100">
+          <tr><td>Dialect</td><td><code>${d.dialect || '—'}</code></td></tr>
+          <tr><td>Pool size</td><td>${d.poolSize}</td></tr>
+          <tr><td>Checked out</td><td>${d.checkedOut}</td></tr>
+          <tr><td>Checked in</td><td>${d.checkedIn}</td></tr>
+          <tr><td>Overflow</td><td>${d.overflow}</td></tr>
+        </table>`;
+      })
+      .catch(() => {
+        const el = document.getElementById('db-stats-body');
+        if (el) el.innerHTML = '<span class="text-muted small">Could not fetch DB stats.</span>';
+      });
+  }
+
+  window.refreshDbStats = refreshDbStats;
+
+  // Auto-refresh live metrics every 30 seconds
+  function refreshMetrics() {
+    fetch('{{ url_for("admin.devops_metrics_json") }}', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => {
+        const m = d.metrics || {};
+        // Update CPU / memory if the elements exist (rendered server-side on load)
+        const cpuEl = document.getElementById('live-cpu');
+        const memEl = document.getElementById('live-mem');
+        if (cpuEl && m.cpuPercent !== undefined) cpuEl.textContent = m.cpuPercent + '%';
+        if (memEl && m.memoryUsedPercent !== undefined) memEl.textContent = m.memoryUsedPercent + '%';
+      })
+      .catch(() => {});
+  }
+
+  // Initial loads
+  refreshGitInfo();
+  refreshDbStats();
+  refreshMetrics();
+
+  // Periodic refresh
+  setInterval(refreshMetrics, 30000);
+  setInterval(refreshDbStats, 60000);
+})();
+</script>
+
 {% endblock %}
