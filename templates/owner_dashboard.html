@@ -1020,7 +1020,53 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
     return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
   }
 
-  let _drawerAutoPopped = false;
+  // ── Notification support ─────────────────────────────────────────────────
+  let _seenCallIds = null;   // null = first load (seed without notifying)
+
+  function requestNotifPerms() {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }
+  // Request on first meaningful click (requires user gesture in Chrome)
+  document.addEventListener('click', function _once() {
+    requestNotifPerms();
+    document.removeEventListener('click', _once);
+  }, { once: true });
+
+  function playChime() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [880, 1100].forEach((freq, i) => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        const t = ctx.currentTime + i * 0.18;
+        gain.gain.setValueAtTime(0.25, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+        osc.start(t); osc.stop(t + 0.55);
+      });
+    } catch (_) {}
+  }
+
+  function notifyNewCall(c) {
+    playChime();
+    // Re-pop the drawer unless the user is already on the table-calls tab
+    if (!drawer.dataset.userClosed && location.hash !== '#table-calls') {
+      drawer.style.display = 'flex';
+    }
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification(`🛎️ Table Call — ${c.tableName || c.tableId}`, {
+          body: (REASON_LABEL[c.reason] || c.reason) + (c.note ? `\n"${c.note}"` : ''),
+          icon: '/static/images/icon-192.png',
+          tag: 'tc-' + c.id,
+          requireInteraction: true,
+        });
+      } catch (_) {}
+    }
+  }
 
   // Drawer (quick peek of OPEN calls only) ----------------------------------
   async function refreshDrawer() {
@@ -1031,12 +1077,24 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
       const calls = j.calls || [];
       badge.textContent = calls.length;
       badge.style.display = calls.length ? 'inline-block' : 'none';
-      // Auto-pop the drawer once (first time there are open calls), unless user dismissed it
-      // or they're already viewing the table-calls tab.
-      if (calls.length && !_drawerAutoPopped && !drawer.dataset.userClosed && location.hash !== '#table-calls') {
-        _drawerAutoPopped = true;
-        drawer.style.display = 'flex';
+
+      // Detect genuinely new calls (not seen on a previous poll)
+      if (_seenCallIds === null) {
+        // First load — seed without notifying
+        _seenCallIds = new Set(calls.map(c => c.id));
+        // Auto-pop drawer if there are already open calls
+        if (calls.length && !drawer.dataset.userClosed && location.hash !== '#table-calls') {
+          drawer.style.display = 'flex';
+        }
+      } else {
+        calls.forEach(c => {
+          if (!_seenCallIds.has(c.id)) {
+            _seenCallIds.add(c.id);
+            notifyNewCall(c);
+          }
+        });
       }
+
       list.innerHTML = calls.length ? calls.map(c => `
         <div style="border:1px solid #e5e7eb;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;">
           <div style="display:flex;justify-content:space-between;align-items:baseline;">

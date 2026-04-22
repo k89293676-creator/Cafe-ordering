@@ -63,17 +63,26 @@ function _hash(s) {
   return Math.abs(h);
 }
 function autoImageUrl(item) {
-  const slug = _slug(item.name);
-  if (!slug) return fallbackImageUrl(item);
-  const tags = (item.tags || []).map(_slug).filter(Boolean).slice(0, 2).join(",");
-  const keywords = encodeURIComponent([slug, tags, "food"].filter(Boolean).join(","));
-  const lock = _hash(item.id || item.name);
-  return `https://loremflickr.com/400/250/${keywords}?lock=${lock}`;
+  // Use Pollinations AI: it understands the item name directly and generates
+  // an image that actually matches the dish. Seed is deterministic per item.
+  const prompt = encodeURIComponent(
+    `${item.name}, professional food photography, restaurant dish, natural light, close-up, appetizing`
+  );
+  const seed = _hash(item.id || item.name) % 999983;
+  return `https://image.pollinations.ai/prompt/${prompt}?width=400&height=250&nologo=true&seed=${seed}`;
 }
 function fallbackImageUrl(item) {
-  const prompt = encodeURIComponent(`${item.name} food photography on a cafe table, top down, natural light`);
-  const seed = _hash(item.id || item.name) % 100000;
-  return `https://image.pollinations.ai/prompt/${prompt}?width=400&height=250&nologo=true&seed=${seed}`;
+  // Split name into individual words so Flickr has better keyword matches
+  // (e.g. "Butter Chicken" → "butter,chicken,food" not "butter-chicken,food")
+  const words = String(item.name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 1)
+    .slice(0, 3)
+    .join(",");
+  const lock = _hash(item.id || item.name) % 10;   // small lock = popular results
+  return `https://loremflickr.com/400/250/${encodeURIComponent(words + ",food")}/all?lock=${lock}`;
 }
 
 function showToast(msg, ms = 2800) {

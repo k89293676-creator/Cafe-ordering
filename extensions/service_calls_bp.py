@@ -7,7 +7,7 @@ and via SSE notifications.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, abort, jsonify, render_template, request
 
@@ -59,10 +59,13 @@ def create_table_call(table_id: str):
     cafe_id = table.get("cafeId")
     table_name = table.get("name") or table_id
 
-    # Debounce: if there's an unresolved call from this table in the last
-    # 60 seconds, return the existing one instead of spamming.
+    # Debounce: only block the SAME table + SAME reason within the last 90 s.
+    # A different reason (e.g. "bill" after "water") always creates a new call.
+    _window = datetime.now(timezone.utc) - timedelta(seconds=90)
     existing = (
-        TableCall.query.filter_by(table_id=table_id, status="open")
+        TableCall.query
+        .filter_by(table_id=table_id, status="open", reason=reason)
+        .filter(TableCall.created_at >= _window)
         .order_by(TableCall.created_at.desc())
         .first()
     )
@@ -88,6 +91,27 @@ def create_table_call(table_id: str):
             pass
 
     return jsonify({"ok": True, "call": _call_dict(call)}), 201
+
+
+# ---------------------------------------------------------------------------
+# Public (customer) — poll their table's current active call
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/table/<table_id>/call-status", methods=["GET"])
+def table_call_status(table_id: str):
+    """Return the current open or acknowledged call for the table (if any).
+    No auth required — the table_id acts as the token.
+    """
+    if not _TABLE_ID_RE.fullmatch(table_id):
+        abort(400, description="Invalid table id.")
+    call = (
+        TableCall.query
+        .filter_by(table_id=table_id)
+        .filter(TableCall.status.in_(["open", "acknowledged"]))
+        .order_by(TableCall.created_at.desc())
+        .first()
+    )
+    return jsonify({"call": _call_dict(call) if call else None})
 
 
 # ---------------------------------------------------------------------------

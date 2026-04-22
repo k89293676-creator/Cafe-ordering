@@ -131,83 +131,150 @@
     if (!tableId) return;
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
 
-    const collapsed     = document.getElementById('ays-collapsed');
-    const expanded      = document.getElementById('ays-expanded');
-    const openBtn       = document.getElementById('ays-open-btn');
-    const cancelBtn     = document.getElementById('ays-cancel-btn');
-    const confirmArea   = document.getElementById('ays-confirm-area');
-    const confirmLabel  = document.getElementById('ays-confirm-label');
-    const noteInput     = document.getElementById('ays-note');
-    const sendBtn       = document.getElementById('ays-send-btn');
-    const status        = document.getElementById('ays-status');
-    const quickStatus   = document.getElementById('ays-quick-status');
+    const collapsed    = document.getElementById('ays-collapsed');
+    const expanded     = document.getElementById('ays-expanded');
+    const openBtn      = document.getElementById('ays-open-btn');
+    const cancelBtn    = document.getElementById('ays-cancel-btn');
+    const confirmArea  = document.getElementById('ays-confirm-area');
+    const confirmLabel = document.getElementById('ays-confirm-label');
+    const noteInput    = document.getElementById('ays-note');
+    const sendBtn      = document.getElementById('ays-send-btn');
+    const statusEl     = document.getElementById('ays-status');
+    const quickStatus  = document.getElementById('ays-quick-status');
 
-    const REASON_LABELS = {service:'🛎️ Call server',bill:'💳 Ask for the bill',water:'💧 Water refill',cutlery:'🍴 Cutlery',help:'❓ Need help'};
+    const REASON_LABELS = {
+      service:'🛎️ Call server', bill:'💳 Ask for the bill',
+      water:'💧 Water refill', cutlery:'🍴 Cutlery', help:'❓ Need help'
+    };
+
     let selectedReason = null;
+    let _pollTimer     = null;
 
-    function open() {
+    /* ── Panel open / close ─────────────────────────────────────────────── */
+    function openPanel() {
       collapsed.style.display = 'none';
       expanded.style.display  = 'flex';
     }
-    function close() {
-      expanded.style.display  = 'none';
-      collapsed.style.display = 'flex';
+    function closePanel() {
+      expanded.style.display    = 'none';
+      collapsed.style.display   = 'flex';
       confirmArea.style.display = 'none';
-      selectedReason = null;
-      noteInput.value = '';
-      status.textContent = '';
-      document.querySelectorAll('#ays-expanded .ays-btn').forEach(b => b.classList.remove('ays-selected'));
+      selectedReason            = null;
+      noteInput.value           = '';
+      statusEl.textContent      = '';
+      document.querySelectorAll('#ays-expanded .ays-btn[data-reason]')
+              .forEach(b => b.classList.remove('ays-selected'));
     }
 
-    openBtn.addEventListener('click', open);
-    cancelBtn.addEventListener('click', close);
+    openBtn.addEventListener('click', openPanel);
+    cancelBtn.addEventListener('click', closePanel);
 
     document.querySelectorAll('#ays-expanded .ays-btn[data-reason]').forEach(btn => {
       btn.addEventListener('click', () => {
         selectedReason = btn.dataset.reason;
-        document.querySelectorAll('#ays-expanded .ays-btn[data-reason]').forEach(b => b.classList.remove('ays-selected'));
+        document.querySelectorAll('#ays-expanded .ays-btn[data-reason]')
+                .forEach(b => b.classList.remove('ays-selected'));
         btn.classList.add('ays-selected');
-        confirmLabel.textContent = REASON_LABELS[selectedReason] || selectedReason;
+        confirmLabel.textContent  = REASON_LABELS[selectedReason] || selectedReason;
         confirmArea.style.display = 'flex';
-        status.textContent = '';
+        statusEl.textContent      = '';
         noteInput.focus();
       });
     });
 
+    /* ── Live call-status polling ────────────────────────────────────────── */
+    function startPoll() {
+      if (_pollTimer) return;
+      _pollTimer = setInterval(pollCallStatus, 8000);
+    }
+    function stopPoll() {
+      clearInterval(_pollTimer);
+      _pollTimer = null;
+    }
+
+    async function pollCallStatus() {
+      try {
+        const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call-status`);
+        if (!r.ok) return;
+        const { call } = await r.json();
+        if (!call) {
+          quickStatus.textContent = '✅ Service complete!';
+          quickStatus.style.color = '#16a34a';
+          openBtn.textContent = '🛎️ Call again';
+          stopPoll();
+          setTimeout(() => { quickStatus.textContent = ''; }, 6000);
+          return;
+        }
+        if (call.status === 'acknowledged') {
+          quickStatus.textContent = '✓ Staff on their way!';
+          quickStatus.style.color = '#4f46e5';
+          quickStatus.style.fontWeight = '600';
+        } else {
+          const age = Math.max(0, Math.round((Date.now() - new Date(call.createdAt).getTime()) / 1000));
+          const ageStr = age < 60 ? `${age}s ago` : `${Math.floor(age / 60)}m ${age % 60}s ago`;
+          quickStatus.textContent = `🛎️ Waiting… (sent ${ageStr})`;
+          quickStatus.style.color = '#6b7280';
+          quickStatus.style.fontWeight = 'normal';
+        }
+      } catch (_) {}
+    }
+
+    /* ── Send call ───────────────────────────────────────────────────────── */
     async function sendCall() {
       if (!selectedReason) return;
-      sendBtn.disabled = true;
+      sendBtn.disabled   = true;
       sendBtn.textContent = 'Sending…';
-      status.textContent = '';
+      statusEl.textContent = '';
       try {
         const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call`, {
-          method:'POST',
-          headers:{'Content-Type':'application/json','X-CSRFToken':csrf},
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
           body: JSON.stringify({ reason: selectedReason, note: noteInput.value.trim() })
         });
-        const j = await r.json().catch(()=>({}));
+        const j = await r.json().catch(() => ({}));
         if (r.ok) {
           const label = REASON_LABELS[selectedReason] || selectedReason;
-          close();
-          quickStatus.textContent = '✓ ' + label + ' — on the way!';
+          closePanel();
+          quickStatus.textContent = j.deduped
+            ? `🔔 Reminder sent for "${label}"!`
+            : `✓ ${label} — on the way!`;
           quickStatus.style.color = '#16a34a';
-          setTimeout(() => { quickStatus.textContent = ''; }, 12000);
+          quickStatus.style.fontWeight = '600';
+          openBtn.textContent = '🛎️ Call again';
+          startPoll();
         } else {
-          status.textContent = j.error || 'Could not send. Please flag down a server.';
-          status.style.color = '#b91c1c';
-          sendBtn.disabled = false;
+          statusEl.textContent = j.error || 'Could not send. Please flag down a server.';
+          statusEl.style.color = '#b91c1c';
+          sendBtn.disabled   = false;
           sendBtn.textContent = 'Send request';
         }
-      } catch(e) {
-        status.textContent = 'Network error.';
-        status.style.color = '#b91c1c';
-        sendBtn.disabled = false;
+      } catch (_) {
+        statusEl.textContent = 'Network error.';
+        statusEl.style.color = '#b91c1c';
+        sendBtn.disabled   = false;
         sendBtn.textContent = 'Send request';
       }
     }
 
     sendBtn.addEventListener('click', sendCall);
     noteInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendCall(); });
+
+    /* ── On page load: check if there's already an active call ──────────── */
+    (async function init() {
+      try {
+        const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call-status`);
+        if (!r.ok) return;
+        const { call } = await r.json();
+        if (call) {
+          openBtn.textContent = '🛎️ Call again';
+          quickStatus.textContent = call.status === 'acknowledged'
+            ? '✓ Staff on their way!'
+            : '🛎️ Service request active…';
+          quickStatus.style.color = call.status === 'acknowledged' ? '#4f46e5' : '#6b7280';
+          startPoll();
+        }
+      } catch (_) {}
+    })();
   })();
   </script>
   {% endif %}

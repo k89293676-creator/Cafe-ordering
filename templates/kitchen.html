@@ -293,6 +293,32 @@
   function orderChime()  { if (soundOn)   chime([[880,0],[1175,250]]); }
   function callChime()   { if (tcSoundOn) chime([[660,0],[880,80],[1100,180]]); }
 
+  // ── Browser notifications ───────────────────────────────────────────────────
+  // Request permission on first user interaction (required by Chrome)
+  document.addEventListener('click', function _once() {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+    document.removeEventListener('click', _once);
+  }, { once: true });
+
+  const TC_REASON = {
+    service:'🛎️ Service', bill:'💳 Bill', water:'💧 Water refill',
+    help:'❓ Help needed', cutlery:'🍴 Cutlery',
+  };
+  function showCallNotification(call) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification(`🛎️ Table Call — ${call.tableName || call.tableId}`, {
+          body: (TC_REASON[call.reason] || call.reason) + (call.note ? `\n"${call.note}"` : ''),
+          icon: '/static/images/icon-192.png',
+          tag: 'tc-' + call.id,
+          requireInteraction: true,
+        });
+      } catch (_) {}
+    }
+  }
+
   // ── Sound toggle buttons ────────────────────────────────────────────────────
   const soundBtn   = document.getElementById('sound-btn');
   const tcSoundBtn = document.getElementById('tc-sound-btn');
@@ -573,17 +599,21 @@
       if (badge) { badge.textContent = openCount; badge.style.display = openCount ? 'inline-block' : 'none'; }
       if (statCalls) statCalls.textContent = openCount;
 
-      // Detect new calls → chime
+      // Detect new calls → chime + browser notification
       if (!firstLoad) {
         const currentCallIds = new Set(calls.map(c => c.id));
         const newCallIds = [...currentCallIds].filter(id => !lastCallIds.has(id));
-        if (newCallIds.length) callChime();
-        newCallIds.forEach(id => {
-          setTimeout(() => {
-            const el = document.querySelector(`[data-tc-id="${id}"]`);
-            if (el) { el.classList.add('new-flash'); }
-          }, 100);
-        });
+        if (newCallIds.length) {
+          callChime();
+          newCallIds.forEach(id => {
+            const call = calls.find(c => c.id === id);
+            if (call) showCallNotification(call);
+            setTimeout(() => {
+              const el = document.querySelector(`[data-tc-id="${id}"]`);
+              if (el) { el.classList.add('new-flash'); }
+            }, 100);
+          });
+        }
         lastCallIds = currentCallIds;
       } else {
         lastCallIds = new Set(calls.map(c => c.id));
