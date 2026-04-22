@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Cafe 11:11{% endblock %}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/enhancements.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; background:#f7f8fb; color:#0f172a; margin:0; }
+    .ext-shell { max-width: 1280px; margin: 0 auto; padding: 1.5rem; }
+    .ext-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:.75rem;}
+    .ext-header h1 { font-size: 1.4rem; margin:0; letter-spacing:-.01em; }
+    .ext-header a.back { color:#4f46e5; text-decoration:none; font-weight:600; font-size:.85rem; }
+    .ext-filter { display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end; background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:.85rem 1rem; margin-bottom:1rem; }
+    .ext-filter .f { display:flex; flex-direction:column; gap:.25rem; }
+    .ext-filter label { font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:#6b7280; font-weight:600;}
+    .ext-filter input,.ext-filter select { padding:.45rem .65rem; border:1px solid #d3d7e2; border-radius:10px; font-size:.85rem; min-width:140px;}
+    .ext-filter button { background:#0f172a; color:#fff; border:0; border-radius:10px; padding:.55rem 1rem; font-weight:600; cursor:pointer; font-size:.85rem; }
+    .ext-grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); margin-bottom:1.25rem;}
+    .kpi { background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:1rem 1.1rem;}
+    .kpi-label { font-size:.7rem; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; font-weight:700;}
+    .kpi-value { font-size:1.7rem; font-weight:800; margin-top:.3rem; line-height:1;}
+    .kpi-sub { font-size:.75rem; color:#6b7280; margin-top:.25rem;}
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:1.1rem; margin-bottom:1rem;}
+    .card h3 { margin:0 0 .85rem; font-size:1rem; font-weight:700;}
+    .chart-wrap { position:relative; height:300px;}
+    table.dt { width:100%; border-collapse:collapse; font-size:.85rem;}
+    table.dt th, table.dt td { padding:.55rem .6rem; border-bottom:1px solid #f1f3f7; text-align:left;}
+    table.dt th { font-size:.7rem; text-transform:uppercase; color:#6b7280; letter-spacing:.05em;}
+    .badge { display:inline-block; padding:.15rem .55rem; border-radius:999px; font-size:.7rem; font-weight:700; text-transform:uppercase;}
+    .b-star { background:#dcfce7; color:#15803d;}
+    .b-plowhorse { background:#fef3c7; color:#a16207;}
+    .b-puzzle { background:#dbeafe; color:#1d4ed8;}
+    .b-dog { background:#fee2e2; color:#b91c1c;}
+    .empty { color:#9ca3af; text-align:center; padding:1.5rem; font-size:.85rem;}
+  </style>
+</head>
+<body>
+<div class="ext-shell">
+  <div class="ext-header">
+    <h1>{% block heading %}{% endblock %}</h1>
+    <a class="back" href="{{ url_for('owner_dashboard') }}">&larr; Back to dashboard</a>
+  </div>
+  {% block body %}{% endblock %}
+</div>
+</body>
+</html>

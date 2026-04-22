@@ -1,0 +1,26 @@
+{
+  "name": "Cafe 11:11",
+  "short_name": "Cafe 11:11",
+  "description": "Order food and drinks at your table",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf8f4",
+  "theme_color": "#1c1c1e",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable any"
+    }
+  ],
+  "categories": ["food", "shopping"],
+  "screenshots": []
+}

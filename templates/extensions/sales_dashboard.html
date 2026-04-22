@@ -1,0 +1,123 @@
+{% extends "extensions/_base_owner.html" %}
+{% block title %}Sales Dashboard — Cafe 11:11{% endblock %}
+{% block heading %}Interactive Sales Dashboard{% endblock %}
+{% block body %}
+<form id="filter" class="ext-filter">
+  <div class="f"><label>Start</label><input type="date" id="start"/></div>
+  <div class="f"><label>End</label><input type="date" id="end"/></div>
+  <div class="f"><label>Granularity</label>
+    <select id="granularity"><option value="day" selected>Day</option><option value="hour">Hour</option></select>
+  </div>
+  <button type="submit">Apply</button>
+</form>
+
+<div class="ext-grid">
+  <div class="kpi"><div class="kpi-label">Revenue</div><div class="kpi-value" id="kpi-rev">—</div></div>
+  <div class="kpi"><div class="kpi-label">Orders</div><div class="kpi-value" id="kpi-orders">—</div></div>
+  <div class="kpi"><div class="kpi-label">Avg ticket</div><div class="kpi-value" id="kpi-ticket">—</div></div>
+  <div class="kpi"><div class="kpi-label">Items sold</div><div class="kpi-value" id="kpi-items">—</div></div>
+</div>
+
+<div class="card">
+  <h3>Revenue over time <span id="drill-hint" style="font-size:.7rem;color:#6b7280;font-weight:500;">(click a bar to drill down)</span></h3>
+  <div class="chart-wrap"><canvas id="ts-chart"></canvas></div>
+</div>
+
+<div class="ext-grid" style="grid-template-columns: 1fr 1fr;">
+  <div class="card">
+    <h3>Revenue by category</h3>
+    <div class="chart-wrap"><canvas id="cat-chart"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>Top items</h3>
+    <table class="dt"><thead><tr><th>Item</th><th>Qty</th><th>Revenue</th></tr></thead>
+      <tbody id="top-items-body"></tbody></table>
+  </div>
+</div>
+
+<div class="card" id="drill-card" style="display:none;">
+  <h3>Orders in <span id="drill-bucket"></span></h3>
+  <table class="dt"><thead><tr><th>ID</th><th>Customer</th><th>Table</th><th>Total</th><th>Time</th></tr></thead>
+    <tbody id="drill-body"></tbody></table>
+</div>
+
+<script>
+const fmt = n => new Intl.NumberFormat(undefined, {style:'currency', currency:'USD'}).format(n||0);
+const today = new Date();
+const lastMonth = new Date(); lastMonth.setDate(today.getDate() - 30);
+document.getElementById('start').value = lastMonth.toISOString().slice(0,10);
+document.getElementById('end').value = today.toISOString().slice(0,10);
+
+let tsChart, catChart;
+
+async function jget(url) { const r = await fetch(url, {credentials:'same-origin'}); return r.json(); }
+
+async function refresh() {
+  const start = document.getElementById('start').value;
+  const end = document.getElementById('end').value;
+  const granularity = document.getElementById('granularity').value;
+  const qs = `?start=${start}&end=${end}&granularity=${granularity}`;
+
+  const [summary, ts, cat, top] = await Promise.all([
+    jget(`/api/owner/sales/summary?start=${start}&end=${end}`),
+    jget(`/api/owner/sales/timeseries${qs}`),
+    jget(`/api/owner/sales/by-category?start=${start}&end=${end}`),
+    jget(`/api/owner/sales/top-items?start=${start}&end=${end}`),
+  ]);
+
+  document.getElementById('kpi-rev').textContent = fmt(summary.totalRevenue);
+  document.getElementById('kpi-orders').textContent = summary.totalOrders;
+  document.getElementById('kpi-ticket').textContent = fmt(summary.avgTicket);
+  document.getElementById('kpi-items').textContent = summary.totalItems;
+
+  const labels = ts.series.map(s => s.bucket);
+  const values = ts.series.map(s => s.revenue);
+  if (tsChart) tsChart.destroy();
+  tsChart = new Chart(document.getElementById('ts-chart'), {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Revenue', data: values, backgroundColor: '#4f46e5' }] },
+    options: {
+      maintainAspectRatio:false,
+      onClick: async (evt, els) => {
+        if (!els.length) return;
+        const bucket = labels[els[0].index];
+        showDrill(bucket, granularity);
+      },
+      plugins:{legend:{display:false}}
+    }
+  });
+
+  if (catChart) catChart.destroy();
+  catChart = new Chart(document.getElementById('cat-chart'), {
+    type: 'doughnut',
+    data: {
+      labels: cat.categories.map(c => c.category),
+      datasets: [{ data: cat.categories.map(c => c.revenue),
+        backgroundColor: ['#4f46e5','#0ea5e9','#10b981','#f59e0b','#ef4444','#a855f7','#6b7280']}]
+    },
+    options: { maintainAspectRatio:false }
+  });
+
+  const tbody = document.getElementById('top-items-body');
+  tbody.innerHTML = top.items.length
+    ? top.items.map(i => `<tr><td>${i.name}</td><td>${i.qty}</td><td>${fmt(i.revenue)}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="empty">No data</td></tr>';
+}
+
+async function showDrill(bucket, granularity) {
+  let start = bucket, end = bucket;
+  if (granularity === 'hour') {
+    start = bucket.slice(0,10); end = bucket.slice(0,10);
+  }
+  const r = await jget(`/api/owner/sales/orders?start=${start}&end=${end}`);
+  document.getElementById('drill-card').style.display='block';
+  document.getElementById('drill-bucket').textContent = bucket;
+  document.getElementById('drill-body').innerHTML = r.orders.length
+    ? r.orders.map(o => `<tr><td>#${o.id}</td><td>${o.customerName||''}</td><td>${o.tableName||''}</td><td>${fmt(o.total)}</td><td>${(o.createdAt||'').slice(0,16).replace('T',' ')}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="empty">No orders</td></tr>';
+}
+
+document.getElementById('filter').addEventListener('submit', e => { e.preventDefault(); refresh(); });
+refresh();
+</script>
+{% endblock %}

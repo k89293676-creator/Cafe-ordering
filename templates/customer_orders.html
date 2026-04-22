@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <title>My Orders</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <style>
+    body{background:var(--surface-alt,#f3f4f6);min-height:100vh;padding:0;}
+    .co-header{background:#fff;border-bottom:1px solid #e5e7eb;padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;}
+    .co-header h1{margin:0;font-size:1.25rem;font-weight:700;color:#0f172a;}
+    .co-header-right{display:flex;align-items:center;gap:.75rem;font-size:.875rem;color:#6b7280;}
+    .co-header-right strong{color:#0f172a;}
+    .co-header-right a{color:var(--primary,#4f46e5);font-weight:600;text-decoration:none;}
+    .co-main{max-width:700px;margin:2rem auto;padding:0 1rem;}
+    .co-empty{text-align:center;padding:3rem 1rem;color:#6b7280;}
+    .co-empty h2{color:#374151;margin-bottom:.5rem;}
+    .order-card{background:#fff;border:1px solid #e5e7eb;border-radius:1rem;padding:1.25rem;margin-bottom:1rem;box-shadow:0 1px 4px rgba(15,23,42,.06);}
+    .order-card-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem;}
+    .order-id{font-weight:700;color:#0f172a;font-size:.95rem;}
+    .order-meta{font-size:.8rem;color:#9ca3af;margin-top:.15rem;}
+    .status-badge{display:inline-block;padding:.2rem .65rem;border-radius:999px;font-size:.75rem;font-weight:700;}
+    .status-pending{background:#fef3c7;color:#92400e;}
+    .status-preparing{background:#dbeafe;color:#1e3a8a;}
+    .status-ready{background:#dcfce7;color:#166534;}
+    .status-completed{background:#f0fdf4;color:#15803d;}
+    .status-cancelled{background:#fef2f2;color:#dc2626;}
+    .order-items{font-size:.85rem;color:#374151;margin:.5rem 0;}
+    .order-item-row{display:flex;justify-content:space-between;padding:.2rem 0;border-bottom:1px solid #f3f4f6;}
+    .order-item-row:last-child{border-bottom:0;}
+    .order-total-row{display:flex;justify-content:space-between;font-weight:700;font-size:.9rem;color:#0f172a;margin-top:.75rem;padding-top:.5rem;border-top:2px solid #e5e7eb;}
+    .pickup-code{font-family:monospace;background:#f0fdf4;border:1.5px dashed #10b981;border-radius:.5rem;padding:.25rem .6rem;font-size:.85rem;color:#065f46;font-weight:700;margin-top:.5rem;display:inline-block;}
+    .flash{padding:.65rem 1rem;border-radius:.6rem;font-size:.875rem;margin-bottom:1rem;}
+    .flash.error{background:#fef2f2;color:#dc2626;border:1px solid #fecaca;}
+    .flash.success{background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;}
+  </style>
+</head>
+<body>
+<header class="co-header">
+  <h1>My Orders</h1>
+  <div class="co-header-right">
+    <span>Logged in as <strong>{{ customer.name or customer.email }}</strong></span>
+    <a href="{{ url_for('customers.customer_logout') }}">Log out</a>
+  </div>
+</header>
+
+<main class="co-main">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+    <div class="flash {{ cat }}">{{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  {% if not orders %}
+  <div class="co-empty">
+    <h2>No orders yet</h2>
+    <p>Your order history will appear here once you place an order using this email address.</p>
+  </div>
+  {% else %}
+    {% for order in orders %}
+    <div class="order-card">
+      <div class="order-card-head">
+        <div>
+          <div class="order-id">Order #{{ order.id }}</div>
+          <div class="order-meta">
+            {{ order.tableName }} · {{ (order.createdAt or '')[:16] | replace('T',' ') }}
+          </div>
+        </div>
+        <span class="status-badge status-{{ order.status }}">
+          {{ order.status | capitalize }}
+        </span>
+      </div>
+
+      {% if order.items %}
+      <div class="order-items">
+        {% for item in order.items %}
+        <div class="order-item-row">
+          <span>{{ item.name | default('Item') }} × {{ item.quantity | default(1) }}</span>
+          <span>₹{{ '%.2f' | format((item.lineTotal or 0) | float) }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="order-total-row">
+        <span>Total</span>
+        <span>₹{{ '%.2f' | format(order.total | float) }}</span>
+      </div>
+
+      {% if order.pickupCode %}
+      <div><span class="pickup-code">🎫 {{ order.pickupCode }}</span></div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% endif %}
+</main>
+</body>
+</html>

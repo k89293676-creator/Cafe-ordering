@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Receipt #{{ order.id }} — {{ cafe_name }}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; background:#f3f4f6;
+           margin:0; padding:1.5rem; color:#111827; }
+    .receipt { max-width: 360px; margin: 0 auto; background:#fff;
+               border-radius: 12px; padding:1.5rem 1.25rem;
+               box-shadow: 0 6px 20px rgba(15,23,42,.08); }
+    h1 { font-size: 1.05rem; margin: 0 0 .15rem; text-align:center; letter-spacing:.02em; }
+    .sub { text-align:center; font-size:.78rem; color:#6b7280; margin-bottom:1rem; }
+    .meta { font-size:.78rem; color:#374151; border-top:1px dashed #d1d5db;
+            border-bottom:1px dashed #d1d5db; padding:.6rem 0; margin:.75rem 0; }
+    .meta div { display:flex; justify-content:space-between; padding:.1rem 0; }
+    .item-row { display:flex; justify-content:space-between; gap:.5rem;
+                padding:.35rem 0; font-size:.85rem; }
+    .item-name { flex:1; }
+    .item-mod { font-size:.72rem; color:#6b7280; padding-left:.75rem; }
+    .totals { border-top:1px dashed #d1d5db; margin-top:.75rem; padding-top:.6rem; font-size:.85rem; }
+    .totals div { display:flex; justify-content:space-between; padding:.15rem 0; }
+    .grand { font-size:1.05rem; font-weight:700; border-top:1px solid #111827;
+             margin-top:.4rem; padding-top:.4rem; }
+    .pickup { text-align:center; font-size:1.4rem; font-weight:800; letter-spacing:.2em;
+              background:#fef3c7; border-radius:8px; padding:.4rem; margin:.75rem 0; }
+    .footer { text-align:center; font-size:.72rem; color:#9ca3af; margin-top:1rem; }
+    .actions { display:flex; gap:.5rem; max-width:360px; margin: 1rem auto 0; }
+    .btn { flex:1; padding:.65rem; border-radius:8px; border:0; font-weight:600;
+           font-size:.85rem; cursor:pointer; text-align:center; text-decoration:none; }
+    .btn-print { background:#0f172a; color:#fff; }
+    .btn-paid  { background:#10b981; color:#fff; }
+    .btn-back  { background:#e5e7eb; color:#374151; }
+    @media print {
+      body { background:#fff; padding:0; }
+      .receipt { box-shadow:none; border:0; max-width:100%; }
+      .actions, .no-print { display:none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="receipt">
+    <h1>{{ cafe_name }}</h1>
+    <div class="sub">Receipt · Order #{{ order.id }}</div>
+
+    <div class="meta">
+      <div><span>Table</span><strong>{{ order.tableName or '—' }}</strong></div>
+      <div><span>Customer</span><span>{{ order.customerName or 'Guest' }}</span></div>
+      {% if order.customerPhone %}<div><span>Phone</span><span>{{ order.customerPhone }}</span></div>{% endif %}
+      <div><span>Date</span><span>{{ printed_at }}</span></div>
+      <div><span>Status</span><span>{{ order.status|upper }}</span></div>
+    </div>
+
+    {% if order.pickupCode %}
+    <div class="pickup">📦 {{ order.pickupCode }}</div>
+    {% endif %}
+
+    {% for it in order.items %}
+    <div class="item-row">
+      <span class="item-name">{{ it.quantity }}× {{ it.name }}{% if it.size %} <small>({{ it.size }})</small>{% endif %}</span>
+      <span>₹{{ "%.2f"|format(it.lineTotal or 0) }}</span>
+    </div>
+    {% if it.modifiers %}
+      {% for m in it.modifiers %}
+        <div class="item-mod">+ {{ m.name }}{% if (m.priceDelta or m.price or 0)|float != 0 %} (₹{{ "%.0f"|format(m.priceDelta or m.price or 0) }}){% endif %}</div>
+      {% endfor %}
+    {% endif %}
+    {% if it.notes %}<div class="item-mod">📝 {{ it.notes }}</div>{% endif %}
+    {% endfor %}
+
+    <div class="totals">
+      <div><span>Subtotal</span><span>₹{{ "%.2f"|format(order.subtotal) }}</span></div>
+      {% if order.tip %}<div><span>Tip</span><span>₹{{ "%.2f"|format(order.tip) }}</span></div>{% endif %}
+      <div class="grand"><span>Total</span><span>₹{{ "%.2f"|format(order.total) }}</span></div>
+    </div>
+
+    {% if order.notes %}
+    <div class="meta" style="margin-top:.75rem;font-style:italic;">"{{ order.notes }}"</div>
+    {% endif %}
+
+    <div class="footer">Thank you for visiting {{ cafe_name }}!</div>
+  </div>
+
+  <div class="actions no-print">
+    <a class="btn btn-back"  href="{{ url_for('owner_dashboard') }}#table-calls">← Back</a>
+    <button class="btn btn-print" onclick="window.print()">🖨 Print</button>
+    {% if order.status not in ('completed', 'cancelled') %}
+    <form method="POST" action="{{ url_for('mark_order_paid', order_id=order.id) }}" style="flex:1;margin:0;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+      <button type="submit" class="btn btn-paid">✓ Mark paid</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <script>
+    // Auto-open the print dialog when ?autoprint=1 is supplied (e.g. from the dashboard).
+    if (new URLSearchParams(location.search).get('autoprint') === '1') {
+      setTimeout(() => window.print(), 350);
+    }
+  </script>
+</body>
+</html>

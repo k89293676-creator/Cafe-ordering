@@ -1,0 +1,85 @@
+{% extends "extensions/_base_owner.html" %}
+{% block title %}Employees — Cafe 11:11{% endblock %}
+{% block heading %}Employees & Performance{% endblock %}
+{% block body %}
+<div class="card">
+  <h3>Add employee</h3>
+  <form id="new-emp" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-end;">
+    <div class="f"><label>Name</label><input id="emp-name" required style="padding:.5rem .65rem;border:1px solid #d3d7e2;border-radius:10px;"/></div>
+    <div class="f"><label>Role</label>
+      <select id="emp-role" style="padding:.5rem .65rem;border:1px solid #d3d7e2;border-radius:10px;">
+        <option value="server">Server</option><option value="barista">Barista</option><option value="cashier">Cashier</option><option value="manager">Manager</option>
+      </select>
+    </div>
+    <button type="submit" style="background:#0f172a;color:#fff;border:0;border-radius:10px;padding:.55rem 1rem;font-weight:600;cursor:pointer;">Add</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Roster</h3>
+  <table class="dt"><thead><tr><th>Name</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody id="emp-rows"></tbody></table>
+</div>
+
+<form id="perf-filter" class="ext-filter">
+  <div class="f"><label>Start</label><input type="date" id="start"/></div>
+  <div class="f"><label>End</label><input type="date" id="end"/></div>
+  <button type="submit">Refresh report</button>
+</form>
+
+<div class="card">
+  <h3>Performance</h3>
+  <table class="dt">
+    <thead><tr><th>Employee</th><th>Role</th><th>Orders</th><th>Revenue</th><th>Tips</th><th>Avg ticket</th><th>Tip %</th></tr></thead>
+    <tbody id="perf-rows"></tbody>
+  </table>
+</div>
+
+<script>
+const fmt = n => new Intl.NumberFormat(undefined, {style:'currency', currency:'USD'}).format(n||0);
+const csrf = document.querySelector('meta[name="csrf-token"]').content;
+const today = new Date(); const back = new Date(); back.setDate(today.getDate()-30);
+document.getElementById('start').value = back.toISOString().slice(0,10);
+document.getElementById('end').value = today.toISOString().slice(0,10);
+
+async function loadEmployees() {
+  const r = await fetch('/api/owner/employees').then(x=>x.json());
+  document.getElementById('emp-rows').innerHTML = r.employees.length
+    ? r.employees.map(e => `<tr>
+        <td>${e.name}</td><td>${e.role}</td>
+        <td>${e.isActive ? '<span class="badge b-star">Active</span>' : '<span class="badge b-dog">Inactive</span>'}</td>
+        <td>${e.isActive ? `<button data-id="${e.id}" class="deact" style="background:transparent;border:1px solid #d3d7e2;border-radius:8px;padding:.3rem .65rem;cursor:pointer;">Deactivate</button>` : ''}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="4" class="empty">No employees yet.</td></tr>';
+  document.querySelectorAll('button.deact').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Deactivate this employee?')) return;
+    await fetch(`/api/owner/employees/${b.dataset.id}`, {method:'DELETE', headers:{'X-CSRFToken': csrf}});
+    loadEmployees();
+  }));
+}
+
+async function loadPerf() {
+  const start = document.getElementById('start').value;
+  const end = document.getElementById('end').value;
+  const r = await fetch(`/api/owner/employees/performance?start=${start}&end=${end}`).then(x=>x.json());
+  document.getElementById('perf-rows').innerHTML = r.employees.length
+    ? r.employees.map(e => `<tr>
+        <td>${e.name}</td><td>${e.role}</td><td>${e.orders}</td>
+        <td>${fmt(e.revenue)}</td><td>${fmt(e.tips)}</td>
+        <td>${fmt(e.avgTicket)}</td><td>${e.tipPct}%</td>
+      </tr>`).join('')
+    : '<tr><td colspan="7" class="empty">No assignments in this range.</td></tr>';
+}
+
+document.getElementById('new-emp').addEventListener('submit', async e => {
+  e.preventDefault();
+  await fetch('/api/owner/employees', {
+    method:'POST', headers:{'Content-Type':'application/json', 'X-CSRFToken': csrf},
+    body: JSON.stringify({name: document.getElementById('emp-name').value, role: document.getElementById('emp-role').value})
+  });
+  document.getElementById('emp-name').value = '';
+  loadEmployees();
+});
+document.getElementById('perf-filter').addEventListener('submit', e => { e.preventDefault(); loadPerf(); });
+loadEmployees(); loadPerf();
+</script>
+{% endblock %}

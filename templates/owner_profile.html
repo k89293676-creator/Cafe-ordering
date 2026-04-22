@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Profile — Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/enhancements.css" />
+</head>
+<body>
+<div class="dashboard-wrapper">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-inner">
+        <div class="brand-wordmark">11:11</div>
+        <div class="brand-text">
+          <h2>Cafe 11:11</h2>
+          <span>Owner Dashboard</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-nav">
+      <div class="sidebar-section-label">Management</div>
+      <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}#overview">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Overview
+      </a>
+      <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}#tables">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h18M3 6h18M3 14h18M3 18h18"/></svg>
+        Tables
+      </a>
+      <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}#menu">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        Menu
+      </a>
+      <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}#orders">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18"/></svg>
+        Orders
+      </a>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-user-card">
+        <div class="user-avatar-lg">{{ owner_username[0].upper() }}</div>
+        <div class="user-info">
+          <div class="user-name">{{ owner_username }}</div>
+          <div class="user-role">Owner</div>
+        </div>
+      </div>
+      <a href="{{ url_for('owner_profile') }}" class="sidebar-link active">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Profile &amp; Settings
+      </a>
+      <a href="{{ url_for('owner_logout') }}" class="sidebar-link sidebar-link--danger">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Sign Out
+      </a>
+    </div>
+  </nav>
+
+  <!-- Main content -->
+  <div class="dashboard-main">
+    <div class="dashboard-topbar">
+      <div class="topbar-title">
+        <h1>Profile &amp; Settings</h1>
+        <p>Manage your account and cafe details</p>
+      </div>
+      <div class="topbar-actions">
+        <a href="{{ url_for('owner_dashboard') }}" class="btn btn-secondary btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+          Back to Dashboard
+        </a>
+      </div>
+    </div>
+
+    <div class="dashboard-content">
+
+      {% with messages = get_flashed_messages() %}
+      {% if messages %}
+      <div style="margin-bottom:1.5rem;">
+        {% for message in messages %}
+        <div class="alert alert-success">{{ message }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endwith %}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;max-width:900px;">
+
+        <!-- Profile info -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Cafe &amp; Profile</h3>
+              <div class="card-subtitle">Update your cafe details and contact info</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <form action="{{ url_for('owner_profile') }}" method="post">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="action" value="profile" />
+              <div class="field">
+                <label>Username</label>
+                <input value="{{ owner.username }}" disabled style="background:var(--surface-alt);cursor:not-allowed;" />
+              </div>
+              <div class="field">
+                <label>Cafe Name</label>
+                <input name="cafe_name" value="{{ owner.cafeName or '' }}" placeholder="e.g. Cafe 11:11" maxlength="200" />
+              </div>
+              <div class="field">
+                <label>Email Address</label>
+                <input type="email" name="email" value="{{ owner.email or '' }}" placeholder="you@example.com" />
+              </div>
+              <div class="field">
+                <label>Phone Number</label>
+                <input type="tel" name="phone" value="{{ owner.phone or '' }}" placeholder="+91 9999999999" maxlength="30" />
+              </div>
+              <div class="field">
+                <label>Logo URL</label>
+                <input name="logo_url" value="{{ branding.logoUrl or '' }}" placeholder="https://example.com/logo.png" maxlength="500" />
+              </div>
+              <div class="field">
+                <label>Brand Color</label>
+                <input type="color" name="brand_color" value="{{ branding.brandColor or '#4f46e5' }}" />
+              </div>
+              <button class="btn btn-primary btn-full" type="submit">Save Changes</button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Change password -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Change Password</h3>
+              <div class="card-subtitle">Keep your account secure</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <form action="{{ url_for('owner_profile') }}" method="post">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="action" value="password" />
+              <div class="field">
+                <label>Current Password</label>
+                <div class="input-with-toggle">
+                  <input type="password" id="cur-pw" name="current_password" placeholder="Your current password" required />
+                  <button type="button" class="password-toggle" onclick="togglePw(this,'cur-pw')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="field">
+                <label>New Password</label>
+                <div class="input-with-toggle">
+                  <input type="password" id="new-pw" name="new_password" placeholder="Min. 8 chars" required />
+                  <button type="button" class="password-toggle" onclick="togglePw(this,'new-pw')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="field">
+                <label>Confirm New Password</label>
+                <input type="password" name="confirm_password" placeholder="Repeat new password" required />
+              </div>
+              <button class="btn btn-primary btn-full" type="submit">Update Password</button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Account info -->
+        <div class="card" style="grid-column:1/-1;">
+          <div class="card-header">
+            <div>
+              <h3>Account Info</h3>
+              <div class="card-subtitle">Your account details</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="kpi-list">
+              <div class="kpi-row">
+                <div class="kpi-label"><span class="kpi-dot" style="background:#4f46e5;"></span> Username</div>
+                <div class="kpi-value">{{ owner.username }}</div>
+              </div>
+              <div class="kpi-row">
+                <div class="kpi-label"><span class="kpi-dot" style="background:#10b981;"></span> Email</div>
+                <div class="kpi-value">{{ owner.email or '—' }}</div>
+              </div>
+              <div class="kpi-row">
+                <div class="kpi-label"><span class="kpi-dot" style="background:#f59e0b;"></span> Cafe Name</div>
+                <div class="kpi-value">{{ owner.cafeName or '—' }}</div>
+              </div>
+              <div class="kpi-row">
+                <div class="kpi-label"><span class="kpi-dot" style="background:#ec4899;"></span> Member Since</div>
+                <div class="kpi-value">{{ (owner.createdAt or '')[:10] or '—' }}</div>
+              </div>
+              <div class="kpi-row">
+                <div class="kpi-label"><span class="kpi-dot" style="background:#6366f1;"></span> 2FA Status</div>
+                <div class="kpi-value">
+                  {% if owner.totpEnabled %}
+                  <span style="color:#10b981;">Enabled</span>
+                  &nbsp;
+                  <form method="post" action="{{ url_for('totp_disable') }}" style="display:inline;" onsubmit="return confirm('Disable 2FA?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <button type="submit" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:.85rem;text-decoration:underline;">Disable</button>
+                  </form>
+                  {% else %}
+                  <span style="color:#6b7280;">Disabled</span>
+                  &nbsp;
+                  <a href="{{ url_for('totp_setup') }}" style="font-size:.85rem;color:#6366f1;">Enable 2FA</a>
+                  {% endif %}
+                </div>
+              </div>
+              {% if owner.isSuperadmin %}
+              <div class="kpi-row">
+                <div class="kpi-label"><span class="kpi-dot" style="background:#ef4444;"></span> Role</div>
+                <div class="kpi-value"><span style="color:#ef4444;font-weight:600;">Superadmin</span> &nbsp; <a href="{{ url_for('superadmin_dashboard') }}" style="color:#6366f1;font-size:.85rem;">Go to Superadmin</a></div>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function togglePw(btn, id) {
+  const inp = document.getElementById(id);
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+  btn.style.opacity = inp.type === 'text' ? '0.4' : '1';
+}
+</script>
+</body>
+</html>

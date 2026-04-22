@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Analytics — Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/enhancements.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    .analytics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    @media (max-width: 900px) { .analytics-grid { grid-template-columns: 1fr; } }
+    .kpi-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.25rem; }
+    @media (max-width: 900px) { .kpi-cards { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 480px) { .kpi-cards { grid-template-columns: 1fr; } }
+    .kpi-card { background: var(--surface, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: 14px; padding: 1.1rem 1.25rem; }
+    .kpi-card-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; margin-bottom: 0.4rem; }
+    .kpi-card-value { font-size: 1.85rem; font-weight: 800; color: #0f172a; letter-spacing: -.02em; line-height: 1; }
+    .kpi-card-sub { font-size: .76rem; color: #6b7280; margin-top: .35rem; }
+    .chart-card { background: var(--surface, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: 14px; padding: 1.25rem; }
+    .chart-card h3 { margin: 0 0 1rem; font-size: 1rem; font-weight: 700; }
+    .chart-wrap { position: relative; height: 280px; }
+    .filter-bar { display:flex; gap:.65rem; align-items:flex-end; margin-bottom:1.25rem; flex-wrap:wrap; background:var(--surface,#fff); border:1px solid var(--border,#e5e7eb); border-radius:14px; padding: .9rem 1rem; }
+    .filter-bar .field { display:flex; flex-direction:column; gap:.2rem; }
+    .filter-bar label { font-size: .72rem; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
+    .filter-bar input[type=date], .filter-bar select { border:1px solid #d3d7e2; border-radius:10px; padding:.45rem .7rem; font-size:.88rem; background:#fff; color:#0f172a; min-width: 140px; }
+    .filter-bar .preset-row { display:flex; gap:.4rem; flex-wrap:wrap; margin-left:auto; }
+    .preset-btn { background:#f3f4f6; border:1px solid #e5e7eb; border-radius:999px; padding:.35rem .8rem; font-size:.78rem; font-weight:600; color:#374151; cursor:pointer; }
+    .preset-btn:hover { background:#e5e7eb; }
+    .preset-btn.is-active { background:#0f172a; color:#fff; border-color:#0f172a; }
+    .quick-actions { display:flex; gap:.5rem; flex-wrap:wrap; }
+    .quick-actions a { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:.5rem .85rem; font-size:.85rem; font-weight:600; color:#0f172a; text-decoration:none; display:inline-flex; align-items:center; gap:.4rem; }
+    .quick-actions a:hover { border-color:#4f46e5; color:#4f46e5; }
+    .chart-card[data-drillable] { cursor: pointer; }
+    .chart-card[data-drillable] h3::after { content: ' ↗'; font-size:.7em; opacity:.4; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="dashboard-wrapper">
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-inner">
+        <div class="brand-wordmark">11:11</div>
+        <div class="brand-text"><h2>Cafe 11:11</h2><span>Analytics</span></div>
+      </div>
+    </div>
+    <div class="sidebar-nav">
+      <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Dashboard
+      </a>
+      <a class="sidebar-link active" href="{{ url_for('owner_analytics') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Analytics
+      </a>
+      <a class="sidebar-link" href="{{ url_for('owner_customers') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Customers
+      </a>
+      <a class="sidebar-link" href="{{ url_for('kitchen_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2v6a1 1 0 01-1 1H4"/><path d="M15 2v6a1 1 0 001 1h4"/><rect x="3" y="9" width="18" height="10" rx="2"/></svg>
+        Kitchen View
+      </a>
+      <a class="sidebar-link" href="{{ url_for('inventory_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        Inventory
+      </a>
+    </div>
+    <div class="sidebar-footer">
+      <div class="sidebar-user-card">
+        <div class="user-avatar-lg">{{ owner_username[0].upper() }}</div>
+        <div class="user-info"><span class="user-name">{{ owner_username }}</span><span class="user-role">Owner</span></div>
+      </div>
+      <a href="{{ url_for('owner_logout') }}" class="sidebar-link sidebar-link--danger" style="margin-top:.5rem;">Sign out</a>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <div class="main-header">
+      <div>
+        <h1 class="main-title">Analytics</h1>
+        <p class="main-subtitle">Revenue trends, top items and peak hours</p>
+      </div>
+      <div class="quick-actions">
+        <a id="exportOrdersBtn" href="{{ url_for('export_orders_csv') }}">Orders CSV</a>
+        <a id="exportMenuBtn" href="{{ url_for('export_menu_csv') }}">Menu CSV</a>
+        <a id="dailyReportBtn" href="{{ url_for('daily_report_pdf') }}">Daily PDF</a>
+      </div>
+    </div>
+
+    <!-- Filter bar -->
+    <form method="get" id="filterForm" class="filter-bar">
+      <div class="field">
+        <label>From</label>
+        <input type="date" name="from" id="dateFrom" value="{{ analytics.dateFrom }}" />
+      </div>
+      <div class="field">
+        <label>To</label>
+        <input type="date" name="to" id="dateTo" value="{{ analytics.dateTo }}" />
+      </div>
+      <button type="submit" class="preset-btn" style="background:#4f46e5;color:#fff;border-color:#4f46e5;">Apply</button>
+      <div class="preset-row">
+        <button type="button" class="preset-btn" data-range="today">Today</button>
+        <button type="button" class="preset-btn" data-range="7">Last 7 days</button>
+        <button type="button" class="preset-btn" data-range="30">Last 30 days</button>
+        <button type="button" class="preset-btn" data-range="all">All time</button>
+      </div>
+    </form>
+
+    <!-- KPI Cards -->
+    <div class="kpi-cards">
+      <div class="kpi-card">
+        <div class="kpi-card-label">Total Revenue</div>
+        <div class="kpi-card-value">₹{{ '%.0f'|format(analytics.totalRevenue) }}</div>
+        <div class="kpi-card-sub">Completed orders only</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-card-label">Completed Orders</div>
+        <div class="kpi-card-value">{{ analytics.totalOrders }}</div>
+        <div class="kpi-card-sub">{{ analytics.totalAllOrders }} total placed</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-card-label">Avg. Order Value</div>
+        <div class="kpi-card-value">₹{{ '%.0f'|format(analytics.avgOrderValue) }}</div>
+        <div class="kpi-card-sub">Per completed order</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-card-label">Avg. Rating</div>
+        <div class="kpi-card-value">{{ '%.1f'|format(analytics.avgRating) }}<span style="font-size:1rem;color:#6b7280;font-weight:600;"> / 5</span></div>
+        <div class="kpi-card-sub">{{ analytics.feedbackCount }} review{{ 's' if analytics.feedbackCount != 1 else '' }}</div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="analytics-grid">
+      <div class="chart-card" data-drillable>
+        <h3>Daily Revenue (Last 30 Days)</h3>
+        <div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Top 5 Items (by quantity)</h3>
+        <div class="chart-wrap"><canvas id="topItemsChart"></canvas></div>
+      </div>
+      <div class="chart-card" data-drillable>
+        <h3>Orders per Day (Last 30 Days)</h3>
+        <div class="chart-wrap"><canvas id="ordersChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Peak Order Hours</h3>
+        <div class="chart-wrap"><canvas id="peakHoursChart"></canvas></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const A = {{ analytics | tojson }};
+const COLORS = ['#4f46e5','#10b981','#f59e0b','#ec4899','#06b6d4'];
+
+new Chart(document.getElementById('revenueChart'), {
+  type: 'bar',
+  data: {
+    labels: A.revenueByDay.map(d => d.date),
+    datasets: [{
+      label: 'Revenue (₹)',
+      data: A.revenueByDay.map(d => d.revenue),
+      backgroundColor: 'rgba(79,70,229,.85)',
+      hoverBackgroundColor: 'rgba(79,70,229,1)',
+      borderRadius: 4,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false },
+               tooltip: { callbacks: { footer: () => 'Click to see orders' } } },
+    scales: {
+      x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 10 } } },
+      y: { beginAtZero: true, ticks: { callback: v => '₹' + v } }
+    },
+    onClick(evt, elements) {
+      if (!elements.length) return;
+      openDayDrillDown(revFullDates[elements[0].index]);
+    },
+    onHover(evt, elements) {
+      evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+    },
+  }
+});
+
+new Chart(document.getElementById('topItemsChart'), {
+  type: 'doughnut',
+  data: {
+    labels: A.topItems.map(i => i.name),
+    datasets: [{
+      data: A.topItems.map(i => i.count),
+      backgroundColor: COLORS,
+      borderWidth: 2,
+      borderColor: '#fff',
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }
+  }
+});
+
+new Chart(document.getElementById('ordersChart'), {
+  type: 'line',
+  data: {
+    labels: A.ordersByDay.map(d => d.date),
+    datasets: [{
+      label: 'Orders',
+      data: A.ordersByDay.map(d => d.count),
+      borderColor: '#10b981',
+      backgroundColor: 'rgba(16,185,129,.18)',
+      fill: true,
+      tension: 0.3,
+      pointRadius: 5,
+      pointHoverRadius: 8,
+      pointBackgroundColor: '#10b981',
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false },
+               tooltip: { callbacks: { footer: () => 'Click to see orders' } } },
+    scales: {
+      x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 10 } } },
+      y: { beginAtZero: true, ticks: { precision: 0 } }
+    },
+    onClick(evt, elements) {
+      if (!elements.length) return;
+      openDayDrillDown(ordFullDates[elements[0].index]);
+    },
+    onHover(evt, elements) {
+      evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+    },
+  }
+});
+
+new Chart(document.getElementById('peakHoursChart'), {
+  type: 'bar',
+  data: {
+    labels: A.peakHours.map(h => h.hour),
+    datasets: [{
+      label: 'Completed orders',
+      data: A.peakHours.map(h => h.count),
+      backgroundColor: 'rgba(245,158,11,.85)',
+      borderRadius: 4,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+      y: { beginAtZero: true, ticks: { precision: 0 } }
+    }
+  }
+});
+
+// ── Full dates for drill-down ───────────────────────────────────────────────
+const revFullDates = A.revenueByDay.map(d => d.fullDate);
+const ordFullDates = A.ordersByDay.map(d => d.fullDate);
+
+// ── Drill-down helpers ──────────────────────────────────────────────────────
+const STATUS_LABEL = {pending:'Pending', confirmed:'Confirmed', preparing:'Preparing',
+                      ready:'Ready', completed:'Completed', cancelled:'Cancelled'};
+const STATUS_COLOR = {pending:'#f59e0b', confirmed:'#3b82f6', preparing:'#f59e0b',
+                      ready:'#10b981', completed:'#4f46e5', cancelled:'#ef4444'};
+
+async function openDayDrillDown(date) {
+  if (!date) return;
+  const modal = document.getElementById('drillModal');
+  const title = document.getElementById('drillTitle');
+  const body  = document.getElementById('drillBody');
+  title.textContent = 'Orders for ' + date;
+  body.innerHTML = '<div style="text-align:center;padding:2rem;"><div style="width:36px;height:36px;border:4px solid #e5e7eb;border-top-color:#4f46e5;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto;"></div></div>';
+  modal.style.display = 'flex';
+
+  try {
+    const r = await fetch('/api/owner/analytics/day-orders?date=' + date, {credentials:'same-origin'});
+    if (!r.ok) throw new Error(r.status);
+    const data = await r.json();
+    const orders = data.orders || [];
+    if (!orders.length) {
+      body.innerHTML = '<p class="text-center text-muted py-3">No orders on this day.</p>';
+      return;
+    }
+    body.innerHTML = orders.map(o => {
+      const items = (o.items || []).map(i => `<span class="badge bg-light text-dark border me-1">${i.quantity}× ${esc(i.name)}</span>`).join('');
+      const sc = STATUS_COLOR[o.status] || '#6b7280';
+      const sl = STATUS_LABEL[o.status] || o.status;
+      return `<div style="border:1px solid #e5e7eb;border-radius:10px;padding:.75rem 1rem;margin-bottom:.65rem;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;flex-wrap:wrap;">
+          <strong>#${o.id} — ${esc(o.tableName || o.tableId || '—')}</strong>
+          <span style="font-size:.75rem;color:${sc};font-weight:700;">${sl}</span>
+        </div>
+        <div style="font-size:.8rem;color:#6b7280;margin:.2rem 0;">${esc(o.customerName || 'Guest')} · ${(o.createdAt||'').slice(11,16)}</div>
+        <div style="margin:.3rem 0;">${items}</div>
+        <div style="font-size:.82rem;font-weight:700;color:#0f172a;">₹${Number(o.total||0).toFixed(2)}</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    body.innerHTML = '<p class="text-center text-danger py-3">Failed to load orders.</p>';
+  }
+}
+
+function esc(s) { return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function closeDrillModal() {
+  document.getElementById('drillModal').style.display = 'none';
+}
+document.getElementById('drillModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('drillModal')) closeDrillModal();
+});
+
+// ── Date-range presets ──────────────────────────────────────────────────────
+function applyPreset(range) {
+  const today = new Date();
+  const fmt = d => d.toISOString().slice(0, 10);
+  let from = '', to = fmt(today);
+  if (range === 'today') from = to;
+  else if (range === '7')  { const d = new Date(); d.setDate(d.getDate() - 6);  from = fmt(d); }
+  else if (range === '30') { const d = new Date(); d.setDate(d.getDate() - 29); from = fmt(d); }
+  else if (range === 'all') { from = ''; to = ''; }
+  document.getElementById('dateFrom').value = from;
+  document.getElementById('dateTo').value = to;
+  document.getElementById('filterForm').submit();
+}
+document.querySelectorAll('.preset-btn[data-range]').forEach(b =>
+  b.addEventListener('click', () => applyPreset(b.dataset.range))
+);
+
+// ── Carry date range into export links ──────────────────────────────────────
+function syncExports() {
+  const from = document.getElementById('dateFrom').value;
+  const to = document.getElementById('dateTo').value;
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  const qs = params.toString();
+  ['exportOrdersBtn','dailyReportBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const base = el.getAttribute('href').split('?')[0];
+    el.href = qs ? base + '?' + qs : base;
+  });
+}
+document.getElementById('dateFrom').addEventListener('change', syncExports);
+document.getElementById('dateTo').addEventListener('change', syncExports);
+syncExports();
+</script>
+
+<!-- Drill-down modal -->
+<div id="drillModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;padding:1rem;">
+  <div style="background:#fff;border-radius:16px;width:100%;max-width:520px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25);">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:1rem 1.25rem;border-bottom:1px solid #e5e7eb;">
+      <strong id="drillTitle" style="font-size:1rem;">Orders</strong>
+      <button onclick="closeDrillModal()" style="background:none;border:0;font-size:1.4rem;cursor:pointer;color:#6b7280;line-height:1;">×</button>
+    </div>
+    <div id="drillBody" style="overflow-y:auto;padding:1rem 1.25rem;"></div>
+  </div>
+</div>
+</body>
+</html>
