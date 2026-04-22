@@ -1,88 +1,174 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Insights — Superadmin</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<style>
-  body{background:#f3f4f6;font-family:system-ui,sans-serif;}
-  .card{border:1px solid #e5e7eb;border-radius:.75rem;}
-  .stat-value{font-size:1.85rem;font-weight:700;line-height:1.1;}
-  .stat-label{font-size:.72rem;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;font-weight:600;}
-</style>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Insights — Superadmin</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/css/enhancements.css"/>
+  <style>
+    :root{--accent:#6366f1;--sidebar-bg:#1a1d21;--sidebar-text:#9ba3af;--sidebar-active:#fff;}
+    body{background:#f3f4f6;font-family:'Inter',system-ui,sans-serif;}
+    .sa-layout{display:flex;min-height:100vh;}
+    .sa-sidebar{width:240px;background:var(--sidebar-bg);color:var(--sidebar-text);display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto;}
+    .sidebar-brand{padding:1.5rem 1.25rem;border-bottom:1px solid rgba(255,255,255,.07);}
+    .sidebar-brand h6{color:#fff;font-weight:700;margin:0;}
+    .sidebar-brand small{color:var(--sidebar-text);font-size:.72rem;}
+    .sidebar-nav{padding:.75rem 0;flex:1;}
+    .sidebar-label{padding:.35rem 1.25rem;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:#4b5563;font-weight:600;}
+    .sidebar-link{display:flex;align-items:center;gap:.6rem;padding:.6rem 1.25rem;color:var(--sidebar-text);text-decoration:none;font-size:.88rem;border-left:3px solid transparent;transition:color .15s,background .15s;}
+    .sidebar-link:hover{color:var(--sidebar-active);background:rgba(255,255,255,.04);}
+    .sidebar-link.active{color:var(--sidebar-active);background:rgba(99,102,241,.15);border-left-color:var(--accent);}
+    .sidebar-link i{font-size:1rem;width:1.2rem;}
+    .sa-content{flex:1;overflow-x:auto;}
+    .sa-topbar{background:#fff;border-bottom:1px solid #e5e7eb;padding:.75rem 1.5rem;display:flex;align-items:center;justify-content:space-between;}
+    .sa-topbar h5{margin:0;font-weight:600;font-size:1rem;}
+    .sa-main{padding:1.5rem;}
+    .stat-value{font-size:1.85rem;font-weight:700;line-height:1.1;}
+    .stat-label{font-size:.72rem;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;font-weight:600;}
+    .table th{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;font-weight:600;}
+    @media(max-width:768px){.sa-sidebar{display:none;}}
+  </style>
 </head>
 <body>
-<div class="container py-4">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="mb-0">Superadmin Insights</h4>
-    <a href="{{ url_for('superadmin_dashboard') }}" class="text-decoration-none">&larr; Back</a>
-  </div>
-
-  <div class="row g-3 mb-4" id="health"></div>
-
-  <div class="card mb-4 p-3">
-    <h6 class="mb-3">Top cafes by revenue</h6>
-    <div class="table-responsive">
-      <table class="table table-sm align-middle">
-        <thead><tr><th>Cafe</th><th>Status</th><th>Owners</th><th>Orders</th><th>Revenue</th><th>Avg rating</th></tr></thead>
-        <tbody id="cafes-rows"></tbody>
-      </table>
+<div class="sa-layout">
+  <aside class="sa-sidebar">
+    <div class="sidebar-brand">
+      <h6><i class="bi bi-shield-lock-fill me-2" style="color:var(--accent)"></i>Superadmin</h6>
+      <small>CafePortal Console</small>
     </div>
-  </div>
+    <nav class="sidebar-nav">
+      <div class="sidebar-label">Overview</div>
+      <a class="sidebar-link" href="{{ url_for('superadmin_dashboard') }}"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a>
+      <a class="sidebar-link" href="{{ url_for('superadmin_analytics') }}"><i class="bi bi-bar-chart-line-fill"></i> Analytics</a>
+      <a class="sidebar-link active" href="{{ url_for('superadmin_extras.insights_view') }}"><i class="bi bi-graph-up-arrow"></i> Insights</a>
+      <div class="sidebar-label mt-2">Switch to</div>
+      <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}"><i class="bi bi-arrow-left-circle"></i> Owner Dashboard</a>
+      <div style="padding:1rem 1.25rem;border-top:1px solid rgba(255,255,255,.07);margin-top:auto;">
+        <a href="{{ url_for('owner_logout') }}" class="sidebar-link" style="padding:0;color:#ef4444;"><i class="bi bi-box-arrow-right"></i> Sign out</a>
+      </div>
+    </nav>
+  </aside>
 
-  <div class="row g-3">
-    <div class="col-md-6">
-      <div class="card p-3"><h6>Daily orders (30d)</h6><canvas id="orders-chart" height="180"></canvas></div>
+  <div class="sa-content">
+    <div class="sa-topbar">
+      <h5><i class="bi bi-graph-up-arrow me-2 text-primary"></i>Platform Insights</h5>
+      <span class="text-muted small">Live data — last 30 days</span>
     </div>
-    <div class="col-md-6">
-      <div class="card p-3"><h6>Daily revenue (30d)</h6><canvas id="rev-chart" height="180"></canvas></div>
+
+    <div class="sa-main">
+      <div class="row g-3 mb-4" id="health">
+        <div class="col-12 text-muted small py-2"><i class="bi bi-arrow-repeat me-1"></i>Loading health data…</div>
+      </div>
+
+      <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white border-bottom py-3 fw-600">
+          <i class="bi bi-trophy me-2 text-warning"></i>Top Cafes by Revenue
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th class="ps-3">#</th><th>Cafe</th><th>Status</th>
+                  <th>Owners</th><th>Orders</th><th>Revenue</th><th>Avg Rating</th>
+                </tr>
+              </thead>
+              <tbody id="cafes-rows">
+                <tr><td colspan="7" class="text-center text-muted py-3">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 fw-600">Daily Orders — Last 30 Days</div>
+            <div class="card-body"><canvas id="orders-chart" height="180"></canvas></div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 fw-600">Daily Revenue (₹) — Last 30 Days</div>
+            <div class="card-body"><canvas id="rev-chart" height="180"></canvas></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-const fmt = n => new Intl.NumberFormat(undefined, {style:'currency', currency:'USD'}).format(n||0);
+const fmtRupee = n => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+
 async function load() {
-  const [cafes, growth, health] = await Promise.all([
-    fetch('/api/superadmin/top-cafes').then(r=>r.json()),
-    fetch('/api/superadmin/growth').then(r=>r.json()),
-    fetch('/api/superadmin/health').then(r=>r.json()),
-  ]);
+  try {
+    const [cafesData, growthData, healthData] = await Promise.all([
+      fetch('/api/superadmin/top-cafes').then(r => r.json()),
+      fetch('/api/superadmin/growth').then(r => r.json()),
+      fetch('/api/superadmin/health').then(r => r.json()),
+    ]);
 
-  document.getElementById('cafes-rows').innerHTML = cafes.cafes.length
-    ? cafes.cafes.map(c => `<tr>
-        <td><strong>${c.name}</strong></td>
-        <td>${c.isActive ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'}</td>
-        <td>${c.ownerCount}</td><td>${c.orders}</td><td>${fmt(c.revenue)}</td>
-        <td>${c.avgRating!=null ? c.avgRating.toFixed(2) + ' / 5' : '—'}</td>
-      </tr>`).join('')
-    : '<tr><td colspan="6" class="text-center text-muted py-3">No cafes with owners yet.</td></tr>';
+    const healthItems = [
+      { label: 'Open Table Calls', val: healthData.openTableCalls, icon: 'bi-bell-fill', color: healthData.openTableCalls > 0 ? 'text-danger' : 'text-muted' },
+      { label: 'Inactive Cafes',   val: healthData.inactiveCafes,  icon: 'bi-shop-window', color: 'text-secondary' },
+      { label: 'Inactive Owners',  val: healthData.inactiveOwners, icon: 'bi-person-x',    color: 'text-secondary' },
+      { label: 'Orders (24h)',     val: healthData.orders24h,      icon: 'bi-receipt',      color: 'text-primary' },
+      { label: 'Completed (24h)', val: healthData.completed24h,   icon: 'bi-check-circle-fill', color: 'text-success' },
+    ];
+    document.getElementById('health').innerHTML = healthItems.map(h => `
+      <div class="col-6 col-md-4 col-xl-2">
+        <div class="card border-0 shadow-sm p-3">
+          <div class="stat-label"><i class="bi ${h.icon} ${h.color} me-1"></i>${h.label}</div>
+          <div class="stat-value mt-1 ${h.color}">${h.val}</div>
+        </div>
+      </div>`).join('');
 
-  const healthCards = [
-    ['Open table calls', health.openTableCalls, 'bi-bell-fill text-warning'],
-    ['Inactive cafes', health.inactiveCafes, 'bi-shop-window text-secondary'],
-    ['Inactive owners', health.inactiveOwners, 'bi-person-x text-secondary'],
-    ['Orders (24h)', health.orders24h, 'bi-receipt text-primary'],
-    ['Completed (24h)', health.completed24h, 'bi-check-circle text-success'],
-  ];
-  document.getElementById('health').innerHTML = healthCards.map(([label, val, ico]) => `
-    <div class="col-md-2 col-6"><div class="card p-3">
-      <div class="stat-label"><i class="bi ${ico}"></i> ${label}</div>
-      <div class="stat-value">${val}</div>
-    </div></div>`).join('');
+    document.getElementById('cafes-rows').innerHTML = cafesData.cafes.length
+      ? cafesData.cafes.map((c, i) => `
+          <tr>
+            <td class="ps-3 text-muted">${i + 1}</td>
+            <td><strong>${c.name}</strong></td>
+            <td>${c.isActive
+              ? '<span class="badge rounded-pill px-2" style="background:#d1fae5;color:#065f46;">Active</span>'
+              : '<span class="badge rounded-pill px-2" style="background:#fee2e2;color:#991b1b;">Inactive</span>'}</td>
+            <td>${c.ownerCount}</td>
+            <td>${c.orders}</td>
+            <td>${fmtRupee(c.revenue)}</td>
+            <td>${c.avgRating != null ? '⭐ ' + c.avgRating.toFixed(1) + ' / 5' : '—'}</td>
+          </tr>`).join('')
+      : '<tr><td colspan="7" class="text-center text-muted py-4">No cafes with owners yet.</td></tr>';
 
-  const labels = growth.days.map(d => d.day.slice(5));
-  new Chart(document.getElementById('orders-chart'), {
-    type:'line', data:{labels, datasets:[{label:'Orders', data: growth.days.map(d=>d.orders), borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,.1)', fill:true, tension:.3}]},
-    options:{plugins:{legend:{display:false}}}
-  });
-  new Chart(document.getElementById('rev-chart'), {
-    type:'line', data:{labels, datasets:[{label:'Revenue', data: growth.days.map(d=>d.revenue), borderColor:'#10b981', backgroundColor:'rgba(16,185,129,.1)', fill:true, tension:.3}]},
-    options:{plugins:{legend:{display:false}}}
-  });
+    const labels = growthData.days.map(d => d.day.slice(5));
+    const mkChart = (id, data, color, yLabel) => new Chart(document.getElementById(id), {
+      type: 'line',
+      data: { labels, datasets: [{ data, borderColor: color,
+        backgroundColor: color.replace(')', ',.1)').replace('rgb', 'rgba'),
+        fill: true, tension: .35, pointRadius: 2 }] },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false },
+          tooltip: yLabel ? { callbacks: { label: c => fmtRupee(c.parsed.y) } } : {} },
+        scales: {
+          x: { grid: { display: false } },
+          y: { beginAtZero: true, grid: { color: '#f3f4f6' },
+            ticks: yLabel ? { callback: v => '₹' + v.toLocaleString() } : {} }
+        }
+      }
+    });
+    mkChart('orders-chart', growthData.days.map(d => d.orders), 'rgb(99,102,241)', false);
+    mkChart('rev-chart',    growthData.days.map(d => d.revenue), 'rgb(16,185,129)', true);
+
+  } catch(err) {
+    console.error('Insights load error:', err);
+    document.getElementById('health').innerHTML =
+      '<div class="col-12"><div class="alert alert-danger">Failed to load insights data.</div></div>';
+  }
 }
 load();
 </script>

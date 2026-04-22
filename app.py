@@ -3000,6 +3000,7 @@ def owner_analytics():
 @login_required
 @superadmin_required
 def superadmin_dashboard():
+    from extensions.models import TableCall
     owners = Owner.query.order_by(Owner.created_at.desc()).all()
     cafes = Cafe.query.order_by(Cafe.created_at.desc()).all()
     total_orders = Order.query.count()
@@ -3007,22 +3008,41 @@ def superadmin_dashboard():
     total_feedback = Feedback.query.count()
     avg_rating_row = db.session.query(db.func.avg(Feedback.rating)).scalar()
     avg_rating = round(float(avg_rating_row), 1) if avg_rating_row else 0.0
+    open_calls = TableCall.query.filter_by(status="open").count()
 
-    recent_orders = Order.query.order_by(Order.created_at.desc()).limit(20).all()
+    recent_orders = Order.query.order_by(Order.created_at.desc()).limit(50).all()
+
+    # Per-cafe stats for the cafes table
+    cafe_stats: dict[int, dict] = {}
+    for cafe in cafes:
+        cafe_owners = [o for o in owners if o.cafe_id == cafe.id]
+        owner_ids = [o.id for o in cafe_owners]
+        order_count = Order.query.filter(Order.owner_id.in_(owner_ids)).count() if owner_ids else 0
+        rev = db.session.query(db.func.sum(Order.total)).filter(
+            Order.owner_id.in_(owner_ids), Order.status == "completed"
+        ).scalar() or 0 if owner_ids else 0
+        cafe_stats[cafe.id] = {
+            "owner_count": len(cafe_owners),
+            "order_count": int(order_count),
+            "revenue": round(float(rev), 0),
+        }
 
     return render_template(
         "superadmin/dashboard.html",
         owners=owners,
         cafes=cafes,
+        cafe_stats=cafe_stats,
         total_orders=total_orders,
         total_revenue=round(float(total_revenue), 2),
         total_feedback=total_feedback,
         avg_rating=avg_rating,
+        open_calls=open_calls,
         recent_orders=[_order_dict(o) for o in recent_orders],
         owner_count=len(owners),
         active_owner_count=sum(1 for o in owners if o.is_active),
         cafe_count=len(cafes),
         active_cafe_count=sum(1 for c in cafes if c.is_active),
+        owner_username=logged_in_owner(),
     )
 
 
@@ -3128,6 +3148,60 @@ def superadmin_assign_cafe(owner_id: int):
     owner.cafe_id = int(cafe_id_str) if cafe_id_str and cafe_id_str.isdigit() else None
     db.session.commit()
     flash(f"Owner '{owner.username}' assigned to cafe.")
+    return redirect(url_for("superadmin_dashboard"))
+
+
+@app.route("/superadmin/cafes/<int:cafe_id>/rename", methods=["POST"])
+@login_required
+@superadmin_required
+def superadmin_rename_cafe(cafe_id: int):
+    cafe = db.session.get(Cafe, cafe_id)
+    if not cafe:
+        abort(404)
+    new_name = str(request.form.get("name", "")).strip()[:200]
+    if not new_name:
+        flash("Cafe name cannot be empty.")
+        return redirect(url_for("superadmin_dashboard"))
+    cafe.name = new_name
+    db.session.commit()
+    flash(f"Cafe renamed to '{new_name}'.")
+    return redirect(url_for("superadmin_dashboard"))
+
+
+@app.route("/superadmin/cafes/<int:cafe_id>/delete", methods=["POST"])
+@login_required
+@superadmin_required
+def superadmin_delete_cafe(cafe_id: int):
+    cafe = db.session.get(Cafe, cafe_id)
+    if not cafe:
+        abort(404)
+    linked_owners = Owner.query.filter_by(cafe_id=cafe_id).count()
+    if linked_owners:
+        flash(f"Cannot delete '{cafe.name}' — {linked_owners} owner(s) still assigned. Reassign or delete them first.")
+        return redirect(url_for("superadmin_dashboard"))
+    db.session.delete(cafe)
+    db.session.commit()
+    flash(f"Cafe '{cafe.name}' deleted.")
+    return redirect(url_for("superadmin_dashboard"))
+
+
+@app.route("/superadmin/owners/<int:owner_id>/delete", methods=["POST"])
+@login_required
+@superadmin_required
+def superadmin_delete_owner(owner_id: int):
+    owner = db.session.get(Owner, owner_id)
+    if not owner:
+        abort(404)
+    if owner.is_superadmin:
+        flash("Cannot delete a superadmin account.")
+        return redirect(url_for("superadmin_dashboard"))
+    order_count = Order.query.filter_by(owner_id=owner_id).count()
+    if order_count:
+        flash(f"Cannot delete '{owner.username}' — {order_count} order(s) exist. Deactivate instead.")
+        return redirect(url_for("superadmin_dashboard"))
+    db.session.delete(owner)
+    db.session.commit()
+    flash(f"Owner '{owner.username}' deleted.")
     return redirect(url_for("superadmin_dashboard"))
 
 

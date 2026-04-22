@@ -84,14 +84,18 @@ def dashboard():
     store = _store()
     owners = store.load_owners()
     stats = _global_stats(store)
+    cafes = _get_cafes(store)
+    orders_24h = _orders_24h(store)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     return render_template(
         "admin/dashboard.html",
         owners=owners,
+        cafes=cafes,
         total_owners=len(owners),
         active_owners=sum(1 for o in owners if o.get("isActive", True)),
         total_orders=stats["total_orders"],
         total_revenue=stats["total_revenue"],
+        orders_24h=orders_24h,
         now=now,
     )
 
@@ -139,6 +143,34 @@ def toggle_owner(owner_id: int):
     return redirect(url_for("admin.owners"))
 
 
+@admin_bp.route("/owners/create", methods=["POST"])
+@admin_required
+def create_owner():
+    import re
+    store = _store()
+    from app import Owner, db, create_owner_in_db
+    username = str(request.form.get("username", "")).strip()[:64]
+    email = str(request.form.get("email", "")).strip()[:254] or None
+    cafe_name = str(request.form.get("cafe_name", "")).strip()[:200]
+    password = str(request.form.get("password", ""))[:256]
+    cafe_id_str = request.form.get("cafe_id", "")
+    cafe_id = int(cafe_id_str) if cafe_id_str and cafe_id_str.isdigit() else None
+
+    if not username or not password:
+        flash("Username and password are required.", "danger")
+        return redirect(url_for("admin.dashboard"))
+    if not re.fullmatch(r"[a-zA-Z0-9_\-\.]{3,64}", username):
+        flash("Invalid username — letters, numbers, _ - . only, 3–64 chars.", "danger")
+        return redirect(url_for("admin.dashboard"))
+    if Owner.query.filter_by(username=username).first():
+        flash(f"Username '{username}' already exists.", "danger")
+        return redirect(url_for("admin.dashboard"))
+    pw_hash = store._make_password_hash(password)
+    create_owner_in_db(username, email, pw_hash, cafe_name, cafe_id)
+    flash(f"Owner <strong>{username}</strong> created successfully.", "success")
+    return redirect(url_for("admin.dashboard"))
+
+
 @admin_bp.route("/analytics")
 @admin_required
 def analytics():
@@ -154,6 +186,24 @@ def analytics():
         daily=daily,
         now=now,
     )
+
+
+def _get_cafes(store) -> list:
+    try:
+        from app import Cafe
+        return [{"id": c.id, "name": c.name} for c in Cafe.query.order_by(Cafe.name).all()]
+    except Exception:
+        return []
+
+
+def _orders_24h(store) -> int:
+    try:
+        from datetime import timedelta
+        from app import Order, db
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        return Order.query.filter(Order.created_at >= cutoff).count()
+    except Exception:
+        return 0
 
 
 def _global_stats(store) -> dict:
