@@ -85,70 +85,129 @@
   <!-- At Your Service -->
   {% set _ays_table_id = (table.id if table else None) %}
   {% if _ays_table_id %}
-  <div id="ays-bar" style="position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #e5e7eb;padding:.55rem .85rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
-    <span style="font-size:.8rem;color:#6b7280;font-weight:600;">At your table?</span>
-    <button type="button" data-reason="service" class="ays-btn">🛎️ Call server</button>
-    <button type="button" data-reason="bill" class="ays-btn">💳 Ask for the bill</button>
-    <button type="button" data-reason="water" class="ays-btn">💧 Water refill</button>
-    <button type="button" data-reason="cutlery" class="ays-btn">🍴 Cutlery</button>
-    <button type="button" data-reason="help" class="ays-btn">❓ Need help</button>
-    <span id="ays-status" style="font-size:.78rem;color:#16a34a;margin-left:auto;"></span>
-    <input id="ays-note" type="text" maxlength="120" placeholder="Add a note (optional)…"
-           style="flex:1 1 100%;border:1px solid #cbd5e1;border-radius:8px;padding:.32rem .55rem;font-size:.78rem;margin-top:.25rem;display:none;" />
+  <div id="ays-bar" style="position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #e5e7eb;padding:.55rem .85rem;">
+
+    <!-- Collapsed: just the trigger button -->
+    <div id="ays-collapsed" style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
+      <span style="font-size:.8rem;color:#6b7280;font-weight:600;">Need something?</span>
+      <button type="button" id="ays-open-btn" class="ays-btn" style="background:var(--gold,#4f46e5);color:#fff;border-color:var(--gold,#4f46e5);">🛎️ Call for service</button>
+      <span id="ays-quick-status" style="font-size:.78rem;margin-left:auto;"></span>
+    </div>
+
+    <!-- Expanded: reason buttons + note -->
+    <div id="ays-expanded" style="display:none;flex-direction:column;gap:.5rem;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.4rem;">
+        <span style="font-size:.8rem;color:#6b7280;font-weight:600;">What do you need?</span>
+        <button type="button" id="ays-cancel-btn" style="background:none;border:none;color:#9ca3af;font-size:.78rem;cursor:pointer;padding:0;">✕ Cancel</button>
+      </div>
+      <div style="display:flex;gap:.4rem;flex-wrap:wrap;">
+        <button type="button" data-reason="service"  class="ays-btn">🛎️ Server</button>
+        <button type="button" data-reason="bill"     class="ays-btn">💳 Bill</button>
+        <button type="button" data-reason="water"    class="ays-btn">💧 Water</button>
+        <button type="button" data-reason="cutlery"  class="ays-btn">🍴 Cutlery</button>
+        <button type="button" data-reason="help"     class="ays-btn">❓ Help</button>
+      </div>
+      <div id="ays-confirm-area" style="display:none;flex-direction:column;gap:.4rem;background:#f8fafc;border-radius:10px;padding:.5rem .65rem;border:1px solid #e2e8f0;">
+        <div id="ays-confirm-label" style="font-size:.82rem;font-weight:600;color:#0f172a;"></div>
+        <input id="ays-note" type="text" maxlength="120" placeholder="Add a note (optional)…"
+               style="border:1px solid #cbd5e1;border-radius:8px;padding:.32rem .55rem;font-size:.78rem;width:100%;box-sizing:border-box;" />
+        <div style="display:flex;gap:.4rem;">
+          <button type="button" id="ays-send-btn" class="ays-btn" style="background:var(--gold,#4f46e5);color:#fff;border-color:var(--gold,#4f46e5);flex:1;">Send request</button>
+        </div>
+        <span id="ays-status" style="font-size:.75rem;"></span>
+      </div>
+    </div>
+
   </div>
   <style>
-    .ays-btn{background:#f1f5f9;border:1px solid #cbd5e1;border-radius:999px;padding:.32rem .8rem;font-size:.78rem;font-weight:600;color:#0f172a;cursor:pointer;}
+    .ays-btn{background:#f1f5f9;border:1px solid #cbd5e1;border-radius:999px;padding:.32rem .8rem;font-size:.78rem;font-weight:600;color:#0f172a;cursor:pointer;transition:background .15s,color .15s;}
     .ays-btn:hover{background:#0f172a;color:#fff;border-color:#0f172a;}
     .ays-btn:disabled{opacity:.6;cursor:not-allowed;}
+    .ays-btn.ays-selected{background:var(--gold,#4f46e5);color:#fff;border-color:var(--gold,#4f46e5);}
   </style>
   <script>
   (function(){
     const tableId = {{ _ays_table_id|tojson }};
     if (!tableId) return;
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
-    const status = document.getElementById('ays-status');
-    const noteInput = document.getElementById('ays-note');
-    let pendingReason = null;
-    document.querySelectorAll('.ays-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const reason = btn.dataset.reason;
-        // First click on a button reveals the optional note input;
-        // a second click (or pressing Enter) actually sends the request.
-        if (pendingReason !== reason) {
-          pendingReason = reason;
-          noteInput.style.display = 'block';
-          noteInput.focus();
-          status.textContent = 'Tap "' + btn.textContent.trim() + '" again to confirm';
-          status.style.color = '#6b7280';
-          return;
-        }
-        const note = noteInput.value.trim();
-        document.querySelectorAll('.ays-btn').forEach(b => b.disabled = true);
-        status.textContent = 'Sending…'; status.style.color = '#6b7280';
-        try {
-          const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call`, {
-            method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':csrf},
-            body: JSON.stringify({reason, note})
-          });
-          if (r.ok) {
-            status.textContent = '✓ Help is on the way';
-            status.style.color = '#16a34a';
-          } else {
-            const j = await r.json().catch(()=>({}));
-            status.textContent = j.error || 'Could not send. Please flag down a server.';
-            status.style.color = '#b91c1c';
-          }
-        } catch (e) {
-          status.textContent = 'Network error.'; status.style.color = '#b91c1c';
-        }
-        setTimeout(() => {
-          document.querySelectorAll('.ays-btn').forEach(b => b.disabled = false);
-          pendingReason = null;
-          noteInput.value = '';
-          noteInput.style.display = 'none';
-        }, 8000);
+
+    const collapsed     = document.getElementById('ays-collapsed');
+    const expanded      = document.getElementById('ays-expanded');
+    const openBtn       = document.getElementById('ays-open-btn');
+    const cancelBtn     = document.getElementById('ays-cancel-btn');
+    const confirmArea   = document.getElementById('ays-confirm-area');
+    const confirmLabel  = document.getElementById('ays-confirm-label');
+    const noteInput     = document.getElementById('ays-note');
+    const sendBtn       = document.getElementById('ays-send-btn');
+    const status        = document.getElementById('ays-status');
+    const quickStatus   = document.getElementById('ays-quick-status');
+
+    const REASON_LABELS = {service:'🛎️ Call server',bill:'💳 Ask for the bill',water:'💧 Water refill',cutlery:'🍴 Cutlery',help:'❓ Need help'};
+    let selectedReason = null;
+
+    function open() {
+      collapsed.style.display = 'none';
+      expanded.style.display  = 'flex';
+    }
+    function close() {
+      expanded.style.display  = 'none';
+      collapsed.style.display = 'flex';
+      confirmArea.style.display = 'none';
+      selectedReason = null;
+      noteInput.value = '';
+      status.textContent = '';
+      document.querySelectorAll('#ays-expanded .ays-btn').forEach(b => b.classList.remove('ays-selected'));
+    }
+
+    openBtn.addEventListener('click', open);
+    cancelBtn.addEventListener('click', close);
+
+    document.querySelectorAll('#ays-expanded .ays-btn[data-reason]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedReason = btn.dataset.reason;
+        document.querySelectorAll('#ays-expanded .ays-btn[data-reason]').forEach(b => b.classList.remove('ays-selected'));
+        btn.classList.add('ays-selected');
+        confirmLabel.textContent = REASON_LABELS[selectedReason] || selectedReason;
+        confirmArea.style.display = 'flex';
+        status.textContent = '';
+        noteInput.focus();
       });
     });
+
+    async function sendCall() {
+      if (!selectedReason) return;
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Sending…';
+      status.textContent = '';
+      try {
+        const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRFToken':csrf},
+          body: JSON.stringify({ reason: selectedReason, note: noteInput.value.trim() })
+        });
+        const j = await r.json().catch(()=>({}));
+        if (r.ok) {
+          const label = REASON_LABELS[selectedReason] || selectedReason;
+          close();
+          quickStatus.textContent = '✓ ' + label + ' — on the way!';
+          quickStatus.style.color = '#16a34a';
+          setTimeout(() => { quickStatus.textContent = ''; }, 12000);
+        } else {
+          status.textContent = j.error || 'Could not send. Please flag down a server.';
+          status.style.color = '#b91c1c';
+          sendBtn.disabled = false;
+          sendBtn.textContent = 'Send request';
+        }
+      } catch(e) {
+        status.textContent = 'Network error.';
+        status.style.color = '#b91c1c';
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send request';
+      }
+    }
+
+    sendBtn.addEventListener('click', sendCall);
+    noteInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendCall(); });
   })();
   </script>
   {% endif %}

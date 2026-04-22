@@ -42,7 +42,11 @@ function switchTab(tabId) {
 
 // Wire up all tab buttons (sidebar + tab bar)
 document.querySelectorAll("[data-tab]").forEach(btn => {
-  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  btn.addEventListener("click", (e) => {
+    // Prevent href="#" from scrolling to top on <a> elements
+    if (btn.tagName === 'A') e.preventDefault();
+    switchTab(btn.dataset.tab);
+  });
 });
 
 // Activate tab from hash on load

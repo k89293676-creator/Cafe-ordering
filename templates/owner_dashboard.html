@@ -1020,6 +1020,8 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
     return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
   }
 
+  let _drawerAutoPopped = false;
+
   // Drawer (quick peek of OPEN calls only) ----------------------------------
   async function refreshDrawer() {
     try {
@@ -1029,8 +1031,10 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
       const calls = j.calls || [];
       badge.textContent = calls.length;
       badge.style.display = calls.length ? 'inline-block' : 'none';
-      // If any open call exists and we're not on the table-calls tab, auto-pop drawer once
-      if (calls.length && !drawer.dataset.userClosed && location.hash !== '#table-calls') {
+      // Auto-pop the drawer once (first time there are open calls), unless user dismissed it
+      // or they're already viewing the table-calls tab.
+      if (calls.length && !_drawerAutoPopped && !drawer.dataset.userClosed && location.hash !== '#table-calls') {
+        _drawerAutoPopped = true;
         drawer.style.display = 'flex';
       }
       list.innerHTML = calls.length ? calls.map(c => `
