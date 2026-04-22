@@ -2335,6 +2335,12 @@ def save_menu_item() -> Response:
     description = str(form.get("itemDescription", "")).strip()[:500]
     price_text = str(form.get("itemPrice", "")).strip()[:20]
     tags_text = str(form.get("itemTags", "")).strip()[:300]
+    image_url = str(form.get("itemImageUrl", "")).strip()[:500]
+    dietary_tags_text = str(form.get("itemDietaryTags", "")).strip()[:300]
+    try:
+        prep_time = max(0, min(300, int(form.get("itemPrepTime") or 0)))
+    except (TypeError, ValueError):
+        prep_time = 0
 
     if not category_id or not name or not price_text:
         flash("Item name, price, and category are required.")
@@ -2349,6 +2355,7 @@ def save_menu_item() -> Response:
         return redirect(url_for("owner_dashboard") + "#menu")
 
     tags = [t.strip()[:50] for t in tags_text.split(",") if t.strip()][:10]
+    dietary_tags = [t.strip()[:50] for t in dietary_tags_text.split(",") if t.strip()][:10]
     menu = load_menu()
     category = next((c for c in menu["categories"] if c["id"] == category_id), None)
     if not category:
@@ -2360,7 +2367,8 @@ def save_menu_item() -> Response:
     if item_id:
         item = next((i for i in category["items"] if i["id"] == item_id), None)
         if item:
-            item.update({"name": name, "description": description, "price": price, "tags": tags})
+            item.update({"name": name, "description": description, "price": price, "tags": tags,
+                         "dietary_tags": dietary_tags, "image_url": image_url, "prep_time": prep_time})
             flash("Menu item updated.")
         else:
             flash("Menu item not found.")
@@ -2370,6 +2378,7 @@ def save_menu_item() -> Response:
         category["items"].append({
             "id": new_item_id, "name": name, "description": description,
             "price": price, "tags": tags, "available": True,
+            "dietary_tags": dietary_tags, "image_url": image_url, "prep_time": prep_time,
         })
         flash(f"'{name}' added to menu.")
 
@@ -2931,6 +2940,7 @@ def superadmin_analytics():
 @csrf.exempt
 @limiter.limit("120 per minute")
 def menu_api() -> Response:
+    import copy
     table_id = request.args.get("table_id", "").strip()[:64]
     all_menu = load_menu()
     if table_id:
@@ -2942,7 +2952,31 @@ def menu_api() -> Response:
             filtered = {"categories": []}
     else:
         filtered = {"categories": []}
-    response = jsonify(filtered)
+
+    # Compute popular items from the last 30 days (ordered ≥ 3 times)
+    popular_ids: set[str] = set()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        recent_orders = Order.query.filter(
+            Order.created_at >= cutoff,
+            Order.status.in_(["completed", "preparing", "ready", "pending"]),
+        ).all()
+        item_counts: dict[str, int] = {}
+        for _o in recent_orders:
+            for _item in (_o.items or []):
+                _iid = _item.get("id", "")
+                if _iid:
+                    item_counts[_iid] = item_counts.get(_iid, 0) + int(_item.get("quantity", 1))
+        popular_ids = {iid for iid, cnt in item_counts.items() if cnt >= 3}
+    except Exception:
+        popular_ids = set()
+
+    result = copy.deepcopy(filtered)
+    for cat in result.get("categories", []):
+        for item in cat.get("items", []):
+            item["popular"] = item.get("id", "") in popular_ids
+
+    response = jsonify(result)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return response
 

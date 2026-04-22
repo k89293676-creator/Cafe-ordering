@@ -146,7 +146,7 @@ function renderMenu() {
     items: cat.items.filter(item => {
       if (!item.available && item.available !== undefined) return item.available !== false;
       const matchesSearch = !q || `${item.name} ${item.description || ""} ${(item.tags || []).join(" ")}`.toLowerCase().includes(q);
-      const matchesFilter = !activeFilter || (item.dietary_tags || []).includes(activeFilter);
+      const matchesFilter = !activeFilter || (item.dietary_tags || item.tags || []).includes(activeFilter);
       return matchesSearch && matchesFilter;
     })
   })).filter(c => c.items.length > 0);
@@ -195,11 +195,17 @@ function itemCard(item) {
            <button class="o-stepper__btn js-inc" aria-label="Add">+</button>
          </div>`;
 
+  const popularBadge = item.popular ? `<span class="o-popular-badge">🔥 Popular</span>` : "";
+  const imgHtml = item.image_url
+    ? `<img class="o-item__img" src="${esc(item.image_url)}" alt="${esc(item.name)}" loading="lazy" />`
+    : "";
+
   return `
     <div class="o-item${avail ? "" : " o-item--sold-out"}" data-item="${esc(item.id)}">
+      ${imgHtml}
       <div class="o-item__body">
         <div class="o-item__name">
-          ${esc(item.name)}
+          ${popularBadge}${esc(item.name)}
           ${avail ? "" : `<span class="o-sold-badge">Sold out</span>`}
         </div>
         ${item.description ? `<p class="o-item__desc">${esc(item.description)}</p>` : ""}
@@ -339,10 +345,12 @@ async function placeOrder(name) {
 
   const tipAmt = getTipAmount();
   const payload = {
-    tableId:      TABLE_ID,
-    customerName: lastName,
+    tableId:       TABLE_ID,
+    customerName:  lastName,
     customerEmail: ($("customer-email")?.value || "").trim(),
-    tip:          Math.round(tipAmt * 100) / 100,
+    customerPhone: ($("customer-phone")?.value || "").trim(),
+    notes:         ($("order-notes")?.value || "").trim(),
+    tip:           Math.round(tipAmt * 100) / 100,
     items: Object.entries(cart).map(([id, { qty }]) => ({ id, quantity: qty })),
   };
 
@@ -414,9 +422,18 @@ function trackerHtml(order) {
     ? `<button class="o-tracker__cancel-btn" id="cancel-btn" data-oid="${esc(String(order.id))}">Cancel order</button>`
     : "";
 
+  const pickupHtml = order.pickupCode
+    ? `<div style="text-align:center;margin:1rem 0;padding:1rem;background:#f0fdf4;border:2px dashed #10b981;border-radius:.75rem;">
+        <div style="font-size:.7rem;font-weight:700;color:#065f46;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.35rem;">Pickup Code</div>
+        <div style="font-size:2.2rem;font-weight:900;font-family:monospace;letter-spacing:.18em;color:#059669;">${esc(order.pickupCode)}</div>
+        <div style="font-size:.75rem;color:#6b7280;margin-top:.3rem;">Show at the counter when paying</div>
+      </div>`
+    : "";
+
   return `<div class="o-tracker" id="tracker-root">
     <div class="o-tracker__id">Order #${esc(String(order.id))}</div>
     <div class="o-tracker__hi">Hi, ${esc(order.customerName || "Guest")}!</div>
+    ${pickupHtml}
     <div class="o-steps" id="tracker-steps">${stepsHtml}</div>
     <div class="o-tracker__card" id="tracker-card">
       <div class="o-tracker__emoji" id="tracker-emoji">${si.emoji}</div>

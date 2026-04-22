@@ -56,3 +56,16 @@ class OrderEmployeeAssignment(db.Model):
     __table_args__ = (
         db.UniqueConstraint("order_id", "employee_id", "role", name="uq_order_employee_role"),
     )
+
+
+class Customer(db.Model):
+    """Customer account for order history and loyalty."""
+
+    __tablename__ = "customers"
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.Text, nullable=False, unique=True)
+    name = db.Column(db.Text, default="")
+    phone = db.Column(db.Text, default="")
+    password_hash = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())

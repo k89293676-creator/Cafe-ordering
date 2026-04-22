@@ -531,6 +531,9 @@
                           <div><input name="itemPrice" type="number" step="0.01" value="{{ item.price }}" placeholder="Price" required /></div>
                           <div class="full-col"><input name="itemDescription" value="{{ item.description }}" placeholder="Description" /></div>
                           <div class="full-col"><input name="itemTags" value="{{ item.tags | join(', ') }}" placeholder="Tags (comma separated)" /></div>
+                          <div class="full-col"><input name="itemDietaryTags" value="{{ item.get('dietary_tags', []) | join(', ') }}" placeholder="Dietary tags (vegan, gluten-free, nut-free)" /></div>
+                          <div class="full-col"><input name="itemImageUrl" type="url" value="{{ item.get('image_url', '') }}" placeholder="Image URL (optional)" /></div>
+                          <div><input name="itemPrepTime" type="number" min="0" max="300" value="{{ item.get('prep_time', '') }}" placeholder="Prep time (min)" /></div>
                           <div class="full-col" style="display:flex;gap:0.5rem;">
                             <button class="btn btn-primary btn-sm" type="submit">Save Changes</button>
                             <button class="btn btn-ghost btn-sm" type="button" data-edit-target="edit-{{ item.id }}">Cancel</button>
@@ -584,7 +587,19 @@
                   </div>
                   <div class="field">
                     <label>Tags <span class="text-muted">(comma separated)</span></label>
-                    <input name="itemTags" placeholder="hot, vegan, popular" />
+                    <input name="itemTags" placeholder="hot, popular" />
+                  </div>
+                  <div class="field">
+                    <label>Dietary Tags <span class="text-muted">(comma separated — for filters)</span></label>
+                    <input name="itemDietaryTags" placeholder="vegan, gluten-free, nut-free" />
+                  </div>
+                  <div class="field">
+                    <label>Image URL <span class="text-muted">(optional)</span></label>
+                    <input name="itemImageUrl" type="url" placeholder="https://example.com/image.jpg" />
+                  </div>
+                  <div class="field">
+                    <label>Prep Time <span class="text-muted">(minutes, optional)</span></label>
+                    <input name="itemPrepTime" type="number" min="0" max="300" placeholder="e.g. 10" />
                   </div>
                   <button class="btn btn-primary btn-full" type="submit">Add Item to Menu</button>
                 </form>
@@ -673,7 +688,7 @@
             </div>
             {% if orders_new %}
               {% for order in orders_new %}
-              <div class="order-card">
+              <div class="order-card" data-order-id="{{ order.id }}">
                 <div class="order-card-head">
                   <div>
                     <div class="order-id">Order #{{ order.id }}</div>
@@ -725,7 +740,7 @@
             </div>
             {% if orders_inprogress %}
               {% for order in orders_inprogress %}
-              <div class="order-card">
+              <div class="order-card" data-order-id="{{ order.id }}">
                 <div class="order-card-head">
                   <div>
                     <div class="order-id">Order #{{ order.id }}</div>
@@ -938,6 +953,7 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
             <span style="font-size:.7rem;color:#6b7280;">${(c.createdAt||'').slice(11,16)}</span>
           </div>
           <div style="font-size:.8rem;color:#374151;margin:.2rem 0;">${REASON_LABEL[c.reason] || c.reason}</div>
+          ${c.note ? `<div style="font-size:.75rem;color:#6b7280;font-style:italic;margin:.1rem 0 .2rem;">"${c.note}"</div>` : ''}
           <div style="display:flex;gap:.35rem;">
             <button data-id="${c.id}" data-action="ack" class="ays-act" style="flex:1;background:#fef3c7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Acknowledge</button>
             <button data-id="${c.id}" data-action="resolve" class="ays-act" style="flex:1;background:#dcfce7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Resolve</button>
@@ -956,6 +972,54 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
   close.addEventListener('click', () => drawer.style.display = 'none');
   refresh();
   setInterval(refresh, 15000);
+})();
+
+// ─── Employee assignment on order cards ─────────────────────────────────────
+(function(){
+  const csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+
+  async function wireEmployeeAssign() {
+    let employees = [];
+    try {
+      const r = await fetch('/api/owner/employees', {credentials:'same-origin'});
+      if (r.ok) employees = (await r.json()).employees || [];
+    } catch(e) {}
+    if (!employees.length) return;
+
+    document.querySelectorAll('.order-card:not(.order-card--done)[data-order-id]').forEach(card => {
+      const orderId = card.dataset.orderId;
+      if (!orderId || card.querySelector('.emp-assign-sel')) return;
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'margin-top:.5rem;';
+      const sel = document.createElement('select');
+      sel.className = 'btn btn-secondary btn-sm btn-full emp-assign-sel';
+      sel.style.cursor = 'pointer';
+      sel.innerHTML = '<option value="">Assign employee…</option>' +
+        employees.map(e => `<option value="${e.id}">${e.name} (${e.role})</option>`).join('');
+      sel.addEventListener('change', async () => {
+        if (!sel.value) return;
+        try {
+          await fetch(`/api/owner/orders/${orderId}/assign`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+            body: JSON.stringify({employee_id: parseInt(sel.value), role: 'server'})
+          });
+          const empName = sel.options[sel.selectedIndex].text;
+          const lbl = document.createElement('span');
+          lbl.style.cssText = 'font-size:.75rem;color:#16a34a;margin-left:.4rem;font-weight:600;';
+          lbl.textContent = '✓ Assigned ' + empName;
+          wrap.appendChild(lbl);
+          setTimeout(() => lbl.remove(), 3000);
+        } catch(e) {}
+        sel.value = '';
+      });
+      wrap.appendChild(sel);
+      const actions = card.querySelector('.order-card-actions');
+      if (actions) actions.insertAdjacentElement('afterend', wrap);
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', wireEmployeeAssign);
 })();
 </script>
 </body>
