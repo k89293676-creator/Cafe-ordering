@@ -130,7 +130,8 @@
   (function(){
     const tableId = {{ _ays_table_id|tojson }};
     if (!tableId) return;
-    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    const csrf     = csrfMeta ? csrfMeta.content : '';
 
     const collapsed    = document.getElementById('ays-collapsed');
     const expanded     = document.getElementById('ays-expanded');
@@ -144,13 +145,24 @@
     const quickStatus  = document.getElementById('ays-quick-status');
     const cancelCallBtn= document.getElementById('ays-cancel-call-btn');
 
+    if (!collapsed || !expanded || !openBtn || !sendBtn) return;  // page not rendered
+
     const REASON_LABELS = {
       service:'🛎️ Call server', bill:'💳 Ask for the bill',
       water:'💧 Water refill', cutlery:'🍴 Cutlery', help:'❓ Need help'
     };
+    const POLL_INTERVAL_MS  = 6000;
+    const STATUS_URL        = `/api/table/${encodeURIComponent(tableId)}/call-status`;
+    const CALL_URL          = `/api/table/${encodeURIComponent(tableId)}/call`;
+    const CANCEL_URL        = `/api/table/${encodeURIComponent(tableId)}/call/cancel`;
 
-    let selectedReason = null;
-    let _pollTimer     = null;
+    let selectedReason     = null;
+    let _pollTimer         = null;
+    let _inFlightStatus    = null;     // AbortController for the current poll
+    let _activeCallId      = null;     // last call we know about
+    let _suppressAckMsgUntil = 0;      // timestamp; "Sending…" UI wins until then
+    let _sendInFlight      = false;    // hard mutex for double-tap protection
+    let _cancelInFlight    = false;
 
     /* ── Panel open / close ─────────────────────────────────────────────── */
     function openPanel() {
@@ -164,12 +176,14 @@
       selectedReason            = null;
       noteInput.value           = '';
       statusEl.textContent      = '';
+      sendBtn.disabled          = false;
+      sendBtn.textContent       = 'Send request';
       document.querySelectorAll('#ays-expanded .ays-btn[data-reason]')
               .forEach(b => b.classList.remove('ays-selected'));
     }
 
     openBtn.addEventListener('click', openPanel);
-    cancelBtn.addEventListener('click', closePanel);
+    if (cancelBtn) cancelBtn.addEventListener('click', closePanel);
 
     document.querySelectorAll('#ays-expanded .ays-btn[data-reason]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -184,135 +198,219 @@
       });
     });
 
+    function setQuickStatus(text, color, weight) {
+      quickStatus.textContent     = text || '';
+      quickStatus.style.color     = color || '#6b7280';
+      quickStatus.style.fontWeight = weight || 'normal';
+    }
+    function ageString(iso) {
+      const t = new Date(iso).getTime();
+      if (!isFinite(t)) return '';
+      const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+      if (s < 60)   return `${s}s ago`;
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return r ? `${m}m ${r}s ago` : `${m}m ago`;
+    }
+    function showCancelBtn(show) {
+      if (!cancelCallBtn) return;
+      cancelCallBtn.style.display = show ? 'inline-block' : 'none';
+      if (show) {
+        cancelCallBtn.disabled  = false;
+        cancelCallBtn.textContent = '✕ Cancel';
+      }
+    }
+
     /* ── Live call-status polling ────────────────────────────────────────── */
     function startPoll() {
       if (_pollTimer) return;
-      _pollTimer = setInterval(pollCallStatus, 8000);
+      // Quick first-tick after ~1.2s so the user sees the "Waiting…" age
+      // update almost immediately, instead of staring at a stale message.
+      setTimeout(pollCallStatus, 1200);
+      _pollTimer = setInterval(pollCallStatus, POLL_INTERVAL_MS);
     }
     function stopPoll() {
-      clearInterval(_pollTimer);
+      if (_pollTimer) clearInterval(_pollTimer);
       _pollTimer = null;
+      if (_inFlightStatus) { try { _inFlightStatus.abort(); } catch(_){} _inFlightStatus = null; }
     }
 
     async function pollCallStatus() {
+      if (document.hidden) return;     // save the customer's battery / data
+      if (_inFlightStatus) return;     // never overlap
+      _inFlightStatus = ('AbortController' in window) ? new AbortController() : null;
       try {
-        const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call-status`);
+        const r = await fetch(STATUS_URL, {
+          signal: _inFlightStatus ? _inFlightStatus.signal : undefined,
+          cache: 'no-store',
+        });
         if (!r.ok) return;
         const { call } = await r.json();
-        if (!call) {
-          quickStatus.textContent = '✅ Service complete!';
-          quickStatus.style.color = '#16a34a';
+        applyCallState(call);
+      } catch (_) {
+        // network blip — keep polling on the next tick
+      } finally {
+        _inFlightStatus = null;
+      }
+    }
+
+    function applyCallState(call) {
+      // Don't clobber the user's "Sending…" optimistic message.
+      if (Date.now() < _suppressAckMsgUntil) return;
+
+      if (!call) {
+        // Only celebrate if we knew about a live call before; otherwise
+        // (fresh page, no call ever sent) stay quiet.
+        if (_activeCallId !== null) {
+          setQuickStatus('✅ Service complete!', '#16a34a', '600');
           openBtn.textContent = '🛎️ Call again';
-          stopPoll();
-          setTimeout(() => { quickStatus.textContent = ''; }, 6000);
-          return;
+          setTimeout(() => {
+            // Only clear if status hasn't been overwritten by a new send.
+            if (quickStatus.textContent.startsWith('✅')) setQuickStatus('');
+          }, 6000);
         }
-        if (call.status === 'acknowledged') {
-          quickStatus.textContent = '✓ Staff on their way!';
-          quickStatus.style.color = '#4f46e5';
-          quickStatus.style.fontWeight = '600';
-          // Once acknowledged, customer can no longer cancel.
-          cancelCallBtn.style.display = 'none';
-        } else {
-          const age = Math.max(0, Math.round((Date.now() - new Date(call.createdAt).getTime()) / 1000));
-          const ageStr = age < 60 ? `${age}s ago` : `${Math.floor(age / 60)}m ${age % 60}s ago`;
-          quickStatus.textContent = `🛎️ Waiting… (sent ${ageStr})`;
-          quickStatus.style.color = '#6b7280';
-          quickStatus.style.fontWeight = 'normal';
-          cancelCallBtn.style.display = 'inline-block';
-        }
-      } catch (_) {}
+        _activeCallId = null;
+        showCancelBtn(false);
+        stopPoll();
+        return;
+      }
+
+      _activeCallId = call.id;
+      openBtn.textContent = '🛎️ Call again';
+
+      if (call.status === 'acknowledged') {
+        const ackedFor = call.acknowledgedAt ? ageString(call.acknowledgedAt) : '';
+        setQuickStatus(
+          ackedFor ? `✓ Staff on their way! (${ackedFor})` : '✓ Staff on their way!',
+          '#4f46e5', '600'
+        );
+        showCancelBtn(false);
+      } else {
+        setQuickStatus(`🛎️ Waiting… (sent ${ageString(call.createdAt)})`, '#6b7280', 'normal');
+        showCancelBtn(true);
+      }
     }
 
     /* ── Cancel pending call ─────────────────────────────────────────────── */
     async function cancelCall() {
-      cancelCallBtn.disabled = true;
-      const prevText = cancelCallBtn.textContent;
+      if (_cancelInFlight || !cancelCallBtn) return;
+      _cancelInFlight = true;
+      cancelCallBtn.disabled    = true;
       cancelCallBtn.textContent = 'Cancelling…';
       try {
-        const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call/cancel`, {
+        const r = await fetch(CANCEL_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf }
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
         });
         const j = await r.json().catch(() => ({}));
         if (r.ok) {
-          stopPoll();
-          cancelCallBtn.style.display = 'none';
-          openBtn.textContent = '🛎️ Call for service';
-          quickStatus.textContent = j.cancelled
-            ? '✓ Request cancelled.'
-            : 'No active request to cancel.';
-          quickStatus.style.color = '#6b7280';
-          quickStatus.style.fontWeight = 'normal';
-          setTimeout(() => { quickStatus.textContent = ''; }, 4000);
+          if (j.cancelled) {
+            stopPoll();
+            _activeCallId = null;
+            showCancelBtn(false);
+            openBtn.textContent = '🛎️ Call for service';
+            setQuickStatus('✓ Request cancelled.', '#6b7280');
+            setTimeout(() => {
+              if (quickStatus.textContent.startsWith('✓ Request cancelled')) setQuickStatus('');
+            }, 4000);
+          } else if (j.reason === 'already_acknowledged') {
+            // Lost the race — staff just acknowledged. Reflect that.
+            showCancelBtn(false);
+            setQuickStatus('✓ Staff already on the way — cannot cancel.', '#4f46e5', '600');
+            pollCallStatus();
+          } else {
+            showCancelBtn(false);
+            setQuickStatus('No active request to cancel.', '#6b7280');
+          }
+        } else if (r.status === 429) {
+          setQuickStatus('Too many cancels — try again in a moment.', '#b91c1c');
         } else {
-          quickStatus.textContent = 'Could not cancel.';
-          quickStatus.style.color = '#b91c1c';
+          setQuickStatus('Could not cancel — try again.', '#b91c1c');
         }
       } catch (_) {
-        quickStatus.textContent = 'Network error.';
-        quickStatus.style.color = '#b91c1c';
+        setQuickStatus('Network error — try again.', '#b91c1c');
       } finally {
-        cancelCallBtn.disabled = false;
-        cancelCallBtn.textContent = prevText;
+        _cancelInFlight = false;
+        if (cancelCallBtn.style.display !== 'none') {
+          cancelCallBtn.disabled    = false;
+          cancelCallBtn.textContent = '✕ Cancel';
+        }
       }
     }
-    cancelCallBtn.addEventListener('click', cancelCall);
+    if (cancelCallBtn) cancelCallBtn.addEventListener('click', cancelCall);
 
     /* ── Send call ───────────────────────────────────────────────────────── */
     async function sendCall() {
-      if (!selectedReason) return;
-      sendBtn.disabled   = true;
-      sendBtn.textContent = 'Sending…';
+      if (_sendInFlight || !selectedReason) return;
+      _sendInFlight        = true;
+      sendBtn.disabled     = true;
+      sendBtn.textContent  = 'Sending…';
       statusEl.textContent = '';
+      const reason = selectedReason;
+      const label  = REASON_LABELS[reason] || reason;
       try {
-        const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call`, {
+        const r = await fetch(CALL_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-          body: JSON.stringify({ reason: selectedReason, note: noteInput.value.trim() })
+          body: JSON.stringify({ reason, note: noteInput.value.trim() }),
         });
         const j = await r.json().catch(() => ({}));
-        if (r.ok) {
-          const label = REASON_LABELS[selectedReason] || selectedReason;
+        if (r.ok && j.ok !== false) {
           closePanel();
-          quickStatus.textContent = j.deduped
-            ? `🔔 Reminder sent for "${label}"!`
-            : `✓ ${label} — on the way!`;
-          quickStatus.style.color = '#16a34a';
-          quickStatus.style.fontWeight = '600';
+          // Hold our optimistic message visible for ~3s so the next poll
+          // doesn't immediately replace "✓ on the way!" with "Waiting…".
+          _suppressAckMsgUntil = Date.now() + 3000;
+          _activeCallId        = (j.call && j.call.id) || _activeCallId || -1;
+          setQuickStatus(
+            j.deduped ? `🔔 Reminder sent for "${label}"!` : `✓ ${label} — on the way!`,
+            '#16a34a', '600'
+          );
           openBtn.textContent = '🛎️ Call again';
+          showCancelBtn(true);
           startPoll();
+        } else if (r.status === 429) {
+          statusEl.textContent = 'Slow down — try again in a moment.';
+          statusEl.style.color = '#b45309';
         } else {
-          statusEl.textContent = j.error || 'Could not send. Please flag down a server.';
+          statusEl.textContent = (j && j.error) || 'Could not send. Please flag down a server.';
           statusEl.style.color = '#b91c1c';
-          sendBtn.disabled   = false;
-          sendBtn.textContent = 'Send request';
         }
       } catch (_) {
-        statusEl.textContent = 'Network error.';
+        statusEl.textContent = 'Network error — try again.';
         statusEl.style.color = '#b91c1c';
-        sendBtn.disabled   = false;
-        sendBtn.textContent = 'Send request';
+      } finally {
+        _sendInFlight = false;
+        if (expanded.style.display !== 'none') {
+          // Panel still open — re-arm so the user can retry.
+          sendBtn.disabled    = false;
+          sendBtn.textContent = 'Send request';
+        }
       }
     }
-
     sendBtn.addEventListener('click', sendCall);
     noteInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendCall(); });
+
+    /* ── Visibility: pause polling when tab hidden, kick once on return ──── */
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && _activeCallId !== null) pollCallStatus();
+    });
 
     /* ── On page load: check if there's already an active call ──────────── */
     (async function init() {
       try {
-        const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call-status`);
+        const r = await fetch(STATUS_URL, { cache: 'no-store' });
         if (!r.ok) return;
         const { call } = await r.json();
         if (call) {
+          _activeCallId = call.id;
           openBtn.textContent = '🛎️ Call again';
-          quickStatus.textContent = call.status === 'acknowledged'
-            ? '✓ Staff on their way!'
-            : '🛎️ Service request active…';
-          quickStatus.style.color = call.status === 'acknowledged' ? '#4f46e5' : '#6b7280';
-          // Show cancel only while still open (not yet acknowledged).
-          cancelCallBtn.style.display = call.status === 'open' ? 'inline-block' : 'none';
+          if (call.status === 'acknowledged') {
+            setQuickStatus('✓ Staff on their way!', '#4f46e5', '600');
+            showCancelBtn(false);
+          } else {
+            setQuickStatus(`🛎️ Service request active… (sent ${ageString(call.createdAt)})`, '#6b7280');
+            showCancelBtn(true);
+          }
           startPoll();
         }
       } catch (_) {}

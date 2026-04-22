@@ -1104,36 +1104,50 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
   }
 
   // ── Notification support ─────────────────────────────────────────────────
-  let _seenCallIds = null;   // null = first load (seed without notifying)
-  let _lastReminderAt = 0;   // throttle the periodic reminder chime
+  let _seenCallIds = null;             // null = first load (seed without notifying)
+  let _lastReminderAt = 0;             // throttle the periodic reminder chime
+  let _audioCtx = null;                // shared, created lazily on a user gesture
+  let _audioReady = false;             // becomes true after first successful chime
   const soundToggle = document.getElementById('tc-sound-toggle');
-  function _soundOn() {
-    if (!soundToggle) return true;
-    if (soundToggle.dataset._inited !== '1') {
-      soundToggle.dataset._inited = '1';
-      try { soundToggle.checked = localStorage.getItem('tcSoundOn') !== '0'; } catch (_) {}
-      soundToggle.addEventListener('change', () => {
-        try { localStorage.setItem('tcSoundOn', soundToggle.checked ? '1' : '0'); } catch (_) {}
-      });
-    }
-    return soundToggle.checked;
+  if (soundToggle) {
+    try { soundToggle.checked = localStorage.getItem('tcSoundOn') !== '0'; } catch (_) {}
+    soundToggle.addEventListener('change', () => {
+      try { localStorage.setItem('tcSoundOn', soundToggle.checked ? '1' : '0'); } catch (_) {}
+    });
   }
+  function _soundOn() { return soundToggle ? soundToggle.checked : true; }
 
   function requestNotifPerms() {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
   }
-  // Request on first meaningful click (requires user gesture in Chrome)
+  function _ensureAudio() {
+    // Browsers block AudioContext until a user gesture. Create+resume here.
+    if (_audioCtx) return _audioCtx;
+    try {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      if (!Ctor) return null;
+      _audioCtx = new Ctor();
+      if (_audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
+      _audioReady = true;
+    } catch (_) { _audioCtx = null; }
+    return _audioCtx;
+  }
+  // First click anywhere: ask for OS notification perms AND warm up the
+  // AudioContext so the very first table call actually beeps.
   document.addEventListener('click', function _once() {
     requestNotifPerms();
+    _ensureAudio();
     document.removeEventListener('click', _once);
   }, { once: true });
 
   function playChime() {
     if (!_soundOn()) return;
+    const ctx = _ensureAudio();
+    if (!ctx) return;
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
       [880, 1100].forEach((freq, i) => {
         const osc  = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -1165,75 +1179,134 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
     }
   }
 
+  // Action helper used by both the drawer and the full panel.
+  async function _doCallAction(id, action, btn) {
+    if (!id || !action) return;
+    if (btn) {
+      btn.disabled = true;
+      btn.dataset._origText = btn.textContent;
+      btn.textContent = '…';
+    }
+    try {
+      const r = await fetch(`/api/owner/table-calls/${id}/${action}`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf },
+        credentials: 'same-origin',
+      });
+      if (!r.ok) {
+        // Surface a quick toast — most likely a stale state machine error.
+        let msg = 'Action failed.';
+        try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (_) {}
+        if (r.status === 401) msg = 'Session expired — please refresh.';
+        showToast(msg, '#b91c1c');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = btn.dataset._origText || btn.textContent;
+        }
+        return;
+      }
+    } catch (_) {
+      showToast('Network error.', '#b91c1c');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = btn.dataset._origText || btn.textContent;
+      }
+      return;
+    }
+    refreshAll();
+  }
+
+  function showToast(msg, color) {
+    let el = document.getElementById('tc-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'tc-toast';
+      el.style.cssText = 'position:fixed;left:50%;bottom:1.5rem;transform:translateX(-50%);background:#0f172a;color:#fff;padding:.55rem 1rem;border-radius:999px;font-size:.85rem;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:200;opacity:0;transition:opacity .25s;pointer-events:none;';
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.background = color || '#0f172a';
+    el.style.opacity = '1';
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => { el.style.opacity = '0'; }, 2800);
+  }
+
   // Drawer (quick peek of OPEN calls only) ----------------------------------
   async function refreshDrawer() {
+    let r;
     try {
-      const r = await fetch('/api/owner/table-calls?status=open', {credentials:'same-origin'});
-      if (!r.ok) return;
-      const j = await r.json();
-      const calls = j.calls || [];
-      badge.textContent = calls.length;
-      badge.style.display = calls.length ? 'inline-block' : 'none';
+      r = await fetch('/api/owner/table-calls?status=open', {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+    } catch (_) { return; }
+    if (!r.ok) return;
+    const j = await r.json().catch(() => ({}));
+    const calls = j.calls || [];
+    badge.textContent = calls.length;
+    badge.style.display = calls.length ? 'inline-block' : 'none';
 
-      // Detect genuinely new calls (not seen on a previous poll)
-      if (_seenCallIds === null) {
-        // First load — seed without notifying
-        _seenCallIds = new Set(calls.map(c => c.id));
-        // Auto-pop drawer if there are already open calls
-        if (calls.length && !drawer.dataset.userClosed && location.hash !== '#table-calls') {
-          drawer.style.display = 'flex';
-        }
-      } else {
-        calls.forEach(c => {
-          if (!_seenCallIds.has(c.id)) {
-            _seenCallIds.add(c.id);
-            notifyNewCall(c);
-          }
-        });
+    // Detect genuinely new calls (not seen on a previous poll)
+    if (_seenCallIds === null) {
+      // First load — seed without notifying.
+      _seenCallIds = new Set(calls.map(c => c.id));
+      if (calls.length && !drawer.dataset.userClosed && location.hash !== '#table-calls') {
+        drawer.style.display = 'flex';
       }
-
-      // BUGFIX: re-arm the drawer when the floor goes quiet so the next wave
-      // of calls actually pops it again (previously, once the user closed it
-      // it stayed closed forever, even for new urgent calls).
-      if (calls.length === 0) {
-        delete drawer.dataset.userClosed;
-        _lastReminderAt = 0;
-      } else {
-        // Repeating reminder: if there are unattended calls older than 60s,
-        // re-chime every 60s so a busy floor doesn't miss them.
-        const now = Date.now();
-        const oldest = Math.max(...calls.map(c => now - new Date(c.createdAt || now).getTime()));
-        if (oldest > 60000 && now - _lastReminderAt > 60000) {
-          _lastReminderAt = now;
-          playChime();
+    } else {
+      calls.forEach(c => {
+        if (!_seenCallIds.has(c.id)) {
+          _seenCallIds.add(c.id);
+          notifyNewCall(c);
         }
+      });
+      // Bound the seen-set so a long-running dashboard doesn't leak forever.
+      // Anything no longer in the open list AND older than 1h is dropped.
+      if (_seenCallIds.size > 200) {
+        const liveIds = new Set(calls.map(c => c.id));
+        _seenCallIds = liveIds;
       }
+    }
 
-      // Show calls oldest-first so staff handle them FIFO
-      // (server returns newest-first, which buries old waiters at the bottom).
-      calls.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    // Re-arm the drawer when the floor goes quiet so the next wave of
+    // calls actually pops it again (otherwise once-closed = closed forever).
+    if (calls.length === 0) {
+      delete drawer.dataset.userClosed;
+      _lastReminderAt = 0;
+    } else {
+      // Repeating reminder: if any open call is over 60s old, re-chime
+      // every 60s so a busy floor doesn't miss it.
+      const now = Date.now();
+      let oldestAge = 0;
+      for (const c of calls) {
+        const t = new Date(c.createdAt || now).getTime();
+        if (isFinite(t)) oldestAge = Math.max(oldestAge, now - t);
+      }
+      if (oldestAge > 60000 && now - _lastReminderAt > 60000) {
+        _lastReminderAt = now;
+        playChime();
+      }
+    }
 
-      list.innerHTML = calls.length ? calls.map(c => `
-        <div style="border:1px solid #e5e7eb;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;">
-          <div style="display:flex;justify-content:space-between;align-items:baseline;">
-            <strong>${esc(c.tableName || c.tableId)}</strong>
-            <span style="font-size:.7rem;color:#6b7280;">${fmtTime(c.createdAt)}</span>
-          </div>
-          <div style="font-size:.8rem;color:#374151;margin:.2rem 0;">${esc(REASON_LABEL[c.reason] || c.reason)}</div>
-          ${c.note ? `<div style="font-size:.75rem;color:#6b7280;font-style:italic;margin:.1rem 0 .2rem;">"${esc(c.note)}"</div>` : ''}
-          <div style="display:flex;gap:.35rem;">
-            <button data-id="${c.id}" data-action="ack" class="ays-act" style="flex:1;background:#fef3c7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Acknowledge</button>
-            <button data-id="${c.id}" data-action="resolve" class="ays-act" style="flex:1;background:#dcfce7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Resolve</button>
-          </div>
-        </div>`).join('') : '<div style="color:#9ca3af;text-align:center;padding:1rem;">No open calls.</div>';
-      list.querySelectorAll('button.ays-act').forEach(b => b.addEventListener('click', async () => {
-        b.disabled = true;
-        await fetch(`/api/owner/table-calls/${b.dataset.id}/${b.dataset.action}`, {
-          method:'POST', headers:{'X-CSRFToken': csrf}
-        });
-        refreshAll();
-      }));
-    } catch (e) {}
+    // FIFO: oldest open call surfaces at the top.
+    calls.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+    list.innerHTML = calls.length ? calls.map(c => `
+      <div style="border:1px solid #e5e7eb;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <strong>${esc(c.tableName || c.tableId)}</strong>
+          <span style="font-size:.7rem;color:#6b7280;">${fmtTime(c.createdAt)}</span>
+        </div>
+        <div style="font-size:.8rem;color:#374151;margin:.2rem 0;">${esc(REASON_LABEL[c.reason] || c.reason)}</div>
+        ${c.note ? `<div style="font-size:.75rem;color:#6b7280;font-style:italic;margin:.1rem 0 .2rem;">"${esc(c.note)}"</div>` : ''}
+        <div style="display:flex;gap:.35rem;">
+          <button data-id="${c.id}" data-action="ack"     class="ays-act" style="flex:1;background:#fef3c7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Acknowledge</button>
+          <button data-id="${c.id}" data-action="resolve" class="ays-act" style="flex:1;background:#dcfce7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Resolve</button>
+        </div>
+      </div>`).join('') : '<div style="color:#9ca3af;text-align:center;padding:1rem;">No open calls.</div>';
+    list.querySelectorAll('button.ays-act').forEach(b => b.addEventListener('click', () => {
+      _doCallAction(b.dataset.id, b.dataset.action, b);
+    }));
   }
 
   if (close) close.addEventListener('click', () => {
@@ -1253,16 +1326,20 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
   async function refreshTab() {
     if (!tcList) return;
     try {
-      const [openR, ackR, resR, currentR] = await Promise.all([
-        fetch('/api/owner/table-calls?status=open',         {credentials:'same-origin'}),
-        fetch('/api/owner/table-calls?status=acknowledged', {credentials:'same-origin'}),
-        fetch('/api/owner/table-calls?status=resolved',     {credentials:'same-origin'}),
-        fetch(`/api/owner/table-calls?status=${currentStatus}`, {credentials:'same-origin'}),
+      // Three fetches cover all four needs: stats use open/ack/res, and
+      // the visible list reuses whichever bucket matches currentStatus
+      // (no need for a duplicate 4th request).
+      const [openR, ackR, resR] = await Promise.all([
+        fetch('/api/owner/table-calls?status=open',         {credentials:'same-origin', cache:'no-store'}),
+        fetch('/api/owner/table-calls?status=acknowledged', {credentials:'same-origin', cache:'no-store'}),
+        fetch('/api/owner/table-calls?status=resolved',     {credentials:'same-origin', cache:'no-store'}),
       ]);
       const open = (openR.ok ? (await openR.json()).calls : []) || [];
       const ack  = (ackR.ok  ? (await ackR.json()).calls  : []) || [];
       const res  = (resR.ok  ? (await resR.json()).calls  : []) || [];
-      const calls = (currentR.ok ? (await currentR.json()).calls : []) || [];
+      const calls = currentStatus === 'open' ? open
+                  : currentStatus === 'acknowledged' ? ack
+                  : res;
 
       // Stats
       document.getElementById('tc-count-open').textContent = open.length;
@@ -1345,14 +1422,10 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
           </div>`;
       }).join('');
 
-      tcList.querySelectorAll('.tc-act').forEach(b => b.addEventListener('click', async () => {
-        b.disabled = true;
-        b.textContent = '…';
-        await fetch(`/api/owner/table-calls/${b.dataset.id}/${b.dataset.action}`, {
-          method:'POST', headers:{'X-CSRFToken': csrf}
-        });
-        refreshAll();
-      }));
+      tcList.querySelectorAll('.tc-act').forEach(b => {
+        if (!b.dataset.action || !b.dataset.id) return;  // skip the print-bill <a>
+        b.addEventListener('click', () => _doCallAction(b.dataset.id, b.dataset.action, b));
+      });
     } catch (e) {
       tcList.innerHTML = '<div style="grid-column:1/-1;color:#b91c1c;text-align:center;padding:2rem;">Could not load table calls. Try refresh.</div>';
     }
@@ -1393,10 +1466,27 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
   }
   if (tcRefresh) tcRefresh.addEventListener('click', refreshAll);
 
-  function refreshAll() { refreshDrawer(); refreshTab(); }
+  let _refreshing = false;
+  async function refreshAll() {
+    if (_refreshing) return;            // never overlap polls
+    _refreshing = true;
+    try { await Promise.all([refreshDrawer(), refreshTab()]); }
+    finally { _refreshing = false; }
+  }
 
   refreshAll();
-  setInterval(refreshAll, 15000);
+  // 8 s feels live; 15 s left calls sitting too long before the badge moved.
+  // We additionally pause the timer while the dashboard tab is hidden so
+  // background tabs don't hammer the server.
+  let _pollInt = setInterval(refreshAll, 8000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      clearInterval(_pollInt); _pollInt = null;
+    } else if (!_pollInt) {
+      refreshAll();
+      _pollInt = setInterval(refreshAll, 8000);
+    }
+  });
 })();
 
 // ─── Employee assignment on order cards ─────────────────────────────────────

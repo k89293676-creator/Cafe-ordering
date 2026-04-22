@@ -3,17 +3,27 @@
 A customer scans the QR for their table, taps the button on the menu page,
 and a TableCall row is created. Owners see open calls on their dashboard
 and via SSE notifications.
+
+Production hardening (vs the original prototype):
+    * Strict reason validation (no silent fallback).
+    * Strict status state machine: open -> acknowledged -> resolved (one-way).
+    * Atomic cancel that races safely with staff acknowledge.
+    * Public ``/call-status`` endpoint is rate-limited and returns a slim
+      payload (no ownerId/cafeId leak to the dining room).
+    * ``/api/owner/table-calls?status=resolved`` filters server-side to the
+      last 24h so the dashboard "resolved today" stat stays accurate even
+      when historical data exceeds the per-page cap.
+    * Bulk resolve never overwrites a real ``acknowledged_at``.
 """
 from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, abort, jsonify, render_template, request
+from flask import Blueprint, abort, jsonify, request
 
 from app import (
-    Owner,
-    csrf,
+    csrf,  # noqa: F401  (re-exported import keeps blueprint import order intact)
     db,
     limiter,
     load_tables,
@@ -27,10 +37,31 @@ bp = Blueprint("service_calls", __name__)
 
 _TABLE_ID_RE = re.compile(r"[a-zA-Z0-9\-]{1,64}")
 _VALID_REASONS = {"service", "bill", "water", "help", "cutlery"}
+_LIVE_STATUSES = ("open", "acknowledged")
+_ALL_STATUSES = ("open", "acknowledged", "resolved")
+
+# Allowed forward transitions. We enforce monotonic progress so a stale
+# button-click in the dashboard cannot un-resolve or skip backwards.
+_ALLOWED_TRANSITIONS = {
+    "open":         {"acknowledged", "resolved"},
+    "acknowledged": {"resolved"},
+    "resolved":     set(),
+}
+
+
+def _validated_table(table_id: str):
+    """Return the row from tables.json for ``table_id`` or abort 4xx."""
+    if not _TABLE_ID_RE.fullmatch(table_id):
+        abort(400, description="Invalid table id.")
+    tables = load_tables()
+    table = next((t for t in tables if t.get("id") == table_id), None)
+    if not table:
+        abort(404, description="Unknown table.")
+    return table
 
 
 # ---------------------------------------------------------------------------
-# Public (customer) endpoint
+# Public (customer) endpoint — create a call
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/table/<table_id>/call", methods=["POST"])
@@ -41,19 +72,16 @@ def create_table_call(table_id: str):
     CSRF is enforced (Flask-WTF) — table_order.html exposes the token via
     the ``csrf-token`` meta tag and the JS sends it as ``X-CSRFToken``.
     """
-    if not _TABLE_ID_RE.fullmatch(table_id):
-        abort(400, description="Invalid table id.")
+    table = _validated_table(table_id)
 
     payload = request.get_json(silent=True) or {}
     reason = str(payload.get("reason", "service")).strip().lower()[:20]
     if reason not in _VALID_REASONS:
-        reason = "service"
+        # Bad reason from a tampered client should fail loudly, not be
+        # silently coerced — silent coercion has hidden real bugs in the past
+        # (a typo on a button caused every "bill" tap to log as "service").
+        return jsonify({"ok": False, "error": "Invalid reason."}), 400
     note = str(payload.get("note", "")).strip()[:200]
-
-    tables = load_tables()
-    table = next((t for t in tables if t["id"] == table_id), None)
-    if not table:
-        abort(404, description="Unknown table.")
 
     owner_id = table.get("ownerId")
     cafe_id = table.get("cafeId")
@@ -70,7 +98,7 @@ def create_table_call(table_id: str):
         .first()
     )
     if existing:
-        return jsonify({"ok": True, "call": _call_dict(existing), "deduped": True})
+        return jsonify({"ok": True, "call": _public_call_dict(existing), "deduped": True})
 
     call = TableCall(
         owner_id=owner_id,
@@ -86,11 +114,11 @@ def create_table_call(table_id: str):
 
     if owner_id:
         try:
-            _notify_owner(owner_id, "table_call", _call_dict(call))
+            _notify_owner(owner_id, "table_call", _owner_call_dict(call))
         except Exception:  # pragma: no cover
             pass
 
-    return jsonify({"ok": True, "call": _call_dict(call)}), 201
+    return jsonify({"ok": True, "call": _public_call_dict(call)}), 201
 
 
 # ---------------------------------------------------------------------------
@@ -98,20 +126,93 @@ def create_table_call(table_id: str):
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/table/<table_id>/call-status", methods=["GET"])
+@limiter.limit("60 per minute; 600 per hour")
 def table_call_status(table_id: str):
     """Return the current open or acknowledged call for the table (if any).
-    No auth required — the table_id acts as the token.
+
+    No auth required — the table_id acts as the token. We rate-limit because
+    every open dining-room device polls this endpoint every few seconds; an
+    abusive client could otherwise hammer it.
     """
     if not _TABLE_ID_RE.fullmatch(table_id):
         abort(400, description="Invalid table id.")
     call = (
         TableCall.query
         .filter_by(table_id=table_id)
-        .filter(TableCall.status.in_(["open", "acknowledged"]))
+        .filter(TableCall.status.in_(_LIVE_STATUSES))
         .order_by(TableCall.created_at.desc())
         .first()
     )
-    return jsonify({"call": _call_dict(call) if call else None})
+    return jsonify({"call": _public_call_dict(call) if call else None})
+
+
+# ---------------------------------------------------------------------------
+# Public (customer) — cancel their own pending call
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/table/<table_id>/call/cancel", methods=["POST"])
+@limiter.limit("10 per minute; 60 per hour")
+def cancel_table_call(table_id: str):
+    """Customer cancels their most recent OPEN (not-yet-acknowledged) call.
+
+    Acknowledged calls can no longer be cancelled — staff is already on the
+    way. The ``table_id`` itself is the implicit auth (matches the customer's
+    QR-scanned URL), the same model as the public status endpoint.
+
+    The cancel is implemented as an atomic conditional UPDATE to avoid a
+    race with staff hitting "Acknowledge" at the same instant: only rows
+    still in ``status = 'open'`` flip to resolved, so a just-acknowledged
+    call is left untouched.
+    """
+    if not _TABLE_ID_RE.fullmatch(table_id):
+        abort(400, description="Invalid table id.")
+
+    target = (
+        TableCall.query
+        .filter_by(table_id=table_id, status="open")
+        .order_by(TableCall.created_at.desc())
+        .first()
+    )
+    if not target:
+        return jsonify({"ok": True, "cancelled": False})
+
+    now = datetime.now(timezone.utc)
+    cancel_tag = "[cancelled by customer]"
+    new_note = (cancel_tag + " " + (target.note or "")).strip()[:200]
+
+    # Conditional update — only flips if it's still open. Returns row count.
+    updated = (
+        TableCall.query
+        .filter(TableCall.id == target.id, TableCall.status == "open")
+        .update(
+            {
+                "status": "resolved",
+                "resolved_at": now,
+                "note": new_note,
+            },
+            synchronize_session=False,
+        )
+    )
+    db.session.commit()
+
+    if not updated:
+        # Lost the race — staff acknowledged at the same instant. Tell the
+        # customer truthfully and let the next status poll reflect reality.
+        return jsonify({"ok": True, "cancelled": False, "reason": "already_acknowledged"})
+
+    refreshed = db.session.get(TableCall, target.id)
+    if refreshed and refreshed.owner_id:
+        try:
+            _notify_owner(refreshed.owner_id, "table_call_update", _owner_call_dict(refreshed))
+        except Exception:  # pragma: no cover
+            pass
+    return jsonify(
+        {
+            "ok": True,
+            "cancelled": True,
+            "call": _public_call_dict(refreshed) if refreshed else None,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -126,10 +227,16 @@ def list_table_calls():
         abort(401)
     status = request.args.get("status", "open")
     q = TableCall.query.filter_by(owner_id=owner_id)
-    if status in {"open", "acknowledged", "resolved"}:
+    if status in _ALL_STATUSES:
         q = q.filter_by(status=status)
-    calls = q.order_by(TableCall.created_at.desc()).limit(100).all()
-    return jsonify({"calls": [_call_dict(c) for c in calls]})
+        if status == "resolved":
+            # Cap historical noise: resolved tab only shows the last 24h.
+            # This also keeps the dashboard's "resolved today" count
+            # accurate when an owner has more than 100 historical calls.
+            since = datetime.now(timezone.utc) - timedelta(hours=24)
+            q = q.filter(TableCall.resolved_at >= since)
+    calls = q.order_by(TableCall.created_at.desc()).limit(200).all()
+    return jsonify({"calls": [_owner_call_dict(c) for c in calls]})
 
 
 @bp.route("/api/owner/table-calls/<int:call_id>/ack", methods=["POST"])
@@ -151,6 +258,10 @@ def resolve_all_open_calls():
 
     Useful when the staff has handled a wave of calls in person and wants
     to clear the board in one tap instead of resolving them one by one.
+
+    We deliberately do NOT touch ``acknowledged_at`` — leaving any real
+    acknowledgement timestamps intact so the response-time stat stays
+    truthful.
     """
     owner_id = logged_in_owner_id()
     if not owner_id:
@@ -159,63 +270,24 @@ def resolve_all_open_calls():
     calls = (
         TableCall.query
         .filter_by(owner_id=owner_id)
-        .filter(TableCall.status.in_(["open", "acknowledged"]))
+        .filter(TableCall.status.in_(_LIVE_STATUSES))
         .all()
     )
-    resolved_payloads = []
     for call in calls:
-        # Preserve the original acknowledged_at if it was a real ack, so
-        # response-time stats stay accurate.
         call.status = "resolved"
         call.resolved_at = now
-        resolved_payloads.append(call)
     db.session.commit()
-    for call in resolved_payloads:
+    for call in calls:
         try:
-            _notify_owner(owner_id, "table_call_update", _call_dict(call))
+            _notify_owner(owner_id, "table_call_update", _owner_call_dict(call))
         except Exception:  # pragma: no cover
             pass
-    return jsonify({"ok": True, "resolved": len(resolved_payloads)})
+    return jsonify({"ok": True, "resolved": len(calls)})
 
 
 # ---------------------------------------------------------------------------
-# Public (customer) — cancel their own pending call
+# Internal helpers
 # ---------------------------------------------------------------------------
-
-@bp.route("/api/table/<table_id>/call/cancel", methods=["POST"])
-@limiter.limit("10 per minute; 60 per hour")
-def cancel_table_call(table_id: str):
-    """Customer cancels their most recent OPEN (not-yet-acknowledged) call.
-
-    Acknowledged calls can no longer be cancelled — staff is already on the
-    way. The table_id itself is the implicit auth (matches the customer's
-    QR-scanned URL), same model as the public status endpoint.
-    """
-    if not _TABLE_ID_RE.fullmatch(table_id):
-        abort(400, description="Invalid table id.")
-    call = (
-        TableCall.query
-        .filter_by(table_id=table_id, status="open")
-        .order_by(TableCall.created_at.desc())
-        .first()
-    )
-    if not call:
-        return jsonify({"ok": True, "cancelled": False})
-    call.status = "resolved"
-    now = datetime.now(timezone.utc)
-    call.resolved_at = now
-    # Tag the note so owners can see it was a customer cancel, not a real serve.
-    cancel_tag = "[cancelled by customer]"
-    if cancel_tag not in (call.note or ""):
-        call.note = (cancel_tag + " " + (call.note or "")).strip()[:200]
-    db.session.commit()
-    if call.owner_id:
-        try:
-            _notify_owner(call.owner_id, "table_call_update", _call_dict(call))
-        except Exception:  # pragma: no cover
-            pass
-    return jsonify({"ok": True, "cancelled": True, "call": _call_dict(call)})
-
 
 def _transition_call(call_id: int, target: str):
     owner_id = logged_in_owner_id()
@@ -224,26 +296,37 @@ def _transition_call(call_id: int, target: str):
     call = db.session.get(TableCall, call_id)
     if not call or call.owner_id != owner_id:
         abort(404)
-    call.status = target
+
+    current = call.status or "open"
+    if target == current:
+        # Idempotent — clicking "Acknowledge" twice should not error.
+        return jsonify({"ok": True, "call": _owner_call_dict(call), "noop": True})
+    if target not in _ALLOWED_TRANSITIONS.get(current, set()):
+        # Reject backwards moves (e.g. resolved -> acknowledged) so a stale
+        # dashboard tab cannot corrupt history.
+        return (
+            jsonify({"ok": False, "error": f"Cannot transition from {current} to {target}."}),
+            409,
+        )
+
     now = datetime.now(timezone.utc)
+    call.status = target
     if target == "acknowledged" and not call.acknowledged_at:
         call.acknowledged_at = now
     if target == "resolved":
-        # IMPORTANT: do NOT backfill acknowledged_at when going directly
-        # open → resolved. Doing so makes the "avg response time" metric
-        # always read 0s for skip-acked calls, which is misleading.
-        # Leave it null; the dashboard's metric correctly excludes calls
-        # without a real acknowledged_at.
+        # Do NOT backfill acknowledged_at on direct open->resolved jumps;
+        # that would zero-out the "avg response time" metric.
         call.resolved_at = now
     db.session.commit()
     try:
-        _notify_owner(owner_id, "table_call_update", _call_dict(call))
+        _notify_owner(owner_id, "table_call_update", _owner_call_dict(call))
     except Exception:  # pragma: no cover
         pass
-    return jsonify({"ok": True, "call": _call_dict(call)})
+    return jsonify({"ok": True, "call": _owner_call_dict(call)})
 
 
-def _call_dict(call: TableCall) -> dict:
+def _owner_call_dict(call: TableCall) -> dict:
+    """Full payload for the owner dashboard (includes IDs for routing)."""
     return {
         "id": call.id,
         "ownerId": call.owner_id,
@@ -256,4 +339,17 @@ def _call_dict(call: TableCall) -> dict:
         "createdAt": call.created_at.isoformat() if call.created_at else None,
         "acknowledgedAt": call.acknowledged_at.isoformat() if call.acknowledged_at else None,
         "resolvedAt": call.resolved_at.isoformat() if call.resolved_at else None,
+    }
+
+
+def _public_call_dict(call: TableCall) -> dict:
+    """Trimmed payload for the customer-facing endpoints — no internal IDs."""
+    return {
+        "id": call.id,
+        "tableId": call.table_id,
+        "reason": call.reason,
+        "note": call.note or "",
+        "status": call.status,
+        "createdAt": call.created_at.isoformat() if call.created_at else None,
+        "acknowledgedAt": call.acknowledged_at.isoformat() if call.acknowledged_at else None,
     }
