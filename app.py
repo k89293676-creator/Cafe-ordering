@@ -1258,6 +1258,9 @@ def _send_order_confirmation(order: dict) -> None:
 
 _sse_subscribers: dict[int, list] = {}
 _sse_customer_subs: dict[int, list] = {}
+# Per-table broadcast queues for the "At Your Service" customer page.
+# Keyed by table_id (string from tables.json).
+_sse_table_subs: dict[str, list] = {}
 _sse_lock = threading.Lock()
 
 
@@ -1287,11 +1290,27 @@ def _local_dispatch_customer(order_id: int, payload: str) -> None:
             queues.remove(q)
 
 
+def _local_dispatch_table(table_id: str, payload: str) -> None:
+    """Fan out a table-call SSE payload to every customer device watching
+    this table_id (typically just one phone, but could be many)."""
+    with _sse_lock:
+        queues = _sse_table_subs.get(table_id, [])
+        dead = []
+        for q in queues:
+            try:
+                q.append(payload)
+            except Exception:
+                dead.append(q)
+        for q in dead:
+            queues.remove(q)
+
+
 # Optional Redis pub/sub fan-out for multi-worker deployments.
 _REDIS_URL = os.environ.get("REDIS_URL")
 _redis_client = None
 _REDIS_OWNER_CHANNEL = "sse:owner"
 _REDIS_CUSTOMER_CHANNEL = "sse:customer"
+_REDIS_TABLE_CHANNEL = "sse:table"
 
 if _REDIS_URL:
     try:
@@ -1306,7 +1325,11 @@ if _REDIS_URL:
             while True:
                 try:
                     pubsub = _redis_client.pubsub(ignore_subscribe_messages=True)
-                    pubsub.subscribe(_REDIS_OWNER_CHANNEL, _REDIS_CUSTOMER_CHANNEL)
+                    pubsub.subscribe(
+                        _REDIS_OWNER_CHANNEL,
+                        _REDIS_CUSTOMER_CHANNEL,
+                        _REDIS_TABLE_CHANNEL,
+                    )
                     backoff = 1
                     for message in pubsub.listen():
                         try:
@@ -1319,6 +1342,8 @@ if _REDIS_URL:
                                 _local_dispatch_owner(int(envelope["owner_id"]), envelope["payload"])
                             elif channel == _REDIS_CUSTOMER_CHANNEL:
                                 _local_dispatch_customer(int(envelope["order_id"]), envelope["payload"])
+                            elif channel == _REDIS_TABLE_CHANNEL:
+                                _local_dispatch_table(str(envelope["table_id"]), envelope["payload"])
                         except Exception as inner_exc:
                             app.logger.warning("SSE redis dispatch error: %s", inner_exc)
                 except Exception as exc:
@@ -1358,6 +1383,28 @@ def _notify_order_status(order_id: int, status: str) -> None:
         except Exception as exc:
             app.logger.warning("SSE redis publish failed (customer): %s; using local.", exc)
     _local_dispatch_customer(order_id, payload)
+
+
+def _notify_table_call(table_id: str, event_type: str, data: dict) -> None:
+    """Push a table-call SSE event to the customer device(s) at this table.
+
+    Used by the service-calls blueprint so the customer sees their call
+    transition states (acknowledged / resolved / cancelled) instantly,
+    without polling.
+    """
+    if not table_id:
+        return
+    payload = json.dumps({"type": event_type, "data": data})
+    if _redis_client is not None:
+        try:
+            _redis_client.publish(
+                _REDIS_TABLE_CHANNEL,
+                json.dumps({"table_id": str(table_id), "payload": payload}),
+            )
+            return
+        except Exception as exc:
+            app.logger.warning("SSE redis publish failed (table): %s; using local.", exc)
+    _local_dispatch_table(str(table_id), payload)
 
 
 # Aliases requested by spec for explicit Redis-backed notifiers.

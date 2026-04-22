@@ -17,10 +17,12 @@ Production hardening (vs the original prototype):
 """
 from __future__ import annotations
 
+import json
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, abort, jsonify, request
+from flask import Blueprint, Response, abort, jsonify, request, stream_with_context
 
 from app import (
     csrf,  # noqa: F401  (re-exported import keeps blueprint import order intact)
@@ -30,6 +32,9 @@ from app import (
     login_required,
     logged_in_owner_id,
     _notify_owner,
+    _notify_table_call,
+    _sse_lock,
+    _sse_table_subs,
 )
 from .models import TableCall
 
@@ -117,6 +122,10 @@ def create_table_call(table_id: str):
             _notify_owner(owner_id, "table_call", _owner_call_dict(call))
         except Exception:  # pragma: no cover
             pass
+    try:
+        _notify_table_call(table_id, "table_call", _public_call_dict(call))
+    except Exception:  # pragma: no cover
+        pass
 
     return jsonify({"ok": True, "call": _public_call_dict(call)}), 201
 
@@ -206,6 +215,11 @@ def cancel_table_call(table_id: str):
             _notify_owner(refreshed.owner_id, "table_call_update", _owner_call_dict(refreshed))
         except Exception:  # pragma: no cover
             pass
+    if refreshed:
+        try:
+            _notify_table_call(table_id, "table_call_update", _public_call_dict(refreshed))
+        except Exception:  # pragma: no cover
+            pass
     return jsonify(
         {
             "ok": True,
@@ -282,7 +296,129 @@ def resolve_all_open_calls():
             _notify_owner(owner_id, "table_call_update", _owner_call_dict(call))
         except Exception:  # pragma: no cover
             pass
+        try:
+            _notify_table_call(call.table_id, "table_call_update", _public_call_dict(call))
+        except Exception:  # pragma: no cover
+            pass
     return jsonify({"ok": True, "resolved": len(calls)})
+
+
+# ---------------------------------------------------------------------------
+# Owner — undo a recent resolve (reopen)
+# ---------------------------------------------------------------------------
+
+_REOPEN_GRACE_SECONDS = 90
+
+
+@bp.route("/api/owner/table-calls/<int:call_id>/reopen", methods=["POST"])
+@login_required
+def reopen_call(call_id: int):
+    """Re-open a call that was just resolved (within the last 90 s).
+
+    This exists so an accidental resolve tap can be undone — the dashboard
+    surfaces a 10-second "Undo" toast and this is the endpoint it calls.
+    The grace window is enforced server-side so this can't be abused to
+    revive ancient calls.
+    """
+    owner_id = logged_in_owner_id()
+    if not owner_id:
+        abort(401)
+    call = db.session.get(TableCall, call_id)
+    if not call or call.owner_id != owner_id:
+        abort(404)
+    if call.status != "resolved":
+        return jsonify({"ok": False, "error": "Only resolved calls can be re-opened."}), 409
+    if not call.resolved_at:
+        return jsonify({"ok": False, "error": "Missing resolve timestamp."}), 409
+    age = (datetime.now(timezone.utc) - call.resolved_at).total_seconds()
+    if age > _REOPEN_GRACE_SECONDS:
+        return jsonify({"ok": False, "error": "Undo window has expired."}), 410
+
+    call.status = "open"
+    call.resolved_at = None
+    # If staff had acknowledged before resolving, keep that ack so the
+    # response-time stat stays accurate. If they jumped straight to
+    # resolve, leave acknowledged_at as null.
+    db.session.commit()
+
+    try:
+        _notify_owner(owner_id, "table_call_update", _owner_call_dict(call))
+    except Exception:  # pragma: no cover
+        pass
+    try:
+        _notify_table_call(call.table_id, "table_call_update", _public_call_dict(call))
+    except Exception:  # pragma: no cover
+        pass
+    return jsonify({"ok": True, "call": _owner_call_dict(call)})
+
+
+# ---------------------------------------------------------------------------
+# Public (customer) — SSE stream for live updates
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/table/<table_id>/call/stream", methods=["GET"])
+@csrf.exempt
+@limiter.exempt
+def table_call_stream(table_id: str):
+    """SSE stream of live call updates for one table.
+
+    The customer page subscribes to this and reacts instantly when staff
+    acknowledges or resolves — no polling needed. The first frame ships
+    the current snapshot so a freshly-loaded page is immediately accurate.
+    """
+    if not _TABLE_ID_RE.fullmatch(table_id):
+        abort(400, description="Invalid table id.")
+    # Make sure the table actually exists (cheap defence against random IDs).
+    _validated_table(table_id)
+
+    my_queue: list[str] = []
+    with _sse_lock:
+        _sse_table_subs.setdefault(table_id, []).append(my_queue)
+
+    # Snapshot the current live call so the very first event reflects truth.
+    snapshot = (
+        TableCall.query
+        .filter_by(table_id=table_id)
+        .filter(TableCall.status.in_(_LIVE_STATUSES))
+        .order_by(TableCall.created_at.desc())
+        .first()
+    )
+    initial = json.dumps({
+        "type": "snapshot",
+        "data": _public_call_dict(snapshot) if snapshot else None,
+    })
+
+    def generate():
+        yield f"data: {initial}\n\n"
+        last_heartbeat = time.time()
+        try:
+            while True:
+                while my_queue:
+                    payload = my_queue.pop(0)
+                    yield f"data: {payload}\n\n"
+                if time.time() - last_heartbeat >= 25:
+                    yield "event: ping\ndata: heartbeat\n\n"
+                    last_heartbeat = time.time()
+                time.sleep(0.5)
+        except GeneratorExit:
+            pass
+        finally:
+            with _sse_lock:
+                subs = _sse_table_subs.get(table_id, [])
+                try:
+                    subs.remove(my_queue)
+                except ValueError:
+                    pass
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +456,10 @@ def _transition_call(call_id: int, target: str):
     db.session.commit()
     try:
         _notify_owner(owner_id, "table_call_update", _owner_call_dict(call))
+    except Exception:  # pragma: no cover
+        pass
+    try:
+        _notify_table_call(call.table_id, "table_call_update", _public_call_dict(call))
     except Exception:  # pragma: no cover
         pass
     return jsonify({"ok": True, "call": _owner_call_dict(call)})

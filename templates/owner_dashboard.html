@@ -1234,16 +1234,25 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
         credentials: 'same-origin',
       });
       if (!r.ok) {
-        // Surface a quick toast — most likely a stale state machine error.
+        // Surface a quick toast — most likely a stale state-machine error.
         let msg = 'Action failed.';
         try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (_) {}
         if (r.status === 401) msg = 'Session expired — please refresh.';
+        if (r.status === 410) msg = 'Undo window expired.';
         showToast(msg, '#b91c1c');
         if (btn) {
           btn.disabled = false;
           btn.textContent = btn.dataset._origText || btn.textContent;
         }
         return;
+      }
+      // Successful resolve → offer a 10 s Undo. SSE will auto-refresh.
+      if (action === 'resolve') {
+        showToast('✓ Resolved', '#0f172a', { label: 'Undo', onClick: () => _undoResolve(id) }, 10000);
+      } else if (action === 'ack') {
+        showToast('✓ Acknowledged', '#0f172a');
+      } else if (action === 'reopen') {
+        showToast('↺ Re-opened', '#0f172a');
       }
     } catch (_) {
       showToast('Network error.', '#b91c1c');
@@ -1256,19 +1265,54 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
     refreshAll();
   }
 
-  function showToast(msg, color) {
+  async function _undoResolve(id) {
+    try {
+      const r = await fetch(`/api/owner/table-calls/${id}/reopen`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf },
+        credentials: 'same-origin',
+      });
+      if (!r.ok) {
+        let msg = 'Could not undo.';
+        try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (_) {}
+        if (r.status === 410) msg = 'Undo window expired.';
+        showToast(msg, '#b91c1c');
+        return;
+      }
+      showToast('↺ Re-opened', '#0f172a');
+      refreshAll();
+    } catch (_) {
+      showToast('Network error.', '#b91c1c');
+    }
+  }
+
+  function showToast(msg, color, action, durationMs) {
     let el = document.getElementById('tc-toast');
     if (!el) {
       el = document.createElement('div');
       el.id = 'tc-toast';
-      el.style.cssText = 'position:fixed;left:50%;bottom:1.5rem;transform:translateX(-50%);background:#0f172a;color:#fff;padding:.55rem 1rem;border-radius:999px;font-size:.85rem;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:200;opacity:0;transition:opacity .25s;pointer-events:none;';
+      el.style.cssText = 'position:fixed;left:50%;bottom:1.5rem;transform:translateX(-50%);background:#0f172a;color:#fff;padding:.55rem 1rem;border-radius:999px;font-size:.85rem;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:200;opacity:0;transition:opacity .25s;display:flex;align-items:center;gap:.6rem;';
       document.body.appendChild(el);
     }
-    el.textContent = msg;
     el.style.background = color || '#0f172a';
+    el.style.pointerEvents = action ? 'auto' : 'none';
+    el.innerHTML = '';
+    const text = document.createElement('span');
+    text.textContent = msg;
+    el.appendChild(text);
+    if (action && action.label && typeof action.onClick === 'function') {
+      const btn = document.createElement('button');
+      btn.textContent = action.label;
+      btn.style.cssText = 'background:#fbbf24;color:#0f172a;border:0;border-radius:999px;padding:.25rem .7rem;font-weight:700;cursor:pointer;font-size:.8rem;';
+      btn.addEventListener('click', () => {
+        try { action.onClick(); } catch (_) {}
+        el.style.opacity = '0';
+      });
+      el.appendChild(btn);
+    }
     el.style.opacity = '1';
     clearTimeout(el._timer);
-    el._timer = setTimeout(() => { el.style.opacity = '0'; }, 2800);
+    el._timer = setTimeout(() => { el.style.opacity = '0'; }, durationMs || 2800);
   }
 
   // Drawer (quick peek of OPEN calls only) ----------------------------------
@@ -1488,7 +1532,7 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
           ? '<span class="tc-escalated-badge" title="Open for over 2.5 minutes">⚠ Escalated</span>'
           : '';
         return `
-          <div class="tc-card tc-card--${c.status}${escalatedCls}" data-id="${c.id}">
+          <div class="tc-card tc-card--${c.status}${escalatedCls}" data-id="${c.id}" data-created-at="${esc(c.createdAt || '')}" data-status="${c.status}">
             <div class="tc-card-head">
               <span class="tc-card-table">${esc(c.tableName || c.tableId)}${escalatedBadge}</span>
               <span class="tc-card-time">${fmtTime(c.createdAt)}</span>
@@ -1559,17 +1603,64 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
     finally { _refreshing = false; }
   }
 
+  // ── Live ticking age timers ────────────────────────────────────────────
+  // Re-renders are expensive (innerHTML wipe), so instead we update only the
+  // age <span> text every second. This makes the "Waiting 12s" counter feel
+  // truly live without the cards flickering or losing input focus.
+  function _tickAges() {
+    if (document.hidden) return;
+    const now = Date.now();
+    document.querySelectorAll('.tc-card[data-id]').forEach(card => {
+      const meta = card.querySelector('.tc-card-meta');
+      if (!meta) return;
+      // Only the open-status cards show "Waiting …".
+      const span = meta.querySelector('span.tc-age-bad, span.tc-age-warn, span:not([class])');
+      if (!span || !span.textContent.startsWith('⏱ Waiting')) return;
+      const created = card.dataset.createdAt;
+      if (!created) return;
+      const age = now - new Date(created).getTime();
+      span.textContent = '⏱ Waiting ' + fmtAge(age);
+      span.className = ageClass(age);
+      // Promote to escalated styling exactly when crossing 2.5 min.
+      const escalated = age >= ESCALATE_MS;
+      card.classList.toggle('tc-card--escalated', escalated && card.classList.contains('tc-card--open'));
+    });
+  }
+  setInterval(_tickAges, 1000);
+
+  // ── Live SSE handler (driven by the global EventSource in dashboard.js) ──
+  // dashboard.js listens to /api/orders/stream and re-broadcasts table-call
+  // events as a 'tableCallSSE' window event. We debounce the resulting
+  // refreshes so a burst of events (e.g. resolve-all) only triggers one.
+  let _ssePending = null;
+  function _ssePoke() {
+    if (_ssePending) return;
+    _ssePending = setTimeout(() => { _ssePending = null; refreshAll(); }, 250);
+  }
+  window.addEventListener('tableCallSSE', evt => {
+    const { type, data } = evt.detail || {};
+    // For brand-new calls, chime + drawer-pop right away so the staff hears
+    // it even before the refetch finishes (notifyNewCall handles dedup).
+    if (type === 'table_call' && data && data.id != null) {
+      if (_seenCallIds && !_seenCallIds.has(data.id)) {
+        _seenCallIds.add(data.id);
+        notifyNewCall(data);
+      }
+    }
+    _ssePoke();
+  });
+
   refreshAll();
-  // 8 s feels live; 15 s left calls sitting too long before the badge moved.
-  // We additionally pause the timer while the dashboard tab is hidden so
+  // SSE drives instant updates; the timer is now a 30 s safety net for
+  // missed events / reconnects, and pauses while the tab is hidden so
   // background tabs don't hammer the server.
-  let _pollInt = setInterval(refreshAll, 8000);
+  let _pollInt = setInterval(refreshAll, 30000);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       clearInterval(_pollInt); _pollInt = null;
     } else if (!_pollInt) {
       refreshAll();
-      _pollInt = setInterval(refreshAll, 8000);
+      _pollInt = setInterval(refreshAll, 30000);
     }
   });
 })();

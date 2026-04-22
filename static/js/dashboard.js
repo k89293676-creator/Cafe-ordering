@@ -209,6 +209,14 @@ function handleSSEEvent(payload) {
       // Row not in current view — schedule a quiet refresh
       scheduleRefresh(2000);
     }
+  } else if (payload.type === "table_call" || payload.type === "table_call_update") {
+    // Re-broadcast as a window event so the table-call IIFE in
+    // owner_dashboard.html can react instantly without polling.
+    try {
+      window.dispatchEvent(new CustomEvent("tableCallSSE", {
+        detail: { type: payload.type, data: payload.data || {} },
+      }));
+    } catch (_) {}
   }
 }
 

@@ -163,6 +163,12 @@
     let _suppressAckMsgUntil = 0;      // timestamp; "Sending…" UI wins until then
     let _sendInFlight      = false;    // hard mutex for double-tap protection
     let _cancelInFlight    = false;
+    let _sse               = null;     // EventSource for real-time updates
+    let _sseRetry          = 1500;     // backoff in ms
+    let _sseConnected      = false;
+    let _ageTicker         = null;     // 1 s timer that updates the "sent Xs ago" text
+    let _currentCall       = null;     // most-recent known call object
+    const STREAM_URL       = `/api/table/${encodeURIComponent(tableId)}/call/stream`;
 
     /* ── Panel open / close ─────────────────────────────────────────────── */
     function openPanel() {
@@ -221,18 +227,84 @@
       }
     }
 
-    /* ── Live call-status polling ────────────────────────────────────────── */
+    /* ── Live call-status polling (failsafe behind SSE) ──────────────────── */
     function startPoll() {
+      // Backup poll only — when SSE is connected the cadence is much slower
+      // because the server pushes every change instantly anyway.
       if (_pollTimer) return;
-      // Quick first-tick after ~1.2s so the user sees the "Waiting…" age
-      // update almost immediately, instead of staring at a stale message.
+      const interval = _sseConnected ? 30000 : POLL_INTERVAL_MS;
       setTimeout(pollCallStatus, 1200);
-      _pollTimer = setInterval(pollCallStatus, POLL_INTERVAL_MS);
+      _pollTimer = setInterval(pollCallStatus, interval);
     }
     function stopPoll() {
       if (_pollTimer) clearInterval(_pollTimer);
       _pollTimer = null;
       if (_inFlightStatus) { try { _inFlightStatus.abort(); } catch(_){} _inFlightStatus = null; }
+    }
+    function restartPoll() { stopPoll(); startPoll(); }
+
+    /* ── Live ticking "Waiting Xs / Acked Xs" updater ────────────────────── */
+    function startAgeTicker() {
+      if (_ageTicker) return;
+      _ageTicker = setInterval(() => {
+        if (document.hidden) return;
+        if (Date.now() < _suppressAckMsgUntil) return;
+        if (!_currentCall) return;
+        if (_currentCall.status === 'acknowledged') {
+          const ackedFor = _currentCall.acknowledgedAt ? ageString(_currentCall.acknowledgedAt) : '';
+          setQuickStatus(
+            ackedFor ? `✓ Staff on their way! (${ackedFor})` : '✓ Staff on their way!',
+            '#4f46e5', '600'
+          );
+        } else {
+          setQuickStatus(`🛎️ Waiting… (sent ${ageString(_currentCall.createdAt)})`, '#6b7280', 'normal');
+        }
+      }, 1000);
+    }
+    function stopAgeTicker() {
+      if (_ageTicker) clearInterval(_ageTicker);
+      _ageTicker = null;
+    }
+
+    /* ── Server-Sent Events: instant push from server ────────────────────── */
+    function connectSSE() {
+      if (!('EventSource' in window) || _sse) return;
+      try { _sse = new EventSource(STREAM_URL); }
+      catch (_) { _sse = null; return; }
+
+      _sse.onopen = () => {
+        _sseConnected = true;
+        _sseRetry = 1500;
+        // Slow the failsafe polling now that pushes are flowing.
+        restartPoll();
+      };
+
+      _sse.onmessage = (evt) => {
+        if (!evt || !evt.data) return;
+        try {
+          const payload = JSON.parse(evt.data);
+          // Snapshot ships the full current state; updates ship just the
+          // changed call. Both shapes carry the call object in `data` (or
+          // null if no live call exists). `type` may be missing for raw
+          // legacy frames — treat that as an update too.
+          const data = payload.data === undefined ? payload : payload.data;
+          applyCallState(data || null);
+        } catch (_) {}
+      };
+
+      _sse.onerror = () => {
+        _sseConnected = false;
+        try { _sse.close(); } catch (_) {}
+        _sse = null;
+        restartPoll();   // fall back to faster polling while disconnected
+        // Exponential backoff reconnect, capped at 30 s.
+        setTimeout(connectSSE, _sseRetry);
+        _sseRetry = Math.min(_sseRetry * 2, 30000);
+      };
+    }
+    function disconnectSSE() {
+      if (_sse) { try { _sse.close(); } catch (_) {} _sse = null; }
+      _sseConnected = false;
     }
 
     async function pollCallStatus() {
@@ -255,22 +327,33 @@
     }
 
     function applyCallState(call) {
+      _currentCall = call || null;
+
       // Don't clobber the user's "Sending…" optimistic message.
       if (Date.now() < _suppressAckMsgUntil) return;
 
-      if (!call) {
+      if (!call || call.status === 'resolved') {
         // Only celebrate if we knew about a live call before; otherwise
         // (fresh page, no call ever sent) stay quiet.
         if (_activeCallId !== null) {
-          setQuickStatus('✅ Service complete!', '#16a34a', '600');
+          // Distinguish "staff resolved it" (positive) from "I cancelled it".
+          const note = (call && call.note) || '';
+          if (note.indexOf('[cancelled by customer]') !== -1) {
+            setQuickStatus('✓ Request cancelled.', '#6b7280');
+          } else {
+            setQuickStatus('✅ Service complete — thank you!', '#16a34a', '600');
+          }
           openBtn.textContent = '🛎️ Call again';
           setTimeout(() => {
             // Only clear if status hasn't been overwritten by a new send.
-            if (quickStatus.textContent.startsWith('✅')) setQuickStatus('');
+            const t = quickStatus.textContent;
+            if (t.startsWith('✅') || t.startsWith('✓ Request cancelled')) setQuickStatus('');
           }, 6000);
         }
         _activeCallId = null;
+        _currentCall = null;
         showCancelBtn(false);
+        stopAgeTicker();
         stopPoll();
         return;
       }
@@ -289,6 +372,7 @@
         setQuickStatus(`🛎️ Waiting… (sent ${ageString(call.createdAt)})`, '#6b7280', 'normal');
         showCancelBtn(true);
       }
+      startAgeTicker();
     }
 
     /* ── Cancel pending call ─────────────────────────────────────────────── */
@@ -392,28 +476,31 @@
 
     /* ── Visibility: pause polling when tab hidden, kick once on return ──── */
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden && _activeCallId !== null) pollCallStatus();
+      if (document.hidden) return;
+      if (_activeCallId !== null) pollCallStatus();
+      // Reconnect SSE if it dropped while we were away.
+      if (!_sse) connectSSE();
     });
+    window.addEventListener('beforeunload', () => { disconnectSSE(); stopPoll(); stopAgeTicker(); });
 
-    /* ── On page load: check if there's already an active call ──────────── */
-    (async function init() {
-      try {
-        const r = await fetch(STATUS_URL, { cache: 'no-store' });
-        if (!r.ok) return;
-        const { call } = await r.json();
-        if (call) {
-          _activeCallId = call.id;
-          openBtn.textContent = '🛎️ Call again';
-          if (call.status === 'acknowledged') {
-            setQuickStatus('✓ Staff on their way!', '#4f46e5', '600');
-            showCancelBtn(false);
-          } else {
-            setQuickStatus(`🛎️ Service request active… (sent ${ageString(call.createdAt)})`, '#6b7280');
-            showCancelBtn(true);
-          }
-          startPoll();
-        }
-      } catch (_) {}
+    /* ── On page load: connect SSE (delivers the snapshot first frame) ──── */
+    (function init() {
+      // SSE's first frame is a snapshot of the current call (or null), so
+      // we no longer need a separate REST status fetch on page load — the
+      // stream itself bootstraps the UI. Polling kicks in only as a
+      // failsafe when SSE isn't available.
+      connectSSE();
+      if (!('EventSource' in window)) {
+        // Old browser — fall back to the legacy poll-on-load path.
+        (async () => {
+          try {
+            const r = await fetch(STATUS_URL, { cache: 'no-store' });
+            if (!r.ok) return;
+            const { call } = await r.json();
+            if (call) { applyCallState(call); startPoll(); }
+          } catch (_) {}
+        })();
+      }
     })();
   })();
   </script>
