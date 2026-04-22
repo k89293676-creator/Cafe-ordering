@@ -909,6 +909,24 @@
           .tc-act:hover{filter:brightness(.95);}
           .tc-age-bad{color:#b91c1c;font-weight:700;}
           .tc-age-warn{color:#b45309;font-weight:700;}
+          /* Auto-escalation: any open call still unattended after 2.5 min */
+          .tc-card.tc-card--escalated{
+            border:2px solid #dc2626;
+            box-shadow:0 0 0 0 rgba(220,38,38,.55);
+            animation:tcPulse 1.4s ease-out infinite;
+            background:#fff5f5;
+          }
+          .tc-escalated-badge{
+            display:inline-block;background:#dc2626;color:#fff;
+            font-size:.65rem;font-weight:700;letter-spacing:.04em;
+            padding:.15rem .5rem;border-radius:999px;margin-left:.4rem;
+            text-transform:uppercase;
+          }
+          @keyframes tcPulse{
+            0%  {box-shadow:0 0 0 0   rgba(220,38,38,.55);}
+            70% {box-shadow:0 0 0 12px rgba(220,38,38,0);}
+            100%{box-shadow:0 0 0 0   rgba(220,38,38,0);}
+          }
         </style>
       </div>
 
@@ -1091,10 +1109,11 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
     if (m < 60)  return m + 'm' + (s % 60 ? ' ' + (s%60) + 's' : '');
     return Math.floor(m/60) + 'h ' + (m%60) + 'm';
   }
+  // Escalation kicks in at 2.5 min (150 s).
+  const ESCALATE_MS = 150000;
   function ageClass(ms) {
-    const s = ms / 1000;
-    if (s > 300) return 'tc-age-bad';
-    if (s > 120) return 'tc-age-warn';
+    if (ms >= ESCALATE_MS) return 'tc-age-bad';
+    if (ms >= 90000)        return 'tc-age-warn';
     return '';
   }
   function fmtTime(iso) {
@@ -1106,6 +1125,7 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
   // ── Notification support ─────────────────────────────────────────────────
   let _seenCallIds = null;             // null = first load (seed without notifying)
   let _lastReminderAt = 0;             // throttle the periodic reminder chime
+  const _escalatedAt = new Map();      // call.id -> last escalation chime ts
   let _audioCtx = null;                // shared, created lazily on a user gesture
   let _audioReady = false;             // becomes true after first successful chime
   const soundToggle = document.getElementById('tc-sound-toggle');
@@ -1142,22 +1162,42 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
     document.removeEventListener('click', _once);
   }, { once: true });
 
+  function _beep(ctx, freq, startOffset, duration, volume) {
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = freq;
+    const t = ctx.currentTime + startOffset;
+    gain.gain.setValueAtTime(volume, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    osc.start(t); osc.stop(t + duration);
+  }
+
   function playChime() {
     if (!_soundOn()) return;
     const ctx = _ensureAudio();
     if (!ctx) return;
     try {
       if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-      [880, 1100].forEach((freq, i) => {
-        const osc  = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.frequency.value = freq;
-        const t = ctx.currentTime + i * 0.18;
-        gain.gain.setValueAtTime(0.25, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
-        osc.start(t); osc.stop(t + 0.55);
-      });
+      _beep(ctx, 880,  0.00, 0.55, 0.25);
+      _beep(ctx, 1100, 0.18, 0.55, 0.25);
+    } catch (_) {}
+  }
+
+  // Louder, more urgent siren-style chime for escalated (>2.5 min) calls.
+  function playEscalationChime() {
+    if (!_soundOn()) return;
+    const ctx = _ensureAudio();
+    if (!ctx) return;
+    try {
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      // Three-tone alternating siren, ~1.5 s long, noticeably louder than
+      // the normal chime so it stands out in a busy floor environment.
+      _beep(ctx, 1320, 0.00, 0.32, 0.55);
+      _beep(ctx, 880,  0.30, 0.32, 0.55);
+      _beep(ctx, 1320, 0.60, 0.32, 0.55);
+      _beep(ctx, 880,  0.90, 0.32, 0.55);
+      _beep(ctx, 1320, 1.20, 0.40, 0.55);
     } catch (_) {}
   }
 
@@ -1273,37 +1313,77 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
     if (calls.length === 0) {
       delete drawer.dataset.userClosed;
       _lastReminderAt = 0;
+      _escalatedAt.clear();
     } else {
-      // Repeating reminder: if any open call is over 60s old, re-chime
-      // every 60s so a busy floor doesn't miss it.
+      // Auto-escalation: any call still OPEN past 2.5 min triggers the
+      // louder siren chime, re-pings every 60 s, and re-pops the drawer
+      // even if staff dismissed it. This is the safety net for a busy
+      // floor that may have missed the original ping.
       const now = Date.now();
-      let oldestAge = 0;
+      let anyEscalated = false;
       for (const c of calls) {
         const t = new Date(c.createdAt || now).getTime();
-        if (isFinite(t)) oldestAge = Math.max(oldestAge, now - t);
+        if (!isFinite(t)) continue;
+        const age = now - t;
+        if (age >= ESCALATE_MS) {
+          anyEscalated = true;
+          const last = _escalatedAt.get(c.id) || 0;
+          if (now - last >= 60000) {     // first crossing OR 60s since last
+            _escalatedAt.set(c.id, now);
+            playEscalationChime();
+            try {
+              if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('⚠ Escalated table call', {
+                  body: `${c.tableName || c.tableId} — ${REASON_LABEL[c.reason] || c.reason} (waiting ${fmtAge(age)})`,
+                  tag: `escalated-${c.id}`,
+                  renotify: true,
+                });
+              }
+            } catch (_) {}
+          }
+        }
       }
-      if (oldestAge > 60000 && now - _lastReminderAt > 60000) {
-        _lastReminderAt = now;
-        playChime();
+      // If something is escalated, force-show the drawer regardless of
+      // whether the user dismissed it earlier.
+      if (anyEscalated && location.hash !== '#table-calls') {
+        delete drawer.dataset.userClosed;
+        drawer.style.display = 'flex';
+      }
+      // Also forget escalation timestamps for calls that are no longer open
+      // (acknowledged or resolved) so the map can't grow forever.
+      const liveIds = new Set(calls.map(c => c.id));
+      for (const id of _escalatedAt.keys()) {
+        if (!liveIds.has(id)) _escalatedAt.delete(id);
       }
     }
 
     // FIFO: oldest open call surfaces at the top.
     calls.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-    list.innerHTML = calls.length ? calls.map(c => `
-      <div style="border:1px solid #e5e7eb;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;">
+    const _now = Date.now();
+    list.innerHTML = calls.length ? calls.map(c => {
+      const age = _now - new Date(c.createdAt || _now).getTime();
+      const escalated = age >= ESCALATE_MS;
+      const wrapStyle = escalated
+        ? 'border:2px solid #dc2626;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;background:#fff5f5;animation:tcPulse 1.4s ease-out infinite;'
+        : 'border:1px solid #e5e7eb;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;';
+      const badge = escalated
+        ? ' <span class="tc-escalated-badge" title="Open over 2.5 min">⚠</span>'
+        : '';
+      return `
+      <div style="${wrapStyle}">
         <div style="display:flex;justify-content:space-between;align-items:baseline;">
-          <strong>${esc(c.tableName || c.tableId)}</strong>
+          <strong>${esc(c.tableName || c.tableId)}${badge}</strong>
           <span style="font-size:.7rem;color:#6b7280;">${fmtTime(c.createdAt)}</span>
         </div>
-        <div style="font-size:.8rem;color:#374151;margin:.2rem 0;">${esc(REASON_LABEL[c.reason] || c.reason)}</div>
+        <div style="font-size:.8rem;color:#374151;margin:.2rem 0;">${esc(REASON_LABEL[c.reason] || c.reason)} <span style="float:right;font-size:.7rem;" class="${ageClass(age)}">${fmtAge(age)}</span></div>
         ${c.note ? `<div style="font-size:.75rem;color:#6b7280;font-style:italic;margin:.1rem 0 .2rem;">"${esc(c.note)}"</div>` : ''}
         <div style="display:flex;gap:.35rem;">
           <button data-id="${c.id}" data-action="ack"     class="ays-act" style="flex:1;background:#fef3c7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Acknowledge</button>
           <button data-id="${c.id}" data-action="resolve" class="ays-act" style="flex:1;background:#dcfce7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Resolve</button>
         </div>
-      </div>`).join('') : '<div style="color:#9ca3af;text-align:center;padding:1rem;">No open calls.</div>';
+      </div>`;
+    }).join('') : '<div style="color:#9ca3af;text-align:center;padding:1rem;">No open calls.</div>';
     list.querySelectorAll('button.ays-act').forEach(b => b.addEventListener('click', () => {
       _doCallAction(b.dataset.id, b.dataset.action, b);
     }));
@@ -1402,10 +1482,15 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
               <button class="tc-act tc-act-resolve" data-id="${c.id}" data-action="resolve">Mark resolved</button>
               ${billBtn}
             </div>` : '';
+        const isEscalated = c.status === 'open' && age >= ESCALATE_MS;
+        const escalatedCls = isEscalated ? ' tc-card--escalated' : '';
+        const escalatedBadge = isEscalated
+          ? '<span class="tc-escalated-badge" title="Open for over 2.5 minutes">⚠ Escalated</span>'
+          : '';
         return `
-          <div class="tc-card tc-card--${c.status}" data-id="${c.id}">
+          <div class="tc-card tc-card--${c.status}${escalatedCls}" data-id="${c.id}">
             <div class="tc-card-head">
-              <span class="tc-card-table">${esc(c.tableName || c.tableId)}</span>
+              <span class="tc-card-table">${esc(c.tableName || c.tableId)}${escalatedBadge}</span>
               <span class="tc-card-time">${fmtTime(c.createdAt)}</span>
             </div>
             <div class="tc-card-reason">${esc(REASON_LABEL[c.reason] || c.reason)}</div>
