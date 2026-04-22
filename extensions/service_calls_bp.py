@@ -144,6 +144,79 @@ def resolve_call(call_id: int):
     return _transition_call(call_id, "resolved")
 
 
+@bp.route("/api/owner/table-calls/resolve-all", methods=["POST"])
+@login_required
+def resolve_all_open_calls():
+    """Bulk-resolve every open or acknowledged call for this owner.
+
+    Useful when the staff has handled a wave of calls in person and wants
+    to clear the board in one tap instead of resolving them one by one.
+    """
+    owner_id = logged_in_owner_id()
+    if not owner_id:
+        abort(401)
+    now = datetime.now(timezone.utc)
+    calls = (
+        TableCall.query
+        .filter_by(owner_id=owner_id)
+        .filter(TableCall.status.in_(["open", "acknowledged"]))
+        .all()
+    )
+    resolved_payloads = []
+    for call in calls:
+        # Preserve the original acknowledged_at if it was a real ack, so
+        # response-time stats stay accurate.
+        call.status = "resolved"
+        call.resolved_at = now
+        resolved_payloads.append(call)
+    db.session.commit()
+    for call in resolved_payloads:
+        try:
+            _notify_owner(owner_id, "table_call_update", _call_dict(call))
+        except Exception:  # pragma: no cover
+            pass
+    return jsonify({"ok": True, "resolved": len(resolved_payloads)})
+
+
+# ---------------------------------------------------------------------------
+# Public (customer) — cancel their own pending call
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/table/<table_id>/call/cancel", methods=["POST"])
+@limiter.limit("10 per minute; 60 per hour")
+def cancel_table_call(table_id: str):
+    """Customer cancels their most recent OPEN (not-yet-acknowledged) call.
+
+    Acknowledged calls can no longer be cancelled — staff is already on the
+    way. The table_id itself is the implicit auth (matches the customer's
+    QR-scanned URL), same model as the public status endpoint.
+    """
+    if not _TABLE_ID_RE.fullmatch(table_id):
+        abort(400, description="Invalid table id.")
+    call = (
+        TableCall.query
+        .filter_by(table_id=table_id, status="open")
+        .order_by(TableCall.created_at.desc())
+        .first()
+    )
+    if not call:
+        return jsonify({"ok": True, "cancelled": False})
+    call.status = "resolved"
+    now = datetime.now(timezone.utc)
+    call.resolved_at = now
+    # Tag the note so owners can see it was a customer cancel, not a real serve.
+    cancel_tag = "[cancelled by customer]"
+    if cancel_tag not in (call.note or ""):
+        call.note = (cancel_tag + " " + (call.note or "")).strip()[:200]
+    db.session.commit()
+    if call.owner_id:
+        try:
+            _notify_owner(call.owner_id, "table_call_update", _call_dict(call))
+        except Exception:  # pragma: no cover
+            pass
+    return jsonify({"ok": True, "cancelled": True, "call": _call_dict(call)})
+
+
 def _transition_call(call_id: int, target: str):
     owner_id = logged_in_owner_id()
     if not owner_id:
@@ -156,8 +229,11 @@ def _transition_call(call_id: int, target: str):
     if target == "acknowledged" and not call.acknowledged_at:
         call.acknowledged_at = now
     if target == "resolved":
-        if not call.acknowledged_at:
-            call.acknowledged_at = now
+        # IMPORTANT: do NOT backfill acknowledged_at when going directly
+        # open → resolved. Doing so makes the "avg response time" metric
+        # always read 0s for skip-acked calls, which is misleading.
+        # Leave it null; the dashboard's metric correctly excludes calls
+        # without a real acknowledged_at.
         call.resolved_at = now
     db.session.commit()
     try:

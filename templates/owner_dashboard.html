@@ -532,7 +532,17 @@
                           <div class="full-col"><input name="itemDescription" value="{{ item.description }}" placeholder="Description" /></div>
                           <div class="full-col"><input name="itemTags" value="{{ item.tags | join(', ') }}" placeholder="Tags (comma separated)" /></div>
                           <div class="full-col"><input name="itemDietaryTags" value="{{ item.get('dietary_tags', []) | join(', ') }}" placeholder="Dietary tags (vegan, gluten-free, nut-free)" /></div>
-                          <div class="full-col"><input name="itemImageUrl" type="url" value="{{ item.get('image_url', '') }}" placeholder="Image URL (optional)" /></div>
+                          <div class="full-col">
+                            <input name="itemImageUrl" type="text" value="{{ item.get('image_url', '') }}" placeholder="Image URL or /static/... (or upload below)" class="js-image-url" />
+                            <div style="display:flex;gap:.4rem;margin-top:.35rem;align-items:center;flex-wrap:wrap;">
+                              <label class="btn btn-secondary btn-sm" style="margin:0;cursor:pointer;">
+                                📷 Upload photo
+                                <input type="file" accept="image/png,image/jpeg" class="js-image-upload" style="display:none;" />
+                              </label>
+                              <button type="button" class="btn btn-ghost btn-sm js-image-clear">✨ Use AI image</button>
+                              <span class="js-image-status" style="font-size:.72rem;color:#6b7280;"></span>
+                            </div>
+                          </div>
                           <div><input name="itemPrepTime" type="number" min="0" max="300" value="{{ item.get('prep_time', '') }}" placeholder="Prep time (min)" /></div>
                           <div class="full-col" style="display:flex;gap:0.5rem;">
                             <button class="btn btn-primary btn-sm" type="submit">Save Changes</button>
@@ -594,8 +604,16 @@
                     <input name="itemDietaryTags" placeholder="vegan, gluten-free, nut-free" />
                   </div>
                   <div class="field">
-                    <label>Image URL <span class="text-muted">(optional)</span></label>
-                    <input name="itemImageUrl" type="url" placeholder="https://example.com/image.jpg" />
+                    <label>Image <span class="text-muted">(upload a photo or paste a URL — leave blank for AI image)</span></label>
+                    <input name="itemImageUrl" type="text" placeholder="https://example.com/image.jpg or /static/... — leave blank for AI" class="js-image-url" />
+                    <div style="display:flex;gap:.4rem;margin-top:.4rem;align-items:center;flex-wrap:wrap;">
+                      <label class="btn btn-secondary btn-sm" style="margin:0;cursor:pointer;">
+                        📷 Upload photo
+                        <input type="file" accept="image/png,image/jpeg" class="js-image-upload" style="display:none;" />
+                      </label>
+                      <button type="button" class="btn btn-ghost btn-sm js-image-clear">✨ Use AI image</button>
+                      <span class="js-image-status" style="font-size:.72rem;color:#6b7280;"></span>
+                    </div>
                   </div>
                   <div class="field">
                     <label>Prep Time <span class="text-muted">(minutes, optional)</span></label>
@@ -841,6 +859,19 @@
                 <button data-status="acknowledged" class="tc-pill">Acknowledged</button>
                 <button data-status="resolved" class="tc-pill">Resolved</button>
               </div>
+              <select id="tc-reason-filter" class="form-input" style="font-size:.78rem;padding:.3rem .55rem;border-radius:8px;">
+                <option value="">All reasons</option>
+                <option value="service">🛎️ Service</option>
+                <option value="bill">💳 Bill</option>
+                <option value="water">💧 Water</option>
+                <option value="cutlery">🍴 Cutlery</option>
+                <option value="help">❓ Help</option>
+              </select>
+              <button id="tc-resolve-all" class="btn btn-sm" type="button"
+                      style="background:#dcfce7;color:#065f46;border:0;display:none;">✓ Resolve all</button>
+              <label style="display:flex;align-items:center;gap:.3rem;font-size:.75rem;color:#475569;cursor:pointer;">
+                <input id="tc-sound-toggle" type="checkbox" checked /> Sound
+              </label>
               <button id="tc-refresh" class="btn btn-ghost btn-sm" type="button">↻ Refresh</button>
             </div>
           </div>
@@ -980,6 +1011,58 @@
 // Dark mode persistence
 if (localStorage.getItem('darkMode') === '1') document.documentElement.classList.add('dark');
 
+// ─── Menu image upload (per-form wiring) ────────────────────────────────
+(function(){
+  const csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+  function wire(input) {
+    const wrap   = input.closest('.field, .full-col');
+    if (!wrap) return;
+    const url    = wrap.querySelector('.js-image-url');
+    const status = wrap.querySelector('.js-image-status');
+    const clear  = wrap.querySelector('.js-image-clear');
+    if (!url) return;
+    input.addEventListener('change', async () => {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      if (f.size > 16 * 1024 * 1024) {
+        status.textContent = 'File too large (max 16 MB).';
+        status.style.color = '#b91c1c';
+        input.value = '';
+        return;
+      }
+      status.style.color = '#6b7280';
+      status.textContent = 'Uploading…';
+      try {
+        const fd = new FormData();
+        fd.append('image', f);
+        const r = await fetch('/owner/menu/upload-image', {
+          method: 'POST',
+          body: fd,
+          credentials: 'same-origin',
+          headers: { 'X-CSRFToken': csrf }
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || 'Upload failed');
+        url.value = j.url;
+        status.style.color = '#065f46';
+        status.textContent = '✓ Uploaded — saved on next "Save".';
+      } catch (e) {
+        status.style.color = '#b91c1c';
+        status.textContent = (e && e.message) || 'Upload failed.';
+      }
+      input.value = '';  // allow re-selecting the same file
+    });
+    if (clear) {
+      clear.addEventListener('click', () => {
+        url.value = '';
+        status.style.color = '#6b7280';
+        status.textContent = 'Cleared — an AI image will be generated.';
+      });
+    }
+  }
+  document.querySelectorAll('.js-image-upload').forEach(wire);
+})();
+
 // ─── Table Calls: drawer (peek), sidebar badge, and full tab panel ──────
 (function(){
   const csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
@@ -1022,6 +1105,19 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
 
   // ── Notification support ─────────────────────────────────────────────────
   let _seenCallIds = null;   // null = first load (seed without notifying)
+  let _lastReminderAt = 0;   // throttle the periodic reminder chime
+  const soundToggle = document.getElementById('tc-sound-toggle');
+  function _soundOn() {
+    if (!soundToggle) return true;
+    if (soundToggle.dataset._inited !== '1') {
+      soundToggle.dataset._inited = '1';
+      try { soundToggle.checked = localStorage.getItem('tcSoundOn') !== '0'; } catch (_) {}
+      soundToggle.addEventListener('change', () => {
+        try { localStorage.setItem('tcSoundOn', soundToggle.checked ? '1' : '0'); } catch (_) {}
+      });
+    }
+    return soundToggle.checked;
+  }
 
   function requestNotifPerms() {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -1035,6 +1131,7 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
   }, { once: true });
 
   function playChime() {
+    if (!_soundOn()) return;
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       [880, 1100].forEach((freq, i) => {
@@ -1095,6 +1192,27 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
         });
       }
 
+      // BUGFIX: re-arm the drawer when the floor goes quiet so the next wave
+      // of calls actually pops it again (previously, once the user closed it
+      // it stayed closed forever, even for new urgent calls).
+      if (calls.length === 0) {
+        delete drawer.dataset.userClosed;
+        _lastReminderAt = 0;
+      } else {
+        // Repeating reminder: if there are unattended calls older than 60s,
+        // re-chime every 60s so a busy floor doesn't miss them.
+        const now = Date.now();
+        const oldest = Math.max(...calls.map(c => now - new Date(c.createdAt || now).getTime()));
+        if (oldest > 60000 && now - _lastReminderAt > 60000) {
+          _lastReminderAt = now;
+          playChime();
+        }
+      }
+
+      // Show calls oldest-first so staff handle them FIFO
+      // (server returns newest-first, which buries old waiters at the bottom).
+      calls.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
       list.innerHTML = calls.length ? calls.map(c => `
         <div style="border:1px solid #e5e7eb;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;">
           <div style="display:flex;justify-content:space-between;align-items:baseline;">
@@ -1124,10 +1242,13 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
   });
 
   // Full tab panel ----------------------------------------------------------
-  const tcList    = document.getElementById('tc-list');
-  const tcRefresh = document.getElementById('tc-refresh');
-  const tcFilter  = document.getElementById('tc-filter');
+  const tcList         = document.getElementById('tc-list');
+  const tcRefresh      = document.getElementById('tc-refresh');
+  const tcFilter       = document.getElementById('tc-filter');
+  const tcReasonFilter = document.getElementById('tc-reason-filter');
+  const tcResolveAll   = document.getElementById('tc-resolve-all');
   let currentStatus = 'open';
+  let currentReason = '';
 
   async function refreshTab() {
     if (!tcList) return;
@@ -1155,16 +1276,35 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
       const avg = responseTimes.length ? responseTimes.reduce((a,b)=>a+b,0)/responseTimes.length : null;
       document.getElementById('tc-count-avg').textContent = avg !== null ? fmtAge(avg) : '—';
 
-      if (!calls.length) {
+      // Apply reason filter (client-side; the API only filters by status)
+      const filteredCalls = currentReason
+        ? calls.filter(c => c.reason === currentReason)
+        : calls;
+
+      // FIFO sort for open/acknowledged so old waiters surface first;
+      // resolved tab keeps newest-first (most recently handled at top).
+      if (currentStatus === 'resolved') {
+        filteredCalls.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      } else {
+        filteredCalls.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      }
+
+      // Show "Resolve all" only when there's something live to clear.
+      if (tcResolveAll) {
+        tcResolveAll.style.display = (open.length + ack.length) > 0 ? 'inline-block' : 'none';
+      }
+
+      if (!filteredCalls.length) {
+        const reasonLbl = currentReason ? ` for "${REASON_LABEL[currentReason] || currentReason}"` : '';
         tcList.innerHTML = `<div style="grid-column:1/-1;color:#9ca3af;text-align:center;padding:2.5rem;">
           <div style="font-size:2rem;margin-bottom:.5rem;">${currentStatus==='open' ? '✅' : '—'}</div>
-          ${currentStatus==='open' ? 'No open calls right now. The floor is calm.' : 'Nothing to show in this tab.'}
+          ${currentStatus==='open' ? `No open calls${reasonLbl}. The floor is calm.` : `Nothing to show${reasonLbl}.`}
         </div>`;
         return;
       }
 
       const now = Date.now();
-      tcList.innerHTML = calls.map(c => {
+      tcList.innerHTML = filteredCalls.map(c => {
         const created = c.createdAt ? new Date(c.createdAt) : null;
         const age = created ? (now - created.getTime()) : 0;
         const ackTime = (c.acknowledgedAt && c.createdAt)
@@ -1225,6 +1365,30 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
       currentStatus = b.dataset.status;
       tcFilter.querySelectorAll('button').forEach(x => x.classList.toggle('tc-pill--active', x === b));
       refreshTab();
+    });
+  }
+  if (tcReasonFilter) {
+    tcReasonFilter.addEventListener('change', () => {
+      currentReason = tcReasonFilter.value || '';
+      refreshTab();
+    });
+  }
+  if (tcResolveAll) {
+    tcResolveAll.addEventListener('click', async () => {
+      if (!confirm('Mark every open and acknowledged call as resolved?')) return;
+      tcResolveAll.disabled = true;
+      const prev = tcResolveAll.textContent;
+      tcResolveAll.textContent = '…';
+      try {
+        await fetch('/api/owner/table-calls/resolve-all', {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrf },
+          credentials: 'same-origin'
+        });
+      } catch (_) {}
+      tcResolveAll.disabled = false;
+      tcResolveAll.textContent = prev;
+      refreshAll();
     });
   }
   if (tcRefresh) tcRefresh.addEventListener('click', refreshAll);

@@ -2594,6 +2594,53 @@ def save_menu_item() -> Response:
     return redirect(url_for("owner_dashboard") + "#menu")
 
 
+@app.route("/owner/menu/upload-image", methods=["POST"])
+@login_required
+@limiter.limit("60 per hour")
+def upload_menu_image() -> Response:
+    """Upload an image file for a menu item.
+
+    Accepts a multipart ``image`` field (jpg/jpeg/png), validates it with the
+    same checks used elsewhere, saves it under ``static/uploads/menu/<owner_id>/``
+    and returns ``{url: "..."}`` so the calling form can drop the URL into the
+    item's ``itemImageUrl`` field.
+
+    The owner-id namespace prevents one cafe from clobbering another's images.
+    """
+    owner_id = logged_in_owner_id()
+    if not owner_id:
+        return jsonify({"ok": False, "error": "Not signed in."}), 401
+
+    uploaded = request.files.get("image")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"ok": False, "error": "No file uploaded."}), 400
+
+    # Reuse the existing 16 MB cap and the shared validator.
+    file_bytes = uploaded.read(16 * 1024 * 1024)
+    err, kind = validate_uploaded_file(uploaded, file_bytes)
+    if err or kind != "image":
+        return jsonify({"ok": False, "error": err or "Only JPG or PNG images are allowed."}), 400
+
+    ext = Path((uploaded.filename or "").lower()).suffix
+    if ext not in {".jpg", ".jpeg", ".png"}:
+        return jsonify({"ok": False, "error": "Only JPG or PNG images are allowed."}), 400
+
+    # Hash-based filename gives a stable URL and natural dedup; no PII leakage.
+    import hashlib
+    digest = hashlib.sha256(file_bytes).hexdigest()[:24]
+    rel_dir = Path("static") / "uploads" / "menu" / str(owner_id)
+    abs_dir = Path(app.root_path) / rel_dir
+    abs_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{digest}{ext}"
+    abs_path = abs_dir / filename
+    if not abs_path.exists():
+        with open(abs_path, "wb") as f:
+            f.write(file_bytes)
+
+    public_url = url_for("static", filename=f"uploads/menu/{owner_id}/{filename}")
+    return jsonify({"ok": True, "url": public_url})
+
+
 @app.route("/owner/menu/item/<item_id>/delete", methods=["POST"])
 @login_required
 def delete_menu_item(item_id: str) -> Response:

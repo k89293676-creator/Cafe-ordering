@@ -92,6 +92,7 @@
       <span style="font-size:.8rem;color:#6b7280;font-weight:600;">Need something?</span>
       <button type="button" id="ays-open-btn" class="ays-btn" style="background:var(--gold,#4f46e5);color:#fff;border-color:var(--gold,#4f46e5);">🛎️ Call for service</button>
       <span id="ays-quick-status" style="font-size:.78rem;margin-left:auto;"></span>
+      <button type="button" id="ays-cancel-call-btn" class="ays-btn" style="display:none;background:#fee2e2;color:#991b1b;border-color:#fecaca;font-size:.72rem;padding:.22rem .6rem;">✕ Cancel</button>
     </div>
 
     <!-- Expanded: reason buttons + note -->
@@ -141,6 +142,7 @@
     const sendBtn      = document.getElementById('ays-send-btn');
     const statusEl     = document.getElementById('ays-status');
     const quickStatus  = document.getElementById('ays-quick-status');
+    const cancelCallBtn= document.getElementById('ays-cancel-call-btn');
 
     const REASON_LABELS = {
       service:'🛎️ Call server', bill:'💳 Ask for the bill',
@@ -209,15 +211,53 @@
           quickStatus.textContent = '✓ Staff on their way!';
           quickStatus.style.color = '#4f46e5';
           quickStatus.style.fontWeight = '600';
+          // Once acknowledged, customer can no longer cancel.
+          cancelCallBtn.style.display = 'none';
         } else {
           const age = Math.max(0, Math.round((Date.now() - new Date(call.createdAt).getTime()) / 1000));
           const ageStr = age < 60 ? `${age}s ago` : `${Math.floor(age / 60)}m ${age % 60}s ago`;
           quickStatus.textContent = `🛎️ Waiting… (sent ${ageStr})`;
           quickStatus.style.color = '#6b7280';
           quickStatus.style.fontWeight = 'normal';
+          cancelCallBtn.style.display = 'inline-block';
         }
       } catch (_) {}
     }
+
+    /* ── Cancel pending call ─────────────────────────────────────────────── */
+    async function cancelCall() {
+      cancelCallBtn.disabled = true;
+      const prevText = cancelCallBtn.textContent;
+      cancelCallBtn.textContent = 'Cancelling…';
+      try {
+        const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call/cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf }
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) {
+          stopPoll();
+          cancelCallBtn.style.display = 'none';
+          openBtn.textContent = '🛎️ Call for service';
+          quickStatus.textContent = j.cancelled
+            ? '✓ Request cancelled.'
+            : 'No active request to cancel.';
+          quickStatus.style.color = '#6b7280';
+          quickStatus.style.fontWeight = 'normal';
+          setTimeout(() => { quickStatus.textContent = ''; }, 4000);
+        } else {
+          quickStatus.textContent = 'Could not cancel.';
+          quickStatus.style.color = '#b91c1c';
+        }
+      } catch (_) {
+        quickStatus.textContent = 'Network error.';
+        quickStatus.style.color = '#b91c1c';
+      } finally {
+        cancelCallBtn.disabled = false;
+        cancelCallBtn.textContent = prevText;
+      }
+    }
+    cancelCallBtn.addEventListener('click', cancelCall);
 
     /* ── Send call ───────────────────────────────────────────────────────── */
     async function sendCall() {
@@ -271,6 +311,8 @@
             ? '✓ Staff on their way!'
             : '🛎️ Service request active…';
           quickStatus.style.color = call.status === 'acknowledged' ? '#4f46e5' : '#6b7280';
+          // Show cancel only while still open (not yet acknowledged).
+          cancelCallBtn.style.display = call.status === 'open' ? 'inline-block' : 'none';
           startPoll();
         }
       } catch (_) {}
