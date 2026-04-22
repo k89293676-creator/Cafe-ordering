@@ -8,20 +8,28 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/enhancements.css" />
   <style>
     .customer-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-    .customer-table th { text-align: left; padding: 0.625rem 1rem; border-bottom: 2px solid var(--border); font-weight: 600; color: var(--text-2); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-    .customer-table td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); color: var(--text-1); }
+    .customer-table th { text-align: left; padding: 0.65rem 1rem; background:#fafbfd; border-bottom: 1px solid #e5e7eb; font-weight: 700; color: #475569; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .customer-table td { padding: 0.75rem 1rem; border-bottom: 1px solid #f1f3f7; color: #0f172a; vertical-align: middle; }
     .customer-table tr:last-child td { border-bottom: none; }
-    .customer-table tr:hover td { background: var(--surface-2); }
-    .badge-repeat { background: #dcfce7; color: #15803d; font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 999px; }
-    .insight-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
-    @media (max-width: 640px) { .insight-cards { grid-template-columns: 1fr; } }
-    .insight-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; }
-    .insight-card-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-3); margin-bottom: 0.5rem; }
-    .insight-card-value { font-size: 2rem; font-weight: 700; color: var(--text-1); }
+    .customer-table tr:hover td { background: rgba(99,102,241,.04); }
+    .badge-repeat { background: #dcfce7; color: #15803d; font-size: 0.7rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; }
+    .badge-vip    { background: #fef3c7; color: #92400e; font-size: 0.7rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; margin-left:.25rem;}
+    .insight-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.25rem; }
+    @media (max-width: 900px) { .insight-cards { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 480px) { .insight-cards { grid-template-columns: 1fr; } }
+    .insight-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 1.1rem 1.25rem; }
+    .insight-card-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; margin-bottom: 0.4rem; }
+    .insight-card-value { font-size: 1.85rem; font-weight: 800; color: #0f172a; letter-spacing: -.02em; }
+    .toolbar { display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; margin-bottom:1rem; }
+    .toolbar input[type=search] { flex:1; min-width:220px; border:1px solid #d3d7e2; border-radius:10px; padding:.55rem .85rem; font-size:.92rem; }
+    .toolbar a { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:.55rem .9rem; font-size:.85rem; font-weight:600; color:#0f172a; text-decoration:none; }
+    .toolbar a:hover { border-color:#4f46e5; color:#4f46e5; }
+    .contact-cell { font-size:.8rem; color:#475569; }
+    .contact-cell a { color:#4f46e5; text-decoration:none; }
   </style>
-  <link rel="stylesheet" href="/static/css/enhancements.css" />
 </head>
 <body>
 <div class="dashboard-wrapper">
@@ -33,17 +41,21 @@
       </div>
     </div>
     <div class="sidebar-nav">
-      <a class="sidebar-link" href="/owner/dashboard">
+      <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}">
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
         Dashboard
       </a>
-      <a class="sidebar-link" href="/owner/analytics">
+      <a class="sidebar-link" href="{{ url_for('owner_analytics') }}">
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         Analytics
       </a>
-      <a class="sidebar-link active" href="/owner/customers">
+      <a class="sidebar-link active" href="{{ url_for('owner_customers') }}">
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
         Customers
+      </a>
+      <a class="sidebar-link" href="{{ url_for('reorder_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        Reorder
       </a>
     </div>
     <div class="sidebar-footer">
@@ -51,7 +63,7 @@
         <div class="user-avatar-lg">{{ owner_username[0].upper() }}</div>
         <div class="user-info"><span class="user-name">{{ owner_username }}</span><span class="user-role">Owner</span></div>
       </div>
-      <a href="/owner/logout" class="btn btn-ghost btn-sm btn-full" style="margin-top:0.5rem;">Sign out</a>
+      <a href="{{ url_for('owner_logout') }}" class="sidebar-link sidebar-link--danger" style="margin-top:.5rem;">Sign out</a>
     </div>
   </nav>
 
@@ -59,30 +71,37 @@
     <div class="main-header">
       <div>
         <h1 class="main-title">Customer Insights</h1>
-        <p class="main-subtitle">Top 20 customers by total spend</p>
+        <p class="main-subtitle">Unique customers identified by phone, email or name</p>
       </div>
-      <button onclick="document.documentElement.classList.toggle('dark');localStorage.setItem('darkMode',document.documentElement.classList.contains('dark')?'1':'0')" class="btn btn-ghost btn-sm" title="Toggle dark mode">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-      </button>
     </div>
 
     <div class="insight-cards">
       <div class="insight-card">
-        <div class="insight-card-label">Total Completed Orders</div>
+        <div class="insight-card-label">Unique Customers</div>
+        <div class="insight-card-value">{{ total_unique }}</div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-card-label">Completed Orders</div>
         <div class="insight-card-value">{{ total_orders }}</div>
       </div>
       <div class="insight-card">
-        <div class="insight-card-label">Unique Customers</div>
-        <div class="insight-card-value">{{ customers | length }}</div>
+        <div class="insight-card-label">Repeat Rate</div>
+        <div class="insight-card-value">{{ repeat_rate }}%</div>
       </div>
       <div class="insight-card">
-        <div class="insight-card-label">Repeat Customer Rate</div>
-        <div class="insight-card-value">{{ repeat_rate }}%</div>
+        <div class="insight-card-label">Showing</div>
+        <div class="insight-card-value">{{ customers|length }}</div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-header"><div><h3>Top Customers</h3><div class="card-subtitle">Ranked by total spend (completed orders only)</div></div></div>
+    <form method="get" class="toolbar">
+      <input type="search" name="q" value="{{ search }}" placeholder="Search by name, email or phone…" autocomplete="off"/>
+      <button type="submit" class="btn btn-primary btn-sm" style="background:#4f46e5;color:#fff;border:none;border-radius:10px;padding:.55rem 1rem;font-weight:600;cursor:pointer;">Search</button>
+      {% if search %}<a href="{{ url_for('owner_customers') }}">Clear</a>{% endif %}
+      <a href="{{ url_for('owner_customers', export='csv', q=search) }}" style="margin-left:auto;">⬇ Export CSV</a>
+    </form>
+
+    <div class="card" style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
       <div class="card-body" style="padding:0;overflow-x:auto;">
         {% if customers %}
         <table class="customer-table">
@@ -90,36 +109,48 @@
             <tr>
               <th>#</th>
               <th>Customer</th>
+              <th>Contact</th>
               <th>Orders</th>
               <th>Total Spend</th>
               <th>Avg. Order</th>
+              <th>Last Order</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {% for c in customers %}
             <tr>
-              <td style="color:var(--text-3);">{{ loop.index }}</td>
-              <td style="font-weight:500;">{{ c.name }}</td>
-              <td>{{ c.orderCount }}</td>
-              <td style="font-weight:600;">₹{{ '%.2f'|format(c.totalSpend) }}</td>
-              <td>₹{{ '%.2f'|format(c.avgOrder) }}</td>
-              <td>{% if c.orderCount > 1 %}<span class="badge-repeat">Repeat</span>{% endif %}</td>
+              <td style="color:#94a3b8;font-weight:600;">{{ loop.index }}</td>
+              <td style="font-weight:600;">{{ c.name }}</td>
+              <td class="contact-cell">
+                {% if c.phone %}<div>📱 <a href="tel:{{ c.phone }}">{{ c.phone }}</a></div>{% endif %}
+                {% if c.email %}<div>✉️ <a href="mailto:{{ c.email }}">{{ c.email }}</a></div>{% endif %}
+                {% if not c.phone and not c.email %}<span style="color:#94a3b8;">—</span>{% endif %}
+              </td>
+              <td><strong>{{ c.orderCount }}</strong> <span style="color:#94a3b8;">/ {{ c.completedCount }}✓</span></td>
+              <td style="font-weight:700;color:#0f172a;">₹{{ '%.0f'|format(c.totalSpend) }}</td>
+              <td>₹{{ '%.0f'|format(c.avgOrder) }}</td>
+              <td style="color:#64748b;font-size:.8rem;">{{ (c.lastOrder or '')[:10] }}</td>
+              <td>
+                {% if c.orderCount > 1 %}<span class="badge-repeat">Repeat</span>{% endif %}
+                {% if c.totalSpend >= 1000 %}<span class="badge-vip">VIP</span>{% endif %}
+                {% if c.phone %}
+                <a href="{{ url_for('reorder_view', q=c.phone) }}" style="margin-left:.4rem;color:#4f46e5;font-size:.78rem;text-decoration:none;font-weight:600;">Reorder →</a>
+                {% endif %}
+              </td>
             </tr>
             {% endfor %}
           </tbody>
         </table>
         {% else %}
-        <div class="empty-state" style="padding:3rem;">
-          <p>No completed orders yet. Customer insights will appear here once orders are completed.</p>
+        <div class="empty-state" style="padding:3.5rem 1.5rem;text-align:center;color:#64748b;">
+          <h3 style="margin:0 0 .35rem;color:#0f172a;">{% if search %}No customers match "{{ search }}"{% else %}No customers yet{% endif %}</h3>
+          <p style="margin:0;font-size:.9rem;">{% if search %}Try a different search term.{% else %}Once orders are placed, customer insights will appear here.{% endif %}</p>
         </div>
         {% endif %}
       </div>
     </div>
   </main>
 </div>
-<script>
-if (localStorage.getItem('darkMode') === '1') document.documentElement.classList.add('dark');
-</script>
 </body>
 </html>

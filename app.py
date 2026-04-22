@@ -2004,6 +2004,73 @@ def delete_ingredient(ing_id: int):
     return redirect(url_for("inventory_view"))
 
 
+@app.route("/owner/inventory/<int:ing_id>/restock", methods=["POST"])
+@login_required
+def restock_ingredient(ing_id: int):
+    """Quick restock: add a delta to existing stock (positive or negative)."""
+    owner_id = logged_in_owner_id()
+    ing = db.session.get(Ingredient, ing_id)
+    if not ing or ing.owner_id != owner_id:
+        abort(403)
+    try:
+        delta = float(request.form.get("delta", "0"))
+    except ValueError:
+        flash("Invalid restock amount.")
+        return redirect(url_for("inventory_view"))
+    new_stock = max(0.0, float(ing.stock or 0) + delta)
+    ing.stock = new_stock
+    db.session.commit()
+    flash(f"{ing.name}: stock {'+' if delta >= 0 else ''}{delta} → {new_stock} {ing.unit}")
+    return redirect(url_for("inventory_view"))
+
+
+@app.route("/owner/inventory/export")
+@login_required
+def export_inventory_csv():
+    owner_id = logged_in_owner_id()
+    ings = Ingredient.query.filter_by(owner_id=owner_id).order_by(Ingredient.name).all()
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["id", "name", "unit", "stock", "low_stock_threshold", "menu_item_id", "qty_per_order", "status"])
+    for i in ings:
+        status = "LOW" if float(i.stock or 0) <= float(i.low_stock_threshold or 0) else "OK"
+        w.writerow([i.id, i.name, i.unit, i.stock, i.low_stock_threshold,
+                    i.menu_item_id or "", i.qty_per_order, status])
+    out.seek(0)
+    fname = f"inventory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return Response(out.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
+# ---------------------------------------------------------------------------
+# Kitchen JSON feed (for in-page polling without losing scroll/state)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/kitchen/orders")
+@api_login_required
+def kitchen_orders_json():
+    owner_id = logged_in_owner_id()
+    all_tables = load_tables()
+    table_names = {t["id"]: t["name"] for t in all_tables if t.get("ownerId") == owner_id}
+    active = {"pending", "confirmed", "preparing", "ready"}
+    orders = (Order.query
+              .filter(Order.owner_id == owner_id, Order.status.in_(active))
+              .order_by(Order.created_at.asc())
+              .all())
+    payload = []
+    now_ts = datetime.now(timezone.utc)
+    for o in orders:
+        d = _order_dict(o)
+        d["tableName"] = table_names.get(o.table_id, o.table_name or "—")
+        try:
+            age_seconds = int((now_ts - o.created_at).total_seconds()) if o.created_at else 0
+        except Exception:
+            age_seconds = 0
+        d["ageSeconds"] = max(0, age_seconds)
+        payload.append(d)
+    return jsonify(orders=payload, fetchedAt=_iso(now_ts))
+
+
 # ---------------------------------------------------------------------------
 # CSV Export
 # ---------------------------------------------------------------------------
@@ -2012,8 +2079,9 @@ def delete_ingredient(ing_id: int):
 @login_required
 def export_orders_csv():
     owner_id = logged_in_owner_id()
-    date_from = request.args.get("date_from", "")
-    date_to = request.args.get("date_to", "")
+    date_from = request.args.get("date_from") or request.args.get("from") or ""
+    date_to = request.args.get("date_to") or request.args.get("to") or ""
+    status_filter = (request.args.get("status") or "").strip().lower()
 
     query = Order.query.filter_by(owner_id=owner_id)
     if date_from:
@@ -2028,6 +2096,9 @@ def export_orders_csv():
             query = query.filter(Order.created_at <= dt_to)
         except ValueError:
             pass
+
+    if status_filter and status_filter in {"pending", "confirmed", "preparing", "ready", "completed", "cancelled"}:
+        query = query.filter(Order.status == status_filter)
 
     orders = query.order_by(Order.created_at.asc()).all()
 
@@ -2579,39 +2650,94 @@ def delete_order(order_id: int) -> Response:
 @login_required
 def owner_analytics():
     owner_id = logged_in_owner_id()
-    orders = Order.query.filter_by(owner_id=owner_id).all()
+
+    # Optional date-range filter (?from=YYYY-MM-DD&to=YYYY-MM-DD)
+    q = Order.query.filter_by(owner_id=owner_id)
+    df = (request.args.get("from") or request.args.get("date_from") or "").strip()
+    dt_ = (request.args.get("to") or request.args.get("date_to") or "").strip()
+    try:
+        if df:
+            q = q.filter(Order.created_at >= datetime.strptime(df, "%Y-%m-%d").replace(tzinfo=timezone.utc))
+        if dt_:
+            end_dt = datetime.strptime(dt_, "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            q = q.filter(Order.created_at <= end_dt)
+    except ValueError:
+        pass
+    orders = q.all()
     feedback_list = Feedback.query.filter_by(owner_id=owner_id).all()
 
-    daily: dict[str, dict] = {}
+    # Build full date series for last 30 days (so chart shows continuity)
+    today = datetime.now(timezone.utc).date()
+    rev_by_day: dict[str, float] = {}
+    ord_by_day: dict[str, int] = {}
+    for i in range(29, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        rev_by_day[d] = 0.0
+        ord_by_day[d] = 0
     for o in orders:
         if not o.created_at:
             continue
-        date_key = o.created_at.strftime("%Y-%m-%d")
-        if date_key not in daily:
-            daily[date_key] = {"orders": 0, "revenue": 0.0}
-        daily[date_key]["orders"] += 1
-        if o.status == "completed":
-            daily[date_key]["revenue"] += float(o.total or 0)
+        key = o.created_at.strftime("%Y-%m-%d")
+        if key in ord_by_day:
+            ord_by_day[key] += 1
+            if o.status == "completed":
+                rev_by_day[key] += float(o.total or 0)
 
+    # Top items by quantity (completed orders only)
     item_counts: dict[str, int] = {}
+    item_revenue: dict[str, float] = {}
     for o in orders:
+        if o.status not in ("completed", "ready", "preparing", "confirmed", "pending"):
+            continue
         for item in (o.items if isinstance(o.items, list) else []):
             name = item.get("name", "Unknown")
-            item_counts[name] = item_counts.get(name, 0) + item.get("quantity", 1)
+            qty = int(item.get("quantity", 1) or 1)
+            item_counts[name] = item_counts.get(name, 0) + qty
+            item_revenue[name] = item_revenue.get(name, 0.0) + float(item.get("lineTotal", 0) or 0)
+    top_items_pairs = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)[:5]
 
-    top_items = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    # Hourly distribution (0-23) of completed orders
+    hour_counts = [0] * 24
+    for o in orders:
+        if o.status == "completed" and o.created_at:
+            hour_counts[o.created_at.hour] += 1
 
-    avg_rating = 0.0
-    if feedback_list:
-        avg_rating = round(sum(f.rating for f in feedback_list) / len(feedback_list), 1)
+    completed = [o for o in orders if o.status == "completed"]
+    total_revenue = round(sum(float(o.total or 0) for o in completed), 2)
+    total_completed = len(completed)
+    avg_order_value = round(total_revenue / total_completed, 2) if total_completed else 0.0
+
+    avg_rating = round(sum(f.rating for f in feedback_list) / len(feedback_list), 1) if feedback_list else 0.0
+
+    analytics_payload = {
+        "totalRevenue": total_revenue,
+        "totalOrders": total_completed,
+        "totalAllOrders": len(orders),
+        "avgOrderValue": avg_order_value,
+        "avgRating": avg_rating,
+        "feedbackCount": len(feedback_list),
+        "revenueByDay": [{"date": d[5:], "revenue": round(v, 2)} for d, v in rev_by_day.items()],
+        "ordersByDay": [{"date": d[5:], "count": c} for d, c in ord_by_day.items()],
+        "topItems": [
+            {"name": n, "count": c, "revenue": round(item_revenue.get(n, 0.0), 2)}
+            for n, c in top_items_pairs
+        ],
+        "peakHours": [
+            {"hour": f"{h:02d}:00", "count": hour_counts[h]} for h in range(24)
+        ],
+        "dateFrom": df,
+        "dateTo": dt_,
+    }
 
     return render_template(
         "owner_analytics.html",
         owner_username=logged_in_owner(),
-        daily=sorted(daily.items()),
-        top_items=top_items,
-        total_orders=len(orders),
-        total_revenue=round(sum(float(o.total or 0) for o in orders if o.status == "completed"), 2),
+        analytics=analytics_payload,
+        # Backward-compat keys (still referenced by older parts of layout)
+        daily=[(d, {"revenue": v, "orders": ord_by_day[d]}) for d, v in rev_by_day.items()],
+        top_items=top_items_pairs,
+        total_orders=total_completed,
+        total_revenue=total_revenue,
         avg_rating=avg_rating,
         total_feedback=len(feedback_list),
     )
@@ -3112,26 +3238,100 @@ def feedback_summary():
 @login_required
 def owner_customers():
     owner_id = logged_in_owner_id()
+    search = (request.args.get("q") or "").strip().lower()[:80]
+    export = request.args.get("export") == "csv"
+
     orders = Order.query.filter_by(owner_id=owner_id).order_by(Order.created_at.desc()).all()
+
     customer_map: dict[str, dict] = {}
     for o in orders:
-        key = (o.customer_phone or o.customer_email or o.customer_name or "Guest").lower()
+        key = (o.customer_phone or o.customer_email or o.customer_name or f"guest-{o.id}").lower().strip()
         if key not in customer_map:
             customer_map[key] = {
                 "name": o.customer_name or "Guest",
                 "email": o.customer_email or "",
                 "phone": o.customer_phone or "",
-                "orders": 0,
-                "total_spent": 0.0,
-                "last_order": _iso(o.created_at),
+                "orderCount": 0,
+                "completedCount": 0,
+                "totalSpend": 0.0,
+                "lastOrder": _iso(o.created_at),
+                "firstOrder": _iso(o.created_at),
             }
-        customer_map[key]["orders"] += 1
+        c = customer_map[key]
+        c["orderCount"] += 1
         if o.status == "completed":
-            customer_map[key]["total_spent"] += float(o.total or 0)
-    customers = sorted(customer_map.values(), key=lambda c: c["orders"], reverse=True)
+            c["completedCount"] += 1
+            c["totalSpend"] += float(o.total or 0)
+        if o.created_at and (not c["firstOrder"] or _iso(o.created_at) < c["firstOrder"]):
+            c["firstOrder"] = _iso(o.created_at)
+
+    for c in customer_map.values():
+        c["totalSpend"] = round(c["totalSpend"], 2)
+        c["avgOrder"] = round(c["totalSpend"] / c["completedCount"], 2) if c["completedCount"] else 0.0
+
+    customers = sorted(customer_map.values(), key=lambda c: c["totalSpend"], reverse=True)
+
+    if search:
+        customers = [
+            c for c in customers
+            if search in (c["name"] or "").lower()
+            or search in (c["email"] or "").lower()
+            or search in (c["phone"] or "").lower()
+        ]
+
+    total_completed = sum(c["completedCount"] for c in customer_map.values())
+    repeat_count = sum(1 for c in customer_map.values() if c["orderCount"] > 1)
+    repeat_rate = round((repeat_count / len(customer_map)) * 100, 1) if customer_map else 0.0
+
+    if export:
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["name", "email", "phone", "orders", "completed", "total_spend", "avg_order", "first_order", "last_order"])
+        for c in customers:
+            w.writerow([c["name"], c["email"], c["phone"], c["orderCount"], c["completedCount"],
+                        c["totalSpend"], c["avgOrder"], c["firstOrder"], c["lastOrder"]])
+        out.seek(0)
+        fname = f"customers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        return Response(out.getvalue(), mimetype="text/csv",
+                        headers={"Content-Disposition": f"attachment; filename={fname}"})
+
     return render_template("owner_customers.html",
-                           customers=customers,
+                           customers=customers[:200],
+                           total_orders=total_completed,
+                           repeat_rate=repeat_rate,
+                           total_unique=len(customer_map),
+                           search=search,
                            owner_username=logged_in_owner())
+
+
+# ---------------------------------------------------------------------------
+# Menu CSV export (referenced by analytics page)
+# ---------------------------------------------------------------------------
+
+@app.route("/owner/export/menu")
+@login_required
+def export_menu_csv():
+    owner_id = logged_in_owner_id()
+    menu = load_menu()
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["category", "id", "name", "price", "description", "available"])
+    for cat in menu.get("categories", []):
+        if cat.get("ownerId") != owner_id:
+            continue
+        for item in cat.get("items", []):
+            w.writerow([
+                cat.get("name", ""),
+                item.get("id", ""),
+                item.get("name", ""),
+                item.get("price", ""),
+                (item.get("description") or "")[:300],
+                "yes" if item.get("available", True) else "no",
+            ])
+    out.seek(0)
+    fname = f"menu_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return Response(out.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={fname}"})
 
 
 # ---------------------------------------------------------------------------
