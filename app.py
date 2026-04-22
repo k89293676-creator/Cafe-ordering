@@ -1359,28 +1359,38 @@ _sse_lock = threading.Lock()
 
 def _local_dispatch_owner(owner_id: int, payload: str) -> None:
     with _sse_lock:
-        queues = _sse_subscribers.get(owner_id, [])
+        entries = _sse_subscribers.get(owner_id, [])
         dead = []
-        for q in queues:
+        for entry in entries:
             try:
-                q.append(payload)
+                if isinstance(entry, tuple):
+                    q, ev = entry
+                    q.append(payload)
+                    ev.set()
+                else:
+                    entry.append(payload)
             except Exception:
-                dead.append(q)
-        for q in dead:
-            queues.remove(q)
+                dead.append(entry)
+        for entry in dead:
+            entries.remove(entry)
 
 
 def _local_dispatch_customer(order_id: int, payload: str) -> None:
     with _sse_lock:
-        queues = _sse_customer_subs.get(order_id, [])
+        entries = _sse_customer_subs.get(order_id, [])
         dead = []
-        for q in queues:
+        for entry in entries:
             try:
-                q.append(payload)
+                if isinstance(entry, tuple):
+                    q, ev = entry
+                    q.append(payload)
+                    ev.set()
+                else:
+                    entry.append(payload)
             except Exception:
-                dead.append(q)
-        for q in dead:
-            queues.remove(q)
+                dead.append(entry)
+        for entry in dead:
+            entries.remove(entry)
 
 
 def _local_dispatch_table(table_id: str, payload: str) -> None:
@@ -2582,11 +2592,11 @@ def orders_stream():
     owner_id = logged_in_owner_id()
 
     def generate():
-        my_queue = []
+        my_queue: list[str] = []
+        my_event = threading.Event()
+        _sub_entry = (my_queue, my_event)
         with _sse_lock:
-            if owner_id not in _sse_subscribers:
-                _sse_subscribers[owner_id] = []
-            _sse_subscribers[owner_id].append(my_queue)
+            _sse_subscribers.setdefault(owner_id, []).append(_sub_entry)
 
         try:
             yield "event: ping\ndata: connected\n\n"
@@ -2598,14 +2608,19 @@ def orders_stream():
                 if time.time() - last_heartbeat > 25:
                     yield "event: ping\ndata: heartbeat\n\n"
                     last_heartbeat = time.time()
-                time.sleep(0.5)
+                # Wake immediately when a notification arrives; fall back to heartbeat cadence
+                _wait_secs = max(0.1, 25.0 - (time.time() - last_heartbeat))
+                my_event.wait(timeout=_wait_secs)
+                my_event.clear()
         except GeneratorExit:
             pass
         finally:
             with _sse_lock:
-                queues = _sse_subscribers.get(owner_id, [])
-                if my_queue in queues:
-                    queues.remove(my_queue)
+                subs = _sse_subscribers.get(owner_id, [])
+                try:
+                    subs.remove(_sub_entry)
+                except ValueError:
+                    pass
 
     return Response(
         stream_with_context(generate()),
@@ -3698,8 +3713,10 @@ def customer_order_stream(order_id: int) -> Response:
     initial_status = order.get("status", "pending")
 
     my_queue: list[str] = []
+    my_event = threading.Event()
+    _sub_entry = (my_queue, my_event)
     with _sse_lock:
-        _sse_customer_subs.setdefault(order_id, []).append(my_queue)
+        _sse_customer_subs.setdefault(order_id, []).append(_sub_entry)
 
     def generate():
         yield f"data: {json.dumps({'status': initial_status, 'id': order_id})}\n\n"
@@ -3720,14 +3737,17 @@ def customer_order_stream(order_id: int) -> Response:
                 if time.time() - last_heartbeat >= 25:
                     yield "event: ping\ndata: heartbeat\n\n"
                     last_heartbeat = time.time()
-                time.sleep(0.5)
+                # Wake immediately when a status update arrives
+                _wait_secs = max(0.1, 25.0 - (time.time() - last_heartbeat))
+                my_event.wait(timeout=_wait_secs)
+                my_event.clear()
         except GeneratorExit:
             pass
         finally:
             with _sse_lock:
                 subs = _sse_customer_subs.get(order_id, [])
                 try:
-                    subs.remove(my_queue)
+                    subs.remove(_sub_entry)
                 except ValueError:
                     pass
 
