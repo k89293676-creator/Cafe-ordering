@@ -357,7 +357,6 @@ def reopen_call(call_id: int):
 # ---------------------------------------------------------------------------
 
 @bp.route("/api/table/<table_id>/call/stream", methods=["GET"])
-@csrf.exempt
 @limiter.exempt
 def table_call_stream(table_id: str):
     """SSE stream of live call updates for one table.

@@ -128,6 +128,23 @@ app.config.update(
         _raw_db_url if _raw_db_url else f"sqlite:///{DATA_DIR / 'app.db'}"
     ),
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
+    # Connection pool tuning. ``pool_pre_ping`` recycles dead sockets that
+    # cloud Postgres providers (Railway, Render, Neon, …) silently drop after
+    # a few minutes of idleness, which would otherwise surface as
+    # ``OperationalError: server closed the connection unexpectedly`` on the
+    # first request after a quiet period. Sized for a single gunicorn worker
+    # with gevent — bump ``pool_size`` if you scale workers/threads up.
+    SQLALCHEMY_ENGINE_OPTIONS=(
+        {
+            "pool_pre_ping": True,
+            "pool_recycle": 1800,
+            "pool_size": int(os.environ.get("DB_POOL_SIZE", "10")),
+            "max_overflow": int(os.environ.get("DB_MAX_OVERFLOW", "10")),
+            "pool_timeout": int(os.environ.get("DB_POOL_TIMEOUT", "30")),
+        }
+        if _raw_db_url
+        else {"pool_pre_ping": True}
+    ),
     MAIL_SERVER=os.environ.get("MAIL_SERVER", "smtp.sendgrid.net"),
     MAIL_PORT=int(os.environ.get("MAIL_PORT", "587")),
     MAIL_USE_TLS=os.environ.get("MAIL_USE_TLS", "true").lower() in {"1", "true", "yes", "on"},
@@ -2479,7 +2496,6 @@ def daily_report_pdf():
 # ---------------------------------------------------------------------------
 
 @app.route("/api/orders/stream")
-@csrf.exempt
 @api_login_required
 def orders_stream():
     owner_id = logged_in_owner_id()
@@ -3333,7 +3349,6 @@ def superadmin_analytics():
 # ---------------------------------------------------------------------------
 
 @app.route("/api/menu", methods=["GET"])
-@csrf.exempt
 @limiter.limit("120 per minute")
 def menu_api() -> Response:
     import copy
@@ -3491,7 +3506,6 @@ def checkout() -> tuple[dict, int]:
 
 
 @app.route("/api/orders", methods=["GET"])
-@csrf.exempt
 @limiter.limit("60 per minute")
 @api_login_required
 def orders_api() -> tuple[dict, int]:
@@ -3502,7 +3516,6 @@ def orders_api() -> tuple[dict, int]:
 
 
 @app.route("/api/orders/<int:order_id>", methods=["GET"])
-@csrf.exempt
 @limiter.limit("20 per minute; 60 per hour")
 def get_order(order_id: int) -> tuple[dict, int]:
     order = _db_get_order(order_id)
@@ -3522,7 +3535,6 @@ def get_order(order_id: int) -> tuple[dict, int]:
 
 
 @app.route("/api/orders/<int:order_id>/stream")
-@csrf.exempt
 @limiter.limit("30 per minute")
 def customer_order_stream(order_id: int) -> Response:
     order = _db_get_order(order_id)
@@ -3659,7 +3671,6 @@ def submit_feedback() -> tuple[dict, int]:
 
 
 @app.route("/api/feedback/summary")
-@csrf.exempt
 @api_login_required
 def feedback_summary():
     owner_id = logged_in_owner_id()

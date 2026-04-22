@@ -6,8 +6,30 @@ from datetime import timezone
 
 from flask import Blueprint, abort, jsonify, render_template, request
 
-from app import Order, db, login_required, logged_in_owner_id
+from app import Order, db, load_menu, login_required, logged_in_owner_id
 from ._helpers import parse_date_range, safe_float
+
+
+def _item_category_lookup(owner_id: int) -> dict[str, str]:
+    """Return a ``{menu_item_id: category_name}`` map for this owner.
+
+    Order rows store a snapshot of the line items but NOT the category that
+    each item belongs to (see ``compute_order_summary`` in ``app.py``), so
+    the category breakdown has to look it up from the live menu at query
+    time. Items that no longer exist on the menu fall back to
+    "Uncategorized" so the chart still totals correctly.
+    """
+    lookup: dict[str, str] = {}
+    menu = load_menu()
+    for category in menu.get("categories", []):
+        if category.get("ownerId") != owner_id:
+            continue
+        cat_name = str(category.get("name") or "Uncategorized")
+        for item in category.get("items", []):
+            item_id = item.get("id")
+            if item_id:
+                lookup[str(item_id)] = cat_name
+    return lookup
 
 bp = Blueprint("sales_dashboard", __name__)
 
@@ -93,12 +115,21 @@ def sales_by_category():
         Order.created_at >= start_dt,
         Order.created_at <= end_dt,
     ).all()
+    cat_lookup = _item_category_lookup(owner_id)
     by_cat: dict[str, dict[str, float]] = defaultdict(lambda: {"revenue": 0.0, "qty": 0})
     for o in rows:
         for it in (o.items or []):
-            cat = str(it.get("category") or "Uncategorized")
+            item_id = str(it.get("id") or "")
+            cat = (
+                str(it.get("category"))
+                if it.get("category")
+                else cat_lookup.get(item_id, "Uncategorized")
+            )
             qty = int(it.get("qty") or it.get("quantity") or 1)
-            line = safe_float(it.get("price")) * qty
+            # Prefer the snapshot lineTotal (already includes modifiers) when
+            # present, otherwise fall back to price * qty.
+            line_total = it.get("lineTotal")
+            line = safe_float(line_total) if line_total is not None else safe_float(it.get("price")) * qty
             by_cat[cat]["revenue"] += line
             by_cat[cat]["qty"] += qty
     return jsonify({
