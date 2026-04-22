@@ -56,6 +56,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_talisman import Talisman
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
@@ -395,13 +396,13 @@ def _initialize_runtime_state(force: bool = False) -> bool:
     if _DB_READY:
         return True
     now = time.monotonic()
-    if not force and now - _DB_INIT_LAST_ATTEMPT < 5:
+    if not force and now - _DB_INIT_LAST_ATTEMPT < 1:
         return False
     with _DB_INIT_LOCK:
         if _DB_READY:
             return True
         now = time.monotonic()
-        if not force and now - _DB_INIT_LAST_ATTEMPT < 5:
+        if not force and now - _DB_INIT_LAST_ATTEMPT < 1:
             return False
         _DB_INIT_LAST_ATTEMPT = now
         try:
@@ -633,7 +634,16 @@ def create_owner_in_db(username: str, email: str | None, password_hash: str,
         is_superadmin=is_superadmin,
     )
     db.session.add(owner)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError as exc:
+        db.session.rollback()
+        msg = str(getattr(exc, "orig", exc)).lower()
+        if "email" in msg:
+            raise ValueError("That email address is already registered.") from exc
+        if "username" in msg:
+            raise ValueError("That username is already taken.") from exc
+        raise ValueError("An account with those details already exists.") from exc
     return _owner_dict(owner)
 
 
@@ -691,8 +701,16 @@ def save_menu(menu: dict) -> None:
     db.session.commit()
 
 
-def load_orders() -> list[dict]:
-    return [_order_dict(o) for o in Order.query.order_by(Order.id).all()]
+def load_orders(owner_id: int | None = None, limit: int = 100, offset: int = 0) -> list[dict]:
+    query = Order.query
+    if owner_id is not None:
+        query = query.filter(Order.owner_id == owner_id)
+    query = query.order_by(Order.id)
+    if limit is not None and limit > 0:
+        query = query.limit(limit)
+    if offset:
+        query = query.offset(offset)
+    return [_order_dict(o) for o in query.all()]
 
 
 def place_order_in_db(order: dict) -> dict:
@@ -718,13 +736,14 @@ def place_order_in_db(order: dict) -> dict:
         updated_at=datetime.now(timezone.utc),
     )
     db.session.add(record)
-    db.session.commit()
+    db.session.flush()
     _deduct_inventory(record.owner_id, record.items)
+    db.session.commit()
     return _order_dict(record)
 
 
 def _generate_pickup_code() -> str:
-    return "".join(random.choices(string.digits, k=6))
+    return f"{secrets.randbelow(1000000):06d}"
 
 
 def _deduct_inventory(owner_id: int | None, items: list) -> None:
@@ -741,9 +760,51 @@ def _deduct_inventory(owner_id: int | None, items: list) -> None:
                 deduct = float(ing.qty_per_order or 1) * qty
                 ing.stock = max(0, float(ing.stock or 0) - deduct)
                 db.session.add(ing)
-        db.session.commit()
     except Exception as exc:
         app.logger.warning("Inventory deduction failed: %s", exc)
+
+
+def _restore_inventory(order: dict) -> None:
+    owner_id = order.get("ownerId")
+    items = order.get("items") or []
+    if not owner_id or not items:
+        return
+    try:
+        for item in items:
+            item_id = item.get("id")
+            qty = int(item.get("quantity", 1))
+            if not item_id:
+                continue
+            ingredients = Ingredient.query.filter_by(owner_id=owner_id, menu_item_id=item_id).all()
+            for ing in ingredients:
+                add_back = float(ing.qty_per_order or 1) * qty
+                ing.stock = float(ing.stock or 0) + add_back
+                db.session.add(ing)
+        db.session.commit()
+    except Exception as exc:
+        app.logger.warning("Inventory restore failed: %s", exc)
+
+
+def _check_stock_available(owner_id: int | None, items: list) -> tuple[bool, str]:
+    if not owner_id or not items:
+        return True, ""
+    try:
+        for item in items:
+            item_id = item.get("id")
+            qty = int(item.get("quantity", 1))
+            if not item_id:
+                continue
+            ingredients = Ingredient.query.filter_by(owner_id=owner_id, menu_item_id=item_id).all()
+            for ing in ingredients:
+                needed = float(ing.qty_per_order or 1) * qty
+                if float(ing.stock or 0) < needed:
+                    name = item.get("name") or f"item {item_id}"
+                    ing_name = getattr(ing, "name", None) or "ingredient"
+                    return False, f"Not enough stock for '{name}' (insufficient {ing_name})."
+    except Exception as exc:
+        app.logger.warning("Stock check failed: %s", exc)
+        return True, ""
+    return True, ""
 
 
 def _db_update_order_status(order_id: int, new_status: str) -> bool:
@@ -1176,8 +1237,7 @@ _sse_customer_subs: dict[int, list] = {}
 _sse_lock = threading.Lock()
 
 
-def _notify_owner(owner_id: int, event_type: str, data: dict) -> None:
-    payload = json.dumps({"type": event_type, "data": data})
+def _local_dispatch_owner(owner_id: int, payload: str) -> None:
     with _sse_lock:
         queues = _sse_subscribers.get(owner_id, [])
         dead = []
@@ -1190,8 +1250,7 @@ def _notify_owner(owner_id: int, event_type: str, data: dict) -> None:
             queues.remove(q)
 
 
-def _notify_order_status(order_id: int, status: str) -> None:
-    payload = json.dumps({"status": status, "id": order_id})
+def _local_dispatch_customer(order_id: int, payload: str) -> None:
     with _sse_lock:
         queues = _sse_customer_subs.get(order_id, [])
         dead = []
@@ -1202,6 +1261,84 @@ def _notify_order_status(order_id: int, status: str) -> None:
                 dead.append(q)
         for q in dead:
             queues.remove(q)
+
+
+# Optional Redis pub/sub fan-out for multi-worker deployments.
+_REDIS_URL = os.environ.get("REDIS_URL")
+_redis_client = None
+_REDIS_OWNER_CHANNEL = "sse:owner"
+_REDIS_CUSTOMER_CHANNEL = "sse:customer"
+
+if _REDIS_URL:
+    try:
+        import redis as _redis_lib  # type: ignore
+
+        _redis_client = _redis_lib.Redis.from_url(_REDIS_URL, decode_responses=True)
+        _redis_client.ping()
+        app.logger.info("SSE: Redis pub/sub enabled at %s", _REDIS_URL)
+
+        def _redis_subscriber_loop() -> None:
+            backoff = 1
+            while True:
+                try:
+                    pubsub = _redis_client.pubsub(ignore_subscribe_messages=True)
+                    pubsub.subscribe(_REDIS_OWNER_CHANNEL, _REDIS_CUSTOMER_CHANNEL)
+                    backoff = 1
+                    for message in pubsub.listen():
+                        try:
+                            channel = message.get("channel")
+                            raw = message.get("data")
+                            if not raw:
+                                continue
+                            envelope = json.loads(raw)
+                            if channel == _REDIS_OWNER_CHANNEL:
+                                _local_dispatch_owner(int(envelope["owner_id"]), envelope["payload"])
+                            elif channel == _REDIS_CUSTOMER_CHANNEL:
+                                _local_dispatch_customer(int(envelope["order_id"]), envelope["payload"])
+                        except Exception as inner_exc:
+                            app.logger.warning("SSE redis dispatch error: %s", inner_exc)
+                except Exception as exc:
+                    app.logger.warning("SSE redis subscriber error: %s; retrying in %ss", exc, backoff)
+                    time.sleep(backoff)
+                    backoff = min(backoff * 2, 30)
+
+        threading.Thread(target=_redis_subscriber_loop, name="sse-redis-sub", daemon=True).start()
+    except Exception as _redis_err:
+        app.logger.warning("SSE: Redis unavailable (%s); falling back to in-memory.", _redis_err)
+        _redis_client = None
+
+
+def _notify_owner(owner_id: int, event_type: str, data: dict) -> None:
+    payload = json.dumps({"type": event_type, "data": data})
+    if _redis_client is not None:
+        try:
+            _redis_client.publish(
+                _REDIS_OWNER_CHANNEL,
+                json.dumps({"owner_id": owner_id, "payload": payload}),
+            )
+            return
+        except Exception as exc:
+            app.logger.warning("SSE redis publish failed (owner): %s; using local.", exc)
+    _local_dispatch_owner(owner_id, payload)
+
+
+def _notify_order_status(order_id: int, status: str) -> None:
+    payload = json.dumps({"status": status, "id": order_id})
+    if _redis_client is not None:
+        try:
+            _redis_client.publish(
+                _REDIS_CUSTOMER_CHANNEL,
+                json.dumps({"order_id": order_id, "payload": payload}),
+            )
+            return
+        except Exception as exc:
+            app.logger.warning("SSE redis publish failed (customer): %s; using local.", exc)
+    _local_dispatch_customer(order_id, payload)
+
+
+# Aliases requested by spec for explicit Redis-backed notifiers.
+_notify_owner_redis = _notify_owner
+_notify_order_status_redis = _notify_order_status
 
 
 # ---------------------------------------------------------------------------
@@ -2400,7 +2537,10 @@ def update_order_status(order_id: int) -> Response:
         return redirect(url_for("owner_dashboard") + "#orders")
     if order.get("ownerId") != owner_id:
         abort(403)
+    prev_status = order.get("status", "pending")
     _db_update_order_status(order_id, new_status)
+    if new_status == "cancelled" and prev_status != "cancelled":
+        _restore_inventory(order)
     _notify_owner(owner_id, "order_updated", {"id": order_id, "status": new_status})
     _notify_order_status(order_id, new_status)
     return redirect(_safe_redirect_target(request.referrer, url_for("owner_dashboard") + "#orders"))
@@ -2738,6 +2878,11 @@ def checkout() -> tuple[dict, int]:
 
     grand_total = round(order_summary["total"] + tip, 2)
 
+    if owner_id:
+        ok, msg = _check_stock_available(owner_id, order_summary["items"])
+        if not ok:
+            abort(400, description=msg)
+
     order_data = {
         "customerName": customer_name,
         "customerEmail": customer_email,
@@ -2887,6 +3032,7 @@ def customer_cancel_order(order_id: int) -> tuple[dict, int]:
             pass
 
     _db_update_order_status(order_id, "cancelled")
+    _restore_inventory(order)
     owner_id = order.get("ownerId")
     if owner_id:
         _notify_owner(owner_id, "order_updated", {"id": order_id, "status": "cancelled"})
