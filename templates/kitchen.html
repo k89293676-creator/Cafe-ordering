@@ -141,7 +141,7 @@
   };
 
   // ── State ───────────────────────────────────────────────────────────────
-  let lastIds    = new Set({{ orders|map(attribute='id')|list|tojson if orders else '[]' }});
+  let lastIds    = new Set({{ (orders|map(attribute='id')|list if orders else [])|tojson }});
   let firstLoad  = true;
   let soundOn    = localStorage.getItem('kitchen-sound') !== '0';
   let ageTick    = null;   // interval that ticks age badges every second
@@ -284,7 +284,10 @@
         if (ac) card.classList.add(ac);
 
         node.querySelector('.card-title').textContent = `#${o.id} — ${o.tableName || '—'}`;
-        node.querySelector('.card-customer').textContent = o.customerName || 'Guest';
+        const contactBits = [o.customerName || 'Guest'];
+        if (o.customerPhone) contactBits.push(`📞 ${o.customerPhone}`);
+        if (o.customerEmail) contactBits.push(`✉ ${o.customerEmail}`);
+        node.querySelector('.card-customer').textContent = contactBits.join(' · ');
 
         if (o.pickupCode) {
           node.querySelector('.card-pickup').innerHTML =
@@ -308,7 +311,10 @@
           ${it.size   ? `<div class="text-muted small ps-2">Size: ${esc(it.size)}</div>` : ''}
           ${it.notes  ? `<div class="text-warning small ps-2">📝 ${esc(it.notes)}</div>` : ''}
           ${(it.modifiers && it.modifiers.length)
-            ? `<div class="text-muted small ps-2">${it.modifiers.map(m => esc(m.name)).join(', ')}</div>`
+            ? `<div class="text-muted small ps-2">+ ${it.modifiers.map(m => {
+                const p = Number(m.priceDelta ?? m.price ?? 0);
+                return esc(m.name) + (p ? ` <span class="text-info">(+₹${p.toFixed(0)})</span>` : '');
+              }).join(', ')}</div>`
             : ''}
         `).join('');
         node.querySelector('.card-items').innerHTML = itemsHtml;

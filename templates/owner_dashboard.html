@@ -827,6 +827,60 @@
         </div>
       </div>
 
+      <!-- ===================== TABLE CALLS TAB ===================== -->
+      <div id="tab-table-calls" class="tab-panel">
+        <div class="card">
+          <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;">
+            <div>
+              <h3>🛎️ Table Calls</h3>
+              <div class="card-subtitle">Live service requests from your dining floor</div>
+            </div>
+            <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+              <div id="tc-filter" style="display:flex;gap:.25rem;background:var(--surface-alt,#f1f5f9);padding:.2rem;border-radius:999px;">
+                <button data-status="open" class="tc-pill tc-pill--active">Open</button>
+                <button data-status="acknowledged" class="tc-pill">Acknowledged</button>
+                <button data-status="resolved" class="tc-pill">Resolved</button>
+              </div>
+              <button id="tc-refresh" class="btn btn-ghost btn-sm" type="button">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="tc-summary" style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;font-size:.78rem;">
+              <span class="tc-stat" data-kind="open">Open <strong id="tc-count-open">0</strong></span>
+              <span class="tc-stat" data-kind="acknowledged">Acknowledged <strong id="tc-count-ack">0</strong></span>
+              <span class="tc-stat" data-kind="resolved">Resolved today <strong id="tc-count-resolved">0</strong></span>
+              <span class="tc-stat" data-kind="avg">Avg response <strong id="tc-count-avg">—</strong></span>
+            </div>
+            <div id="tc-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.75rem;">
+              <div style="grid-column:1/-1;color:var(--text-muted,#9ca3af);text-align:center;padding:2rem;">Loading…</div>
+            </div>
+          </div>
+        </div>
+        <style>
+          .tc-pill{background:transparent;border:0;padding:.35rem .85rem;border-radius:999px;font-size:.75rem;font-weight:600;color:#475569;cursor:pointer;}
+          .tc-pill--active{background:#0f172a;color:#fff;}
+          .tc-stat{background:var(--surface-alt,#f1f5f9);border-radius:999px;padding:.35rem .8rem;color:var(--text-secondary,#475569);}
+          .tc-stat strong{margin-left:.25rem;color:var(--text-primary,#0f172a);}
+          .tc-card{border:1px solid var(--border,#e5e7eb);border-radius:12px;padding:.85rem;background:var(--surface,#fff);display:flex;flex-direction:column;gap:.45rem;}
+          .tc-card.tc-card--open{border-left:4px solid #ef4444;}
+          .tc-card.tc-card--acknowledged{border-left:4px solid #f59e0b;}
+          .tc-card.tc-card--resolved{border-left:4px solid #10b981;opacity:.85;}
+          .tc-card-head{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;}
+          .tc-card-table{font-weight:700;font-size:1rem;color:var(--text-primary,#0f172a);}
+          .tc-card-time{font-size:.72rem;color:var(--text-muted,#9ca3af);}
+          .tc-card-reason{font-size:.85rem;color:#374151;}
+          .tc-card-note{font-size:.78rem;color:#6b7280;font-style:italic;background:#f9fafb;border-radius:8px;padding:.4rem .55rem;}
+          .tc-card-meta{font-size:.72rem;color:var(--text-muted,#9ca3af);display:flex;gap:.75rem;flex-wrap:wrap;}
+          .tc-card-actions{display:flex;gap:.4rem;margin-top:.25rem;}
+          .tc-act{flex:1;border:0;border-radius:8px;padding:.45rem;font-weight:600;font-size:.78rem;cursor:pointer;}
+          .tc-act-ack{background:#fef3c7;color:#92400e;}
+          .tc-act-resolve{background:#dcfce7;color:#065f46;}
+          .tc-act:hover{filter:brightness(.95);}
+          .tc-age-bad{color:#b91c1c;font-weight:700;}
+          .tc-age-warn{color:#b45309;font-weight:700;}
+        </style>
+      </div>
+
       <!-- ===================== FEEDBACK TAB ===================== -->
       <div id="tab-feedback" class="tab-panel">
         <div class="overview-grid">
@@ -926,19 +980,48 @@
 // Dark mode persistence
 if (localStorage.getItem('darkMode') === '1') document.documentElement.classList.add('dark');
 
-// ─── Table Calls polling ────────────────────────────────────────────────
+// ─── Table Calls: drawer (peek), sidebar badge, and full tab panel ──────
 (function(){
   const csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
   const badge = document.getElementById('ays-badge');
-  const link = document.getElementById('table-calls-link');
   const drawer = document.getElementById('ays-drawer');
   const list = document.getElementById('ays-list');
   const close = document.getElementById('ays-close');
-  if (!badge || !link) return;
+  if (!badge) return;
 
-  const REASON_LABEL = { service:'🛎️ Service', bill:'💳 Bill', water:'💧 Water', help:'❓ Help', cutlery:'🍴 Cutlery' };
+  const REASON_LABEL = {
+    service:'🛎️ Service',
+    bill:'💳 Bill',
+    water:'💧 Water refill',
+    help:'❓ Need help',
+    cutlery:'🍴 Cutlery',
+  };
 
-  async function refresh() {
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+  }
+  function fmtAge(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    if (s < 60)   return s + 's';
+    const m = Math.floor(s / 60);
+    if (m < 60)  return m + 'm' + (s % 60 ? ' ' + (s%60) + 's' : '');
+    return Math.floor(m/60) + 'h ' + (m%60) + 'm';
+  }
+  function ageClass(ms) {
+    const s = ms / 1000;
+    if (s > 300) return 'tc-age-bad';
+    if (s > 120) return 'tc-age-warn';
+    return '';
+  }
+  function fmtTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+
+  // Drawer (quick peek of OPEN calls only) ----------------------------------
+  async function refreshDrawer() {
     try {
       const r = await fetch('/api/owner/table-calls?status=open', {credentials:'same-origin'});
       if (!r.ok) return;
@@ -946,32 +1029,143 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
       const calls = j.calls || [];
       badge.textContent = calls.length;
       badge.style.display = calls.length ? 'inline-block' : 'none';
+      // If any open call exists and we're not on the table-calls tab, auto-pop drawer once
+      if (calls.length && !drawer.dataset.userClosed && location.hash !== '#table-calls') {
+        drawer.style.display = 'flex';
+      }
       list.innerHTML = calls.length ? calls.map(c => `
         <div style="border:1px solid #e5e7eb;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;">
           <div style="display:flex;justify-content:space-between;align-items:baseline;">
-            <strong>${c.tableName || c.tableId}</strong>
-            <span style="font-size:.7rem;color:#6b7280;">${(c.createdAt||'').slice(11,16)}</span>
+            <strong>${esc(c.tableName || c.tableId)}</strong>
+            <span style="font-size:.7rem;color:#6b7280;">${fmtTime(c.createdAt)}</span>
           </div>
-          <div style="font-size:.8rem;color:#374151;margin:.2rem 0;">${REASON_LABEL[c.reason] || c.reason}</div>
-          ${c.note ? `<div style="font-size:.75rem;color:#6b7280;font-style:italic;margin:.1rem 0 .2rem;">"${c.note}"</div>` : ''}
+          <div style="font-size:.8rem;color:#374151;margin:.2rem 0;">${esc(REASON_LABEL[c.reason] || c.reason)}</div>
+          ${c.note ? `<div style="font-size:.75rem;color:#6b7280;font-style:italic;margin:.1rem 0 .2rem;">"${esc(c.note)}"</div>` : ''}
           <div style="display:flex;gap:.35rem;">
             <button data-id="${c.id}" data-action="ack" class="ays-act" style="flex:1;background:#fef3c7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Acknowledge</button>
             <button data-id="${c.id}" data-action="resolve" class="ays-act" style="flex:1;background:#dcfce7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Resolve</button>
           </div>
         </div>`).join('') : '<div style="color:#9ca3af;text-align:center;padding:1rem;">No open calls.</div>';
       list.querySelectorAll('button.ays-act').forEach(b => b.addEventListener('click', async () => {
+        b.disabled = true;
         await fetch(`/api/owner/table-calls/${b.dataset.id}/${b.dataset.action}`, {
           method:'POST', headers:{'X-CSRFToken': csrf}
         });
-        refresh();
+        refreshAll();
       }));
     } catch (e) {}
   }
 
-  link.addEventListener('click', e => { e.preventDefault(); drawer.style.display = drawer.style.display === 'flex' ? 'none' : 'flex'; refresh(); });
-  close.addEventListener('click', () => drawer.style.display = 'none');
-  refresh();
-  setInterval(refresh, 15000);
+  if (close) close.addEventListener('click', () => {
+    drawer.style.display = 'none';
+    drawer.dataset.userClosed = '1';
+  });
+
+  // Full tab panel ----------------------------------------------------------
+  const tcList    = document.getElementById('tc-list');
+  const tcRefresh = document.getElementById('tc-refresh');
+  const tcFilter  = document.getElementById('tc-filter');
+  let currentStatus = 'open';
+
+  async function refreshTab() {
+    if (!tcList) return;
+    try {
+      const [openR, ackR, resR, currentR] = await Promise.all([
+        fetch('/api/owner/table-calls?status=open',         {credentials:'same-origin'}),
+        fetch('/api/owner/table-calls?status=acknowledged', {credentials:'same-origin'}),
+        fetch('/api/owner/table-calls?status=resolved',     {credentials:'same-origin'}),
+        fetch(`/api/owner/table-calls?status=${currentStatus}`, {credentials:'same-origin'}),
+      ]);
+      const open = (openR.ok ? (await openR.json()).calls : []) || [];
+      const ack  = (ackR.ok  ? (await ackR.json()).calls  : []) || [];
+      const res  = (resR.ok  ? (await resR.json()).calls  : []) || [];
+      const calls = (currentR.ok ? (await currentR.json()).calls : []) || [];
+
+      // Stats
+      document.getElementById('tc-count-open').textContent = open.length;
+      document.getElementById('tc-count-ack').textContent  = ack.length;
+      const today = new Date().toISOString().slice(0,10);
+      const resolvedToday = res.filter(c => (c.resolvedAt||'').slice(0,10) === today);
+      document.getElementById('tc-count-resolved').textContent = resolvedToday.length;
+      const responseTimes = ack.concat(res)
+        .map(c => (c.acknowledgedAt && c.createdAt) ? (new Date(c.acknowledgedAt) - new Date(c.createdAt)) : null)
+        .filter(v => v !== null && v >= 0);
+      const avg = responseTimes.length ? responseTimes.reduce((a,b)=>a+b,0)/responseTimes.length : null;
+      document.getElementById('tc-count-avg').textContent = avg !== null ? fmtAge(avg) : '—';
+
+      if (!calls.length) {
+        tcList.innerHTML = `<div style="grid-column:1/-1;color:#9ca3af;text-align:center;padding:2.5rem;">
+          <div style="font-size:2rem;margin-bottom:.5rem;">${currentStatus==='open' ? '✅' : '—'}</div>
+          ${currentStatus==='open' ? 'No open calls right now. The floor is calm.' : 'Nothing to show in this tab.'}
+        </div>`;
+        return;
+      }
+
+      const now = Date.now();
+      tcList.innerHTML = calls.map(c => {
+        const created = c.createdAt ? new Date(c.createdAt) : null;
+        const age = created ? (now - created.getTime()) : 0;
+        const ackTime = (c.acknowledgedAt && c.createdAt)
+          ? (new Date(c.acknowledgedAt) - new Date(c.createdAt)) : null;
+        const resTime = (c.resolvedAt && c.createdAt)
+          ? (new Date(c.resolvedAt) - new Date(c.createdAt)) : null;
+        const actions = c.status === 'open' ? `
+            <div class="tc-card-actions">
+              <button class="tc-act tc-act-ack"     data-id="${c.id}" data-action="ack">Acknowledge</button>
+              <button class="tc-act tc-act-resolve" data-id="${c.id}" data-action="resolve">Resolve</button>
+            </div>`
+          : c.status === 'acknowledged' ? `
+            <div class="tc-card-actions">
+              <button class="tc-act tc-act-resolve" data-id="${c.id}" data-action="resolve">Mark resolved</button>
+            </div>` : '';
+        return `
+          <div class="tc-card tc-card--${c.status}" data-id="${c.id}">
+            <div class="tc-card-head">
+              <span class="tc-card-table">${esc(c.tableName || c.tableId)}</span>
+              <span class="tc-card-time">${fmtTime(c.createdAt)}</span>
+            </div>
+            <div class="tc-card-reason">${esc(REASON_LABEL[c.reason] || c.reason)}</div>
+            ${c.note ? `<div class="tc-card-note">"${esc(c.note)}"</div>` : ''}
+            <div class="tc-card-meta">
+              <span>Call #${c.id}</span>
+              ${c.status === 'open'
+                ? `<span class="${ageClass(age)}">⏱ Waiting ${fmtAge(age)}</span>`
+                : ackTime !== null
+                  ? `<span>Acknowledged in ${fmtAge(ackTime)}</span>` : ''}
+              ${resTime !== null ? `<span>Resolved in ${fmtAge(resTime)}</span>` : ''}
+            </div>
+            ${actions}
+          </div>`;
+      }).join('');
+
+      tcList.querySelectorAll('.tc-act').forEach(b => b.addEventListener('click', async () => {
+        b.disabled = true;
+        b.textContent = '…';
+        await fetch(`/api/owner/table-calls/${b.dataset.id}/${b.dataset.action}`, {
+          method:'POST', headers:{'X-CSRFToken': csrf}
+        });
+        refreshAll();
+      }));
+    } catch (e) {
+      tcList.innerHTML = '<div style="grid-column:1/-1;color:#b91c1c;text-align:center;padding:2rem;">Could not load table calls. Try refresh.</div>';
+    }
+  }
+
+  if (tcFilter) {
+    tcFilter.addEventListener('click', e => {
+      const b = e.target.closest('button[data-status]');
+      if (!b) return;
+      currentStatus = b.dataset.status;
+      tcFilter.querySelectorAll('button').forEach(x => x.classList.toggle('tc-pill--active', x === b));
+      refreshTab();
+    });
+  }
+  if (tcRefresh) tcRefresh.addEventListener('click', refreshAll);
+
+  function refreshAll() { refreshDrawer(); refreshTab(); }
+
+  refreshAll();
+  setInterval(refreshAll, 15000);
 })();
 
 // ─── Employee assignment on order cards ─────────────────────────────────────

@@ -48,6 +48,34 @@ function esc(s) {
     .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
+/* ── Auto image generator ──
+ * When an item has no explicit image_url, generate one from the item's name
+ * so the menu always has visuals. Uses Loremflickr (real food photos by keyword)
+ * with a deterministic lock seed so the same item always shows the same image.
+ * On error, falls back to a Pollinations AI-generated photo prompt.
+ */
+function _slug(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function _hash(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
+  return Math.abs(h);
+}
+function autoImageUrl(item) {
+  const slug = _slug(item.name);
+  if (!slug) return fallbackImageUrl(item);
+  const tags = (item.tags || []).map(_slug).filter(Boolean).slice(0, 2).join(",");
+  const keywords = encodeURIComponent([slug, tags, "food"].filter(Boolean).join(","));
+  const lock = _hash(item.id || item.name);
+  return `https://loremflickr.com/400/250/${keywords}?lock=${lock}`;
+}
+function fallbackImageUrl(item) {
+  const prompt = encodeURIComponent(`${item.name} food photography on a cafe table, top down, natural light`);
+  const seed = _hash(item.id || item.name) % 100000;
+  return `https://image.pollinations.ai/prompt/${prompt}?width=400&height=250&nologo=true&seed=${seed}`;
+}
+
 function showToast(msg, ms = 2800) {
   document.querySelectorAll(".cafe-toast").forEach(t => t.remove());
   const t = document.createElement("div");
@@ -196,9 +224,9 @@ function itemCard(item) {
          </div>`;
 
   const popularBadge = item.popular ? `<span class="o-popular-badge">🔥 Popular</span>` : "";
-  const imgHtml = item.image_url
-    ? `<img class="o-item__img" src="${esc(item.image_url)}" alt="${esc(item.name)}" loading="lazy" />`
-    : "";
+  const imgSrc = item.image_url || autoImageUrl(item);
+  const imgHtml = `<img class="o-item__img" src="${esc(imgSrc)}" alt="${esc(item.name)}" loading="lazy"
+                        onerror="this.onerror=null;this.src='${esc(fallbackImageUrl(item))}';" />`;
 
   return `
     <div class="o-item${avail ? "" : " o-item--sold-out"}" data-item="${esc(item.id)}">

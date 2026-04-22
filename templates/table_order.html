@@ -90,8 +90,11 @@
     <button type="button" data-reason="service" class="ays-btn">🛎️ Call server</button>
     <button type="button" data-reason="bill" class="ays-btn">💳 Ask for the bill</button>
     <button type="button" data-reason="water" class="ays-btn">💧 Water refill</button>
+    <button type="button" data-reason="cutlery" class="ays-btn">🍴 Cutlery</button>
     <button type="button" data-reason="help" class="ays-btn">❓ Need help</button>
     <span id="ays-status" style="font-size:.78rem;color:#16a34a;margin-left:auto;"></span>
+    <input id="ays-note" type="text" maxlength="120" placeholder="Add a note (optional)…"
+           style="flex:1 1 100%;border:1px solid #cbd5e1;border-radius:8px;padding:.32rem .55rem;font-size:.78rem;margin-top:.25rem;display:none;" />
   </div>
   <style>
     .ays-btn{background:#f1f5f9;border:1px solid #cbd5e1;border-radius:999px;padding:.32rem .8rem;font-size:.78rem;font-weight:600;color:#0f172a;cursor:pointer;}
@@ -104,15 +107,28 @@
     if (!tableId) return;
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     const status = document.getElementById('ays-status');
+    const noteInput = document.getElementById('ays-note');
+    let pendingReason = null;
     document.querySelectorAll('.ays-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const reason = btn.dataset.reason;
+        // First click on a button reveals the optional note input;
+        // a second click (or pressing Enter) actually sends the request.
+        if (pendingReason !== reason) {
+          pendingReason = reason;
+          noteInput.style.display = 'block';
+          noteInput.focus();
+          status.textContent = 'Tap "' + btn.textContent.trim() + '" again to confirm';
+          status.style.color = '#6b7280';
+          return;
+        }
+        const note = noteInput.value.trim();
         document.querySelectorAll('.ays-btn').forEach(b => b.disabled = true);
         status.textContent = 'Sending…'; status.style.color = '#6b7280';
         try {
           const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call`, {
             method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':csrf},
-            body: JSON.stringify({reason})
+            body: JSON.stringify({reason, note})
           });
           if (r.ok) {
             status.textContent = '✓ Help is on the way';
@@ -127,6 +143,9 @@
         }
         setTimeout(() => {
           document.querySelectorAll('.ays-btn').forEach(b => b.disabled = false);
+          pendingReason = null;
+          noteInput.value = '';
+          noteInput.style.display = 'none';
         }, 8000);
       });
     });

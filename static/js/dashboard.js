@@ -10,6 +10,7 @@ const TAB_TITLES = {
   menu:     { title: "Menu",     sub: "Build and manage your menu" },
   orders:   { title: "Orders",   sub: "Live order management" },
   feedback: { title: "Reviews",  sub: "Guest feedback and ratings" },
+  "table-calls": { title: "Table Calls", sub: "Live customer requests from the floor" },
 };
 
 function switchTab(tabId) {
