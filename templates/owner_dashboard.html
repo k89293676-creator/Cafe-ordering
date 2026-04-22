@@ -76,6 +76,26 @@
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         Analytics
       </a>
+      <a class="sidebar-link" href="{{ url_for('sales_dashboard.sales_dashboard_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+        Sales Dashboard
+      </a>
+      <a class="sidebar-link" href="{{ url_for('menu_engineering.view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Menu Engineering
+      </a>
+      <a class="sidebar-link" href="{{ url_for('ltv.view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+        Customer LTV
+      </a>
+      <a class="sidebar-link" href="{{ url_for('employees.view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        Employees
+      </a>
+      <a class="sidebar-link" href="#" id="table-calls-link" data-tab="table-calls">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+        Table Calls <span id="ays-badge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;padding:0 .45rem;font-size:.65rem;font-weight:700;margin-left:.4rem;">0</span>
+      </a>
       <a class="sidebar-link" href="{{ url_for('owner_customers') }}">
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
         Customers
@@ -877,10 +897,66 @@
 <!-- New order notification banner placeholder -->
 <div id="new-order-banner" style="display:none;"></div>
 
+<!-- Floating Table Calls drawer -->
+<div id="ays-drawer" style="position:fixed;bottom:1.25rem;right:1.25rem;width:340px;max-height:60vh;background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 12px 28px rgba(15,23,42,.18);z-index:50;display:none;flex-direction:column;overflow:hidden;">
+  <div style="padding:.75rem 1rem;background:#0f172a;color:#fff;display:flex;justify-content:space-between;align-items:center;">
+    <strong style="font-size:.9rem;">🛎️ Open table calls</strong>
+    <button id="ays-close" style="background:transparent;border:0;color:#fff;font-size:1.2rem;cursor:pointer;">×</button>
+  </div>
+  <div id="ays-list" style="overflow:auto;padding:.5rem;font-size:.85rem;"></div>
+</div>
+
 <script src="/static/js/dashboard.js"></script>
 <script>
 // Dark mode persistence
 if (localStorage.getItem('darkMode') === '1') document.documentElement.classList.add('dark');
+
+// ─── Table Calls polling ────────────────────────────────────────────────
+(function(){
+  const csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+  const badge = document.getElementById('ays-badge');
+  const link = document.getElementById('table-calls-link');
+  const drawer = document.getElementById('ays-drawer');
+  const list = document.getElementById('ays-list');
+  const close = document.getElementById('ays-close');
+  if (!badge || !link) return;
+
+  const REASON_LABEL = { service:'🛎️ Service', bill:'💳 Bill', water:'💧 Water', help:'❓ Help', cutlery:'🍴 Cutlery' };
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/owner/table-calls?status=open', {credentials:'same-origin'});
+      if (!r.ok) return;
+      const j = await r.json();
+      const calls = j.calls || [];
+      badge.textContent = calls.length;
+      badge.style.display = calls.length ? 'inline-block' : 'none';
+      list.innerHTML = calls.length ? calls.map(c => `
+        <div style="border:1px solid #e5e7eb;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;">
+            <strong>${c.tableName || c.tableId}</strong>
+            <span style="font-size:.7rem;color:#6b7280;">${(c.createdAt||'').slice(11,16)}</span>
+          </div>
+          <div style="font-size:.8rem;color:#374151;margin:.2rem 0;">${REASON_LABEL[c.reason] || c.reason}</div>
+          <div style="display:flex;gap:.35rem;">
+            <button data-id="${c.id}" data-action="ack" class="ays-act" style="flex:1;background:#fef3c7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Acknowledge</button>
+            <button data-id="${c.id}" data-action="resolve" class="ays-act" style="flex:1;background:#dcfce7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Resolve</button>
+          </div>
+        </div>`).join('') : '<div style="color:#9ca3af;text-align:center;padding:1rem;">No open calls.</div>';
+      list.querySelectorAll('button.ays-act').forEach(b => b.addEventListener('click', async () => {
+        await fetch(`/api/owner/table-calls/${b.dataset.id}/${b.dataset.action}`, {
+          method:'POST', headers:{'X-CSRFToken': csrf}
+        });
+        refresh();
+      }));
+    } catch (e) {}
+  }
+
+  link.addEventListener('click', e => { e.preventDefault(); drawer.style.display = drawer.style.display === 'flex' ? 'none' : 'flex'; refresh(); });
+  close.addEventListener('click', () => drawer.style.display = 'none');
+  refresh();
+  setInterval(refresh, 15000);
+})();
 </script>
 </body>
 </html>

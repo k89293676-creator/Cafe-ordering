@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Insights — Superadmin</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  body{background:#f3f4f6;font-family:system-ui,sans-serif;}
+  .card{border:1px solid #e5e7eb;border-radius:.75rem;}
+  .stat-value{font-size:1.85rem;font-weight:700;line-height:1.1;}
+  .stat-label{font-size:.72rem;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;font-weight:600;}
+</style>
+</head>
+<body>
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0">Superadmin Insights</h4>
+    <a href="{{ url_for('superadmin_dashboard') }}" class="text-decoration-none">&larr; Back</a>
+  </div>
+
+  <div class="row g-3 mb-4" id="health"></div>
+
+  <div class="card mb-4 p-3">
+    <h6 class="mb-3">Top cafes by revenue</h6>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead><tr><th>Cafe</th><th>Status</th><th>Owners</th><th>Orders</th><th>Revenue</th><th>Avg rating</th></tr></thead>
+        <tbody id="cafes-rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-6">
+      <div class="card p-3"><h6>Daily orders (30d)</h6><canvas id="orders-chart" height="180"></canvas></div>
+    </div>
+    <div class="col-md-6">
+      <div class="card p-3"><h6>Daily revenue (30d)</h6><canvas id="rev-chart" height="180"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const fmt = n => new Intl.NumberFormat(undefined, {style:'currency', currency:'USD'}).format(n||0);
+async function load() {
+  const [cafes, growth, health] = await Promise.all([
+    fetch('/api/superadmin/top-cafes').then(r=>r.json()),
+    fetch('/api/superadmin/growth').then(r=>r.json()),
+    fetch('/api/superadmin/health').then(r=>r.json()),
+  ]);
+
+  document.getElementById('cafes-rows').innerHTML = cafes.cafes.length
+    ? cafes.cafes.map(c => `<tr>
+        <td><strong>${c.name}</strong></td>
+        <td>${c.isActive ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'}</td>
+        <td>${c.ownerCount}</td><td>${c.orders}</td><td>${fmt(c.revenue)}</td>
+        <td>${c.avgRating!=null ? c.avgRating.toFixed(2) + ' / 5' : '—'}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" class="text-center text-muted py-3">No cafes with owners yet.</td></tr>';
+
+  const healthCards = [
+    ['Open table calls', health.openTableCalls, 'bi-bell-fill text-warning'],
+    ['Inactive cafes', health.inactiveCafes, 'bi-shop-window text-secondary'],
+    ['Inactive owners', health.inactiveOwners, 'bi-person-x text-secondary'],
+    ['Orders (24h)', health.orders24h, 'bi-receipt text-primary'],
+    ['Completed (24h)', health.completed24h, 'bi-check-circle text-success'],
+  ];
+  document.getElementById('health').innerHTML = healthCards.map(([label, val, ico]) => `
+    <div class="col-md-2 col-6"><div class="card p-3">
+      <div class="stat-label"><i class="bi ${ico}"></i> ${label}</div>
+      <div class="stat-value">${val}</div>
+    </div></div>`).join('');
+
+  const labels = growth.days.map(d => d.day.slice(5));
+  new Chart(document.getElementById('orders-chart'), {
+    type:'line', data:{labels, datasets:[{label:'Orders', data: growth.days.map(d=>d.orders), borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,.1)', fill:true, tension:.3}]},
+    options:{plugins:{legend:{display:false}}}
+  });
+  new Chart(document.getElementById('rev-chart'), {
+    type:'line', data:{labels, datasets:[{label:'Revenue', data: growth.days.map(d=>d.revenue), borderColor:'#10b981', backgroundColor:'rgba(16,185,129,.1)', fill:true, tension:.3}]},
+    options:{plugins:{legend:{display:false}}}
+  });
+}
+load();
+</script>
+</body>
+</html>

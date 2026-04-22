@@ -1892,9 +1892,9 @@ def reorder_view():
                            owner_username=logged_in_owner())
 
 
+# NOTE: CSRF is enforced — the owner UI sends X-CSRFToken from the meta tag.
 @app.route("/api/reorder/<int:order_id>", methods=["POST"])
 @api_login_required
-@csrf.exempt
 def reorder_api(order_id: int):
     owner_id = logged_in_owner_id()
     original = db.session.get(Order, order_id)
@@ -3351,6 +3351,15 @@ def export_menu_csv():
 
 from admin import admin_bp
 app.register_blueprint(admin_bp)
+
+# ---------------------------------------------------------------------------
+# Modular feature blueprints (gradual decomposition of the monolith).
+# ---------------------------------------------------------------------------
+try:
+    from extensions import register_extensions
+    register_extensions(app)
+except Exception as _ext_exc:  # pragma: no cover - never block startup on extras
+    app.logger.warning("extensions: failed to register: %s", _ext_exc)
 
 
 # ---------------------------------------------------------------------------

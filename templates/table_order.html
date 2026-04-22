@@ -82,6 +82,58 @@
      ═══════════════════════════════════════ -->
 <div class="o-layout">
 
+  <!-- At Your Service -->
+  {% set _ays_table_id = (table.id if table else None) %}
+  {% if _ays_table_id %}
+  <div id="ays-bar" style="position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #e5e7eb;padding:.55rem .85rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+    <span style="font-size:.8rem;color:#6b7280;font-weight:600;">At your table?</span>
+    <button type="button" data-reason="service" class="ays-btn">🛎️ Call server</button>
+    <button type="button" data-reason="bill" class="ays-btn">💳 Ask for the bill</button>
+    <button type="button" data-reason="water" class="ays-btn">💧 Water refill</button>
+    <button type="button" data-reason="help" class="ays-btn">❓ Need help</button>
+    <span id="ays-status" style="font-size:.78rem;color:#16a34a;margin-left:auto;"></span>
+  </div>
+  <style>
+    .ays-btn{background:#f1f5f9;border:1px solid #cbd5e1;border-radius:999px;padding:.32rem .8rem;font-size:.78rem;font-weight:600;color:#0f172a;cursor:pointer;}
+    .ays-btn:hover{background:#0f172a;color:#fff;border-color:#0f172a;}
+    .ays-btn:disabled{opacity:.6;cursor:not-allowed;}
+  </style>
+  <script>
+  (function(){
+    const tableId = {{ _ays_table_id|tojson }};
+    if (!tableId) return;
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const status = document.getElementById('ays-status');
+    document.querySelectorAll('.ays-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const reason = btn.dataset.reason;
+        document.querySelectorAll('.ays-btn').forEach(b => b.disabled = true);
+        status.textContent = 'Sending…'; status.style.color = '#6b7280';
+        try {
+          const r = await fetch(`/api/table/${encodeURIComponent(tableId)}/call`, {
+            method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':csrf},
+            body: JSON.stringify({reason})
+          });
+          if (r.ok) {
+            status.textContent = '✓ Help is on the way';
+            status.style.color = '#16a34a';
+          } else {
+            const j = await r.json().catch(()=>({}));
+            status.textContent = j.error || 'Could not send. Please flag down a server.';
+            status.style.color = '#b91c1c';
+          }
+        } catch (e) {
+          status.textContent = 'Network error.'; status.style.color = '#b91c1c';
+        }
+        setTimeout(() => {
+          document.querySelectorAll('.ays-btn').forEach(b => b.disabled = false);
+        }, 8000);
+      });
+    });
+  })();
+  </script>
+  {% endif %}
+
   <!-- Menu -->
   <main class="o-menu" id="menu-panel" aria-label="Menu">
     <div id="menu-container">

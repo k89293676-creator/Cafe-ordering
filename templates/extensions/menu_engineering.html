@@ -1,0 +1,75 @@
+{% extends "extensions/_base_owner.html" %}
+{% block title %}Menu Engineering — Cafe 11:11{% endblock %}
+{% block heading %}Menu Engineering Report{% endblock %}
+{% block body %}
+<form id="filter" class="ext-filter">
+  <div class="f"><label>Start</label><input type="date" id="start"/></div>
+  <div class="f"><label>End</label><input type="date" id="end"/></div>
+  <button type="submit">Apply</button>
+  <div style="margin-left:auto;font-size:.8rem;color:#6b7280;">
+    Set <code>cost</code> on each menu item to compute true profit margin.
+  </div>
+</form>
+
+<div class="ext-grid">
+  <div class="kpi"><div class="kpi-label">Stars</div><div class="kpi-value" id="c-star">—</div><div class="kpi-sub">High popularity, high margin</div></div>
+  <div class="kpi"><div class="kpi-label">Plowhorses</div><div class="kpi-value" id="c-plowhorse">—</div><div class="kpi-sub">Popular but low margin</div></div>
+  <div class="kpi"><div class="kpi-label">Puzzles</div><div class="kpi-value" id="c-puzzle">—</div><div class="kpi-sub">High margin, low popularity</div></div>
+  <div class="kpi"><div class="kpi-label">Dogs</div><div class="kpi-value" id="c-dog">—</div><div class="kpi-sub">Low popularity, low margin</div></div>
+</div>
+
+<div class="card">
+  <h3>Profit / Popularity matrix</h3>
+  <div class="chart-wrap"><canvas id="me-chart"></canvas></div>
+</div>
+
+<div class="card">
+  <h3>All items</h3>
+  <table class="dt">
+    <thead><tr><th>Item</th><th>Category</th><th>Qty</th><th>Unit price</th><th>Unit cost</th><th>Margin %</th><th>Total profit</th><th>Quadrant</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+
+<script>
+const today = new Date(); const back = new Date(); back.setDate(today.getDate()-30);
+document.getElementById('start').value = back.toISOString().slice(0,10);
+document.getElementById('end').value = today.toISOString().slice(0,10);
+let chart;
+
+async function refresh() {
+  const start = document.getElementById('start').value;
+  const end = document.getElementById('end').value;
+  const r = await fetch(`/api/owner/reports/menu-engineering?start=${start}&end=${end}`).then(x=>x.json());
+
+  const counts = {star:0, plowhorse:0, puzzle:0, dog:0};
+  for (const it of r.items) counts[it.quadrant]++;
+  for (const k of Object.keys(counts)) document.getElementById('c-'+k).textContent = counts[k];
+
+  if (chart) chart.destroy();
+  const colors = {star:'#10b981', plowhorse:'#f59e0b', puzzle:'#3b82f6', dog:'#ef4444'};
+  chart = new Chart(document.getElementById('me-chart'), {
+    type:'scatter',
+    data:{ datasets: ['star','plowhorse','puzzle','dog'].map(q => ({
+      label: q.charAt(0).toUpperCase()+q.slice(1),
+      data: r.items.filter(i => i.quadrant === q).map(i => ({x: i.qty, y: i.marginPct, name: i.name})),
+      backgroundColor: colors[q], pointRadius: 7
+    }))},
+    options:{ maintainAspectRatio:false,
+      scales:{x:{title:{display:true,text:'Units sold (popularity)'}}, y:{title:{display:true,text:'Margin %'}}},
+      plugins:{tooltip:{callbacks:{label: c => `${c.raw.name}: qty=${c.raw.x}, margin=${c.raw.y}%`}}}
+    }
+  });
+
+  document.getElementById('rows').innerHTML = r.items.length
+    ? r.items.map(i => `<tr>
+        <td>${i.name}</td><td>${i.category}</td><td>${i.qty}</td>
+        <td>$${i.unitPrice}</td><td>$${i.unitCost}</td><td>${i.marginPct}%</td>
+        <td>$${i.totalProfit}</td><td><span class="badge b-${i.quadrant}">${i.quadrant}</span></td>
+      </tr>`).join('')
+    : '<tr><td colspan="8" class="empty">No completed orders in this range.</td></tr>';
+}
+document.getElementById('filter').addEventListener('submit', e => { e.preventDefault(); refresh(); });
+refresh();
+</script>
+{% endblock %}
