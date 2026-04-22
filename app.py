@@ -76,6 +76,10 @@ _orders_lock = threading.Lock()
 _menu_lock = threading.Lock()
 _tables_lock = threading.Lock()
 
+# Boot time + version are surfaced via /health for uptime tracking on Railway.
+APP_START_TIME = time.time()
+APP_VERSION = os.environ.get("APP_VERSION") or os.environ.get("RAILWAY_GIT_COMMIT_SHA", "dev")[:12]
+
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
@@ -1426,12 +1430,21 @@ def err_server(e):
 @app.route("/health")
 @limiter.exempt
 def health_check():
-    return jsonify(status="ok", service="cafe-ordering-saas"), 200
+    """Cheap liveness probe for Railway. No DB / disk calls — must always be fast."""
+    return jsonify(
+        status="ok",
+        service="cafe-ordering-saas",
+        version=APP_VERSION,
+        uptimeSeconds=int(time.time() - APP_START_TIME),
+        env=("production" if os.environ.get("IS_PRODUCTION", "").lower() == "true"
+             or os.environ.get("RAILWAY_ENVIRONMENT") else "development"),
+    ), 200
 
 
 @app.route("/ready")
 @limiter.exempt
 def readiness_check():
+    """Lightweight readiness probe: DB ping only. Used by Railway for rolling deploys."""
     if not _initialize_runtime_state(force=True):
         return jsonify(status="degraded",
                        service="cafe-ordering-saas",
@@ -1447,6 +1460,98 @@ def readiness_check():
     return jsonify(status="ok" if db_status == "ok" else "degraded",
                    service="cafe-ordering-saas",
                    db=db_status), status_code
+
+
+@app.route("/health/full")
+@limiter.exempt
+def health_check_full():
+    """Deep diagnostics: DB latency, disk writability, redis (if configured), worker info.
+    Returns 200 when all critical checks pass, 503 otherwise. Safe to expose publicly —
+    no secrets or business data are returned."""
+    checks: dict = {}
+    overall_ok = True
+
+    # ── Database ────────────────────────────────────────────────────────────
+    if not _initialize_runtime_state(force=False):
+        checks["database"] = {"ok": False, "error": _DB_INIT_ERROR or "init failed"}
+        overall_ok = False
+    else:
+        t0 = time.time()
+        try:
+            db.session.execute(text("SELECT 1"))
+            checks["database"] = {"ok": True, "latencyMs": round((time.time() - t0) * 1000, 2)}
+        except Exception as exc:
+            checks["database"] = {"ok": False, "error": str(exc)[:200]}
+            overall_ok = False
+
+    # ── Disk writability (DATA_DIR) ─────────────────────────────────────────
+    try:
+        probe = DATA_DIR / ".healthcheck.tmp"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        checks["disk"] = {"ok": True, "path": str(DATA_DIR)}
+    except Exception as exc:
+        checks["disk"] = {"ok": False, "error": str(exc)[:200]}
+        # Disk is non-critical when DATABASE_URL is configured (DB is the source of truth).
+        if not os.environ.get("DATABASE_URL"):
+            overall_ok = False
+
+    # ── Redis (rate-limit storage) — optional ───────────────────────────────
+    redis_url = os.environ.get("REDIS_URL")
+    if redis_url:
+        try:
+            import redis  # type: ignore
+            client = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+            t0 = time.time()
+            client.ping()
+            checks["redis"] = {"ok": True, "latencyMs": round((time.time() - t0) * 1000, 2)}
+        except Exception as exc:
+            checks["redis"] = {"ok": False, "error": str(exc)[:200]}
+            # Redis is non-critical — in-memory fallback works for single-process deploys.
+    else:
+        checks["redis"] = {"ok": True, "configured": False}
+
+    # ── Worker / runtime info ───────────────────────────────────────────────
+    checks["runtime"] = {
+        "ok": True,
+        "pid": os.getpid(),
+        "pythonVersion": sys.version.split()[0],
+        "uptimeSeconds": int(time.time() - APP_START_TIME),
+    }
+
+    return jsonify(
+        status="ok" if overall_ok else "degraded",
+        service="cafe-ordering-saas",
+        version=APP_VERSION,
+        checks=checks,
+    ), (200 if overall_ok else 503)
+
+
+@app.route("/metrics")
+@limiter.exempt
+def public_metrics():
+    """Aggregated, non-sensitive runtime metrics. Useful for uptime dashboards.
+    Counts only — no per-customer or per-cafe data is exposed."""
+    payload: dict = {
+        "service": "cafe-ordering-saas",
+        "version": APP_VERSION,
+        "uptimeSeconds": int(time.time() - APP_START_TIME),
+    }
+    try:
+        if _initialize_runtime_state(force=False):
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            payload["ordersToday"] = db.session.query(Order).filter(Order.created_at >= today_start).count()
+            payload["activeOrders"] = db.session.query(Order).filter(
+                Order.status.in_(("pending", "confirmed", "preparing", "ready"))
+            ).count()
+        else:
+            payload["ordersToday"] = None
+            payload["activeOrders"] = None
+    except Exception as exc:
+        app.logger.warning("Metrics query failed: %s", exc)
+        payload["ordersToday"] = None
+        payload["activeOrders"] = None
+    return jsonify(payload), 200
 
 
 # ---------------------------------------------------------------------------
@@ -2104,6 +2209,76 @@ def kitchen_update_order_status(order_id: int):
     _notify_owner(owner_id, "order_updated", {"id": order_id, "status": new_status})
     _notify_order_status(order_id, new_status)
     return jsonify(ok=True, orderId=order_id, status=new_status)
+
+
+# ---------------------------------------------------------------------------
+# Printable receipt / "Print Bill" — used from the Table Calls dashboard tab
+# so the owner can hand a printed bill to a customer who tapped "Bill".
+# ---------------------------------------------------------------------------
+
+def _find_open_order_for_table(owner_id: int, table_id: str):
+    """Most recent non-completed/cancelled order for a table belonging to this owner."""
+    return (Order.query
+            .filter(Order.owner_id == owner_id,
+                    Order.table_id == table_id,
+                    Order.status.notin_(("completed", "cancelled")))
+            .order_by(Order.created_at.desc())
+            .first())
+
+
+@app.route("/owner/order/<int:order_id>/receipt")
+@login_required
+def order_receipt(order_id: int):
+    owner_id = logged_in_owner_id()
+    order = Order.query.filter_by(id=order_id, owner_id=owner_id).first()
+    if not order:
+        abort(404)
+    owner = db.session.get(Owner, owner_id)
+    cafe_name = (owner.cafe_name if owner else None) or "Cafe"
+    order_d = _order_dict(order)
+    table_name = order.table_name or order.table_id or "—"
+    try:
+        all_tables = load_tables()
+        for t in all_tables:
+            if t.get("id") == order.table_id and t.get("ownerId") == owner_id:
+                table_name = t.get("name") or table_name
+                break
+    except Exception:
+        pass
+    order_d["tableName"] = table_name
+    printed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return render_template("receipt.html",
+                           order=order_d,
+                           cafe_name=cafe_name,
+                           printed_at=printed_at)
+
+
+@app.route("/owner/table/<table_id>/bill")
+@login_required
+def owner_table_bill(table_id: str):
+    """Shortcut from a Bill table-call: jump straight to the latest open order's receipt."""
+    owner_id = logged_in_owner_id()
+    order = _find_open_order_for_table(owner_id, table_id)
+    if not order:
+        flash("No open order found for that table.", "warning")
+        return redirect(url_for("owner_dashboard") + "#table-calls")
+    return redirect(url_for("order_receipt", order_id=order.id, autoprint=1))
+
+
+@app.route("/owner/order/<int:order_id>/mark-paid", methods=["POST"])
+@login_required
+def mark_order_paid(order_id: int):
+    """Complete an order from the receipt screen (closes the bill in one click)."""
+    owner_id = logged_in_owner_id()
+    order = Order.query.filter_by(id=order_id, owner_id=owner_id).first()
+    if not order:
+        abort(404)
+    if order.status not in ("completed", "cancelled"):
+        _db_update_order_status(order_id, "completed")
+        _notify_owner(owner_id, "order_updated", {"id": order_id, "status": "completed"})
+        _notify_order_status(order_id, "completed")
+        flash(f"Order #{order_id} marked as paid and completed.", "success")
+    return redirect(url_for("owner_dashboard") + "#table-calls")
 
 
 # ---------------------------------------------------------------------------

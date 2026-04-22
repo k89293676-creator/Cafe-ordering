@@ -1109,14 +1109,19 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
           ? (new Date(c.acknowledgedAt) - new Date(c.createdAt)) : null;
         const resTime = (c.resolvedAt && c.createdAt)
           ? (new Date(c.resolvedAt) - new Date(c.createdAt)) : null;
+        const billBtn = (c.reason === 'bill' && c.tableId)
+          ? `<a class="tc-act tc-act-print" href="/owner/table/${encodeURIComponent(c.tableId)}/bill" target="_blank" style="background:#0f172a;color:#fff;text-align:center;text-decoration:none;line-height:1.6;">🖨 Print bill</a>`
+          : '';
         const actions = c.status === 'open' ? `
             <div class="tc-card-actions">
               <button class="tc-act tc-act-ack"     data-id="${c.id}" data-action="ack">Acknowledge</button>
               <button class="tc-act tc-act-resolve" data-id="${c.id}" data-action="resolve">Resolve</button>
+              ${billBtn}
             </div>`
           : c.status === 'acknowledged' ? `
             <div class="tc-card-actions">
               <button class="tc-act tc-act-resolve" data-id="${c.id}" data-action="resolve">Mark resolved</button>
+              ${billBtn}
             </div>` : '';
         return `
           <div class="tc-card tc-card--${c.status}" data-id="${c.id}">

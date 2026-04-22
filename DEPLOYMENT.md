@@ -34,8 +34,10 @@ python start.py
 - The app initializes tables and additive upgrade columns on startup.
 - Production startup fails fast without `DATABASE_URL` so orders are not accidentally stored on Railway's ephemeral filesystem.
 - `start.py` reads Railway's `PORT` environment variable directly, avoiding shell-specific parsing issues.
-- Railway liveness health check is at `/health`.
-- Database readiness is available at `/ready` for diagnostics.
+- Railway liveness health check is at `/health` (cheap, always-on JSON with version + uptime).
+- Database readiness is available at `/ready` (DB SELECT 1 ping; returns 503 on failure).
+- Deep diagnostics at `/health/full` — DB latency, disk writability, Redis (if configured), worker info. 503 on any critical failure.
+- Aggregate runtime metrics at `/metrics` — orders today, active orders, uptime. No PII.
 
 ## 4. First-time setup
 
