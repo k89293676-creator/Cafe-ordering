@@ -65,6 +65,9 @@
       <a class="sidebar-link {% if request.endpoint == 'admin.status' %}active{% endif %}" href="{{ url_for('admin.status') }}">
         <i class="bi bi-hdd-rack-fill"></i> System Status
       </a>
+      <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('admin.devops') %}active{% endif %}" href="{{ url_for('admin.devops') }}">
+        <i class="bi bi-hdd-network-fill"></i> DevOps
+      </a>
       <div style="margin-top:auto; padding: 1rem 1.25rem; border-top: 1px solid rgba(255,255,255,.07); margin-top: 2rem;">
         <a href="{{ url_for('admin.logout') }}" class="sidebar-link" style="padding: 0; color: #ef4444;">
           <i class="bi bi-box-arrow-right"></i> Sign out

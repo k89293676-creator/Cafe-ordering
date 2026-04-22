@@ -95,6 +95,7 @@
           Generating a new key for an owner replaces any previous key they had.
         </p>
         <form method="post" action="{{ url_for('superadmin_generate_admin_key') }}" class="row g-2 align-items-end">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
           <div class="col-sm-6 col-md-5">
             <label class="form-label small text-muted mb-1">Authorised owner</label>
             <select name="owner_id" class="form-select" required>
@@ -147,12 +148,14 @@
                 <td class="text-end">
                   {% if r.has_key %}
                     <form method="post" action="{{ url_for('superadmin_revoke_admin_key') }}" class="d-inline" onsubmit="return confirm('Revoke admin key for {{ r.username }}?');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                       <input type="hidden" name="owner_id" value="{{ r.owner_id }}"/>
                       <button class="btn btn-sm btn-outline-danger"><i class="bi bi-x-circle me-1"></i>Revoke</button>
                     </form>
                   {% endif %}
                   {% if r.is_active %}
                     <form method="post" action="{{ url_for('superadmin_generate_admin_key') }}" class="d-inline">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                       <input type="hidden" name="owner_id" value="{{ r.owner_id }}"/>
                       <button class="btn btn-sm btn-outline-primary"><i class="bi bi-arrow-repeat me-1"></i>{% if r.has_key %}Regenerate{% else %}Generate{% endif %}</button>
                     </form>

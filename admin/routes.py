@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+import platform
 import secrets
 import shutil
+import socket
+import sys
 import time
 from datetime import datetime, timezone
 from functools import wraps
@@ -10,6 +13,7 @@ from functools import wraps
 from flask import (
     Blueprint,
     abort,
+    current_app,
     flash,
     jsonify,
     redirect,
@@ -333,3 +337,215 @@ def status():
         server_time=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         now=now,
     )
+
+
+# ---------------------------------------------------------------------------
+# DevOps tools
+# ---------------------------------------------------------------------------
+
+_DEVOPS_RECENT_HEALTH: list[dict] = []
+_DEVOPS_RECENT_HEALTH_MAX = 25
+
+
+def _system_metrics() -> dict:
+    """Best-effort host metrics. Returns whatever is available; never raises."""
+    metrics: dict = {
+        "host": socket.gethostname(),
+        "python": sys.version.split(" ")[0],
+        "platform": f"{platform.system()} {platform.release()}",
+        "pid": os.getpid(),
+    }
+    try:
+        import psutil  # type: ignore
+        proc = psutil.Process(os.getpid())
+        with proc.oneshot():
+            mem_info = proc.memory_info()
+            create_time = proc.create_time()
+        vmem = psutil.virtual_memory()
+        try:
+            load1, load5, load15 = os.getloadavg()
+            metrics["loadAvg"] = {"1m": round(load1, 2), "5m": round(load5, 2), "15m": round(load15, 2)}
+        except (AttributeError, OSError):
+            pass
+        metrics.update({
+            "cpuPercent": psutil.cpu_percent(interval=0.1),
+            "cpuCount": psutil.cpu_count(logical=True),
+            "memoryTotalMb": round(vmem.total / 1e6, 0),
+            "memoryUsedPercent": vmem.percent,
+            "processRssMb": round(mem_info.rss / 1e6, 1),
+            "processUptimeSeconds": int(time.time() - create_time),
+            "psutilAvailable": True,
+        })
+    except ImportError:
+        metrics["psutilAvailable"] = False
+    except Exception as exc:  # noqa: BLE001
+        metrics["psutilError"] = str(exc)[:200]
+    return metrics
+
+
+def _run_health_check() -> dict:
+    """Aggregate liveness/readiness/full health signals into one result."""
+    store = _store()
+    started = time.time()
+    checks: dict = {}
+
+    # DB ping
+    try:
+        store.db.session.execute(store.text("SELECT 1"))
+        checks["database"] = {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        checks["database"] = {"ok": False, "error": str(exc)[:200]}
+
+    # Disk writability
+    try:
+        probe = store.DATA_DIR / ".admin_devops_probe.tmp"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        checks["disk"] = {"ok": True, "path": str(store.DATA_DIR)}
+    except Exception as exc:  # noqa: BLE001
+        checks["disk"] = {"ok": False, "error": str(exc)[:200]}
+
+    # Disk free
+    try:
+        usage = shutil.disk_usage(str(store.DATA_DIR))
+        checks["diskUsage"] = {
+            "ok": (usage.free / usage.total) > 0.05 if usage.total else True,
+            "freePercent": round((usage.free / usage.total) * 100, 1) if usage.total else None,
+            "freeGb": round(usage.free / 1e9, 2),
+        }
+    except Exception as exc:  # noqa: BLE001
+        checks["diskUsage"] = {"ok": False, "error": str(exc)[:200]}
+
+    # Redis (optional)
+    redis_url = os.environ.get("REDIS_URL")
+    if redis_url:
+        try:
+            import redis  # type: ignore
+            client = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+            t0 = time.time()
+            client.ping()
+            checks["redis"] = {"ok": True, "latencyMs": round((time.time() - t0) * 1000, 2)}
+        except Exception as exc:  # noqa: BLE001
+            checks["redis"] = {"ok": False, "error": str(exc)[:200]}
+    else:
+        checks["redis"] = {"ok": True, "skipped": True, "note": "REDIS_URL not configured"}
+
+    # Admin key configured
+    checks["adminKey"] = {"ok": _has_any_admin_key()}
+
+    overall_ok = all(c.get("ok") for c in checks.values())
+    return {
+        "ok": overall_ok,
+        "elapsedMs": round((time.time() - started) * 1000, 1),
+        "ranAt": datetime.now(timezone.utc).isoformat(),
+        "ranBy": session.get("admin_owner_id"),
+        "checks": checks,
+    }
+
+
+def _record_health(result: dict) -> None:
+    _DEVOPS_RECENT_HEALTH.insert(0, {
+        "ranAt": result.get("ranAt"),
+        "ok": bool(result.get("ok")),
+        "elapsedMs": result.get("elapsedMs"),
+        "failing": [name for name, info in (result.get("checks") or {}).items() if not info.get("ok")],
+    })
+    del _DEVOPS_RECENT_HEALTH[_DEVOPS_RECENT_HEALTH_MAX:]
+
+
+def _safe_env_summary() -> list[dict]:
+    """Show whether sensitive env vars are configured, never their values."""
+    keys = [
+        "ADMIN_SECRET_KEY", "DATABASE_URL", "REDIS_URL", "SECRET_KEY",
+        "MAIL_USERNAME", "MAIL_PASSWORD", "FLASK_ENV", "IS_PRODUCTION",
+        "RAILWAY_ENVIRONMENT", "PORT",
+    ]
+    summary = []
+    for key in keys:
+        val = os.environ.get(key)
+        sensitive = any(s in key for s in ("KEY", "PASSWORD", "URL", "SECRET"))
+        summary.append({
+            "key": key,
+            "set": bool(val),
+            "value": (val if (val and not sensitive) else None),
+        })
+    return summary
+
+
+def _is_safe_redirect(target: str) -> bool:
+    return bool(target) and target.startswith("/admin/")
+
+
+@admin_bp.route("/devops")
+@admin_required
+def devops():
+    store = _store()
+    metrics = _system_metrics()
+    env_summary = _safe_env_summary()
+    last_health = _DEVOPS_RECENT_HEALTH[0] if _DEVOPS_RECENT_HEALTH else None
+    app_info = {
+        "version": getattr(store, "APP_VERSION", "unknown"),
+        "uptimeSeconds": int(time.time() - getattr(store, "APP_START_TIME", time.time())),
+        "useDb": getattr(store, "USE_DB", False),
+        "dataDir": str(getattr(store, "DATA_DIR", "")),
+    }
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return render_template(
+        "admin/devops.html",
+        metrics=metrics,
+        env_summary=env_summary,
+        last_health=last_health,
+        recent_health=list(_DEVOPS_RECENT_HEALTH),
+        app_info=app_info,
+        admin_owner_id=session.get("admin_owner_id"),
+        now=now,
+    )
+
+
+@admin_bp.route("/devops/health", methods=["GET", "POST"])
+@admin_required
+def devops_health():
+    """Run the aggregated health check.
+
+    GET returns JSON for AJAX/probes; POST updates the page-level cache and
+    redirects back to the DevOps view with a flash message.
+    """
+    result = _run_health_check()
+    _record_health(result)
+    if request.method == "POST":
+        flash(
+            ("All systems healthy." if result["ok"]
+             else "Health check found issues — see DevOps panel for details."),
+            "success" if result["ok"] else "danger",
+        )
+        return redirect(url_for("admin.devops"))
+    return jsonify(result), (200 if result["ok"] else 503)
+
+
+@admin_bp.route("/devops/clear-rate-limits", methods=["POST"])
+@admin_required
+def devops_clear_rate_limits():
+    """Reset Flask-Limiter storage (best-effort). Useful after a burst of 429s."""
+    store = _store()
+    cleared = False
+    try:
+        limiter = getattr(store, "limiter", None)
+        if limiter is not None and getattr(limiter, "storage", None):
+            try:
+                limiter.storage.reset()
+                cleared = True
+            except Exception:
+                # In-memory storage may not implement reset()
+                if hasattr(limiter, "_storage") and hasattr(limiter._storage, "storage"):
+                    limiter._storage.storage.clear()
+                    cleared = True
+    except Exception as exc:  # noqa: BLE001
+        flash(f"Could not clear rate limit storage: {exc}", "danger")
+        return redirect(url_for("admin.devops"))
+    try:
+        store.log_security("DEVOPS_CLEAR_RATE_LIMITS",
+                           f"by_owner_id={session.get('admin_owner_id')}")
+    except Exception:
+        pass
+    flash("Rate-limit storage cleared." if cleared else "Nothing to clear.", "success" if cleared else "info")
+    return redirect(url_for("admin.devops"))
