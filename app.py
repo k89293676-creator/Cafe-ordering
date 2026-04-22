@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import base64
+import csv
 import io
 import json
 import logging
 import mimetypes
 import os
+import random
 import re
 import secrets
+import string
+import sys
 import tempfile
 import threading
 from logging.handlers import RotatingFileHandler
@@ -15,9 +19,10 @@ import time
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
-import csv
 import portalocker
+import pyotp
 import qrcode
 from dotenv import load_dotenv
 from flask import (
@@ -32,10 +37,12 @@ from flask import (
     session,
     url_for,
     stream_with_context,
+    send_file,
 )
 from flask_bcrypt import Bcrypt
-from flask_limiter import Limiter
 from flask_compress import Compress
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_login import (
     LoginManager,
     current_user,
@@ -44,7 +51,6 @@ from flask_login import (
     logout_user,
 )
 from flask_mail import Mail, Message
-from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from flask_talisman import Talisman
@@ -53,16 +59,7 @@ from sqlalchemy import inspect, text
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 
-try:
-    import stripe
-except ImportError:
-    stripe = None
-
 load_dotenv()
-
-# ---------------------------------------------------------------------------
-# Paths (used as fallback when DATABASE_URL is not set)
-# ---------------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("DATA_DIR")) if os.environ.get("DATA_DIR") else BASE_DIR
@@ -78,10 +75,6 @@ _orders_lock = threading.Lock()
 _menu_lock = threading.Lock()
 _tables_lock = threading.Lock()
 
-# ---------------------------------------------------------------------------
-# App creation
-# ---------------------------------------------------------------------------
-
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
@@ -95,26 +88,17 @@ _raw_db_url = os.environ.get("DATABASE_URL", "")
 if _raw_db_url.startswith("postgres://"):
     _raw_db_url = _raw_db_url.replace("postgres://", "postgresql://", 1)
 
-# ---------------------------------------------------------------------------
-# Secret key
-# ---------------------------------------------------------------------------
+_allow_sqlite_in_production = os.environ.get("ALLOW_SQLITE_IN_PRODUCTION", "").lower() in {"1", "true", "yes", "on"}
+_using_ephemeral_production_sqlite = IS_PRODUCTION and not _raw_db_url and not _allow_sqlite_in_production
 
 _secret_key = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET")
 if _secret_key:
     app.secret_key = _secret_key
 else:
     if IS_PRODUCTION:
-        raise RuntimeError("SECRET_KEY is required when IS_PRODUCTION=true or FLASK_ENV=production.")
+        raise RuntimeError("SECRET_KEY is required in production.")
     app.secret_key = secrets.token_hex(32)
-    print(
-        "WARNING: SECRET_KEY not set. Sessions will not survive restarts. "
-        "Set SECRET_KEY in your environment for production.",
-        flush=True,
-    )
-
-# ---------------------------------------------------------------------------
-# App config
-# ---------------------------------------------------------------------------
+    print("WARNING: SECRET_KEY not set. Sessions will not survive restarts.", flush=True)
 
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
@@ -136,6 +120,7 @@ app.config.update(
     MAIL_DEFAULT_SENDER=os.environ.get("MAIL_DEFAULT_SENDER"),
 )
 
+
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload = {
@@ -151,13 +136,14 @@ class JsonFormatter(logging.Formatter):
 
 def configure_logging() -> None:
     level = logging.INFO if IS_PRODUCTION else logging.DEBUG
-    if IS_PRODUCTION:
-        log_path = Path(os.environ.get("LOG_FILE", DATA_DIR / "logs" / "app.log"))
+    log_file = os.environ.get("LOG_FILE")
+    if IS_PRODUCTION and log_file:
+        log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(log_path, maxBytes=10 * 1024 * 1024, backupCount=5)
         handler.setFormatter(JsonFormatter())
     else:
-        handler = logging.StreamHandler()
+        handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
     root = logging.getLogger()
     root.handlers.clear()
@@ -170,10 +156,6 @@ def configure_logging() -> None:
 
 
 configure_logging()
-
-# ---------------------------------------------------------------------------
-# Security extensions
-# ---------------------------------------------------------------------------
 
 Compress(app)
 csrf = CSRFProtect(app)
@@ -194,9 +176,8 @@ _csp = {
     "script-src": ["'self'", "'unsafe-inline'"],
     "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
     "font-src": ["'self'", "https://fonts.gstatic.com"],
-    "img-src": ["'self'", "data:", "https://lh3.googleusercontent.com", "https://maps.googleapis.com"],
-    "connect-src": ["'self'", "https://maps.googleapis.com", "https://places.googleapis.com"],
-    "frame-src": ["https://www.google.com"],
+    "img-src": ["'self'", "data:"],
+    "connect-src": ["'self'"],
     "frame-ancestors": "'none'",
     "form-action": "'self'",
     "base-uri": "'self'",
@@ -212,7 +193,6 @@ if IS_PRODUCTION:
             strict_transport_security_include_subdomains=True,
             session_cookie_secure=IS_PRODUCTION,
             content_security_policy=_csp,
-            content_security_policy_nonce_in=None,
             permissions_policy={
                 "geolocation": "()",
                 "camera": "()",
@@ -239,8 +219,19 @@ mail = Mail(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "owner_login"
 
-if stripe is not None and os.environ.get("STRIPE_SECRET_KEY"):
-    stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+
+class Cafe(db.Model):
+    __tablename__ = "cafes"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.Text, nullable=False, default="")
+    slug = db.Column(db.Text, unique=True, nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, server_default="true")
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 
 class Owner(db.Model):
@@ -250,8 +241,13 @@ class Owner(db.Model):
     email = db.Column(db.Text, unique=True)
     password_hash = db.Column(db.Text, nullable=False)
     cafe_name = db.Column(db.Text, default="")
+    cafe_id = db.Column(db.Integer, db.ForeignKey("cafes.id"), nullable=True)
     google_place_id = db.Column(db.Text, default="")
     is_active = db.Column(db.Boolean, default=True, nullable=False, server_default="true")
+    is_superadmin = db.Column(db.Boolean, default=False, nullable=False, server_default="false")
+    totp_secret = db.Column(db.Text, nullable=True)
+    totp_enabled = db.Column(db.Boolean, default=False, server_default="false")
+    phone = db.Column(db.Text, default="")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
     @property
@@ -271,30 +267,50 @@ class CafeTable(db.Model):
     id = db.Column(db.Text, primary_key=True)
     name = db.Column(db.Text, nullable=False)
     owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"))
+    cafe_id = db.Column(db.Integer, db.ForeignKey("cafes.id"), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 
 class Menu(db.Model):
     __tablename__ = "menus"
     owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"), primary_key=True)
+    cafe_id = db.Column(db.Integer, db.ForeignKey("cafes.id"), nullable=True)
     data = db.Column(db.JSON, nullable=False, default=lambda: {"categories": []})
+
+
+class Ingredient(db.Model):
+    __tablename__ = "ingredients"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"), nullable=False)
+    cafe_id = db.Column(db.Integer, db.ForeignKey("cafes.id"), nullable=True)
+    name = db.Column(db.Text, nullable=False)
+    unit = db.Column(db.Text, default="unit")
+    stock = db.Column(db.Numeric(10, 3), default=0)
+    low_stock_threshold = db.Column(db.Numeric(10, 3), default=5)
+    menu_item_id = db.Column(db.Text, nullable=True)
+    qty_per_order = db.Column(db.Numeric(10, 3), default=1)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 
 class Order(db.Model):
     __tablename__ = "orders"
     id = db.Column(db.Integer, primary_key=True)
     owner_id = db.Column(db.Integer, db.ForeignKey("owners.id"))
+    cafe_id = db.Column(db.Integer, db.ForeignKey("cafes.id"), nullable=True)
     table_id = db.Column(db.Text)
     table_name = db.Column(db.Text)
     customer_name = db.Column(db.Text, default="Guest")
     customer_email = db.Column(db.Text, default="")
+    customer_phone = db.Column(db.Text, default="")
     items = db.Column(db.JSON, nullable=False, default=list)
+    modifiers = db.Column(db.JSON, default=dict)
     subtotal = db.Column(db.Numeric(10, 2), default=0)
     tip = db.Column(db.Numeric(10, 2), default=0)
     total = db.Column(db.Numeric(10, 2), default=0)
     status = db.Column(db.Text, default="pending")
+    pickup_code = db.Column(db.Text, default="")
     origin = db.Column(db.Text, default="table")
-    payment_intent = db.Column(db.Text, default="")
+    notes = db.Column(db.Text, default="")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
@@ -303,6 +319,8 @@ class Feedback(db.Model):
     __tablename__ = "feedback"
     id = db.Column(db.Integer, primary_key=True)
     owner_id = db.Column(db.Integer, db.ForeignKey("owners.id"))
+    cafe_id = db.Column(db.Integer, db.ForeignKey("cafes.id"), nullable=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=True)
     table_id = db.Column(db.Text)
     customer_name = db.Column(db.Text, default="Guest")
     rating = db.Column(db.Integer, nullable=False)
@@ -331,27 +349,72 @@ USE_DB = True
 db.init_app(app)
 migrate.init_app(app, db)
 
+_DB_READY = False
+_DB_INIT_ERROR = "Database has not been initialized yet."
+_DB_INIT_LAST_ATTEMPT = 0.0
+_DB_INIT_LOCK = threading.Lock()
+
 
 def _init_db() -> None:
-    """Create SQLAlchemy tables and run safe additive column upgrades."""
     with app.app_context():
+        if _using_ephemeral_production_sqlite:
+            app.logger.error(
+                "DATABASE_URL is not set in production. Running with SQLite fallback; "
+                "data may be lost on Railway redeploys. Attach Railway PostgreSQL for durable persistence."
+            )
         db.create_all()
         inspector = inspect(db.engine)
 
-        def add_column(table_name: str, column_sql: str, column_name: str) -> None:
-            existing = {col["name"] for col in inspector.get_columns(table_name)}
-            if column_name in existing:
+        def add_column_if_missing(table_name: str, column_sql: str, column_name: str) -> None:
+            if table_name not in inspector.get_table_names():
                 return
-            db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}"))
-            db.session.commit()
+            existing = {col["name"] for col in inspector.get_columns(table_name)}
+            if column_name not in existing:
+                db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}"))
+                db.session.commit()
 
-        add_column("orders", "customer_email TEXT DEFAULT ''", "customer_email")
-        add_column("orders", "subtotal NUMERIC(10, 2) DEFAULT 0", "subtotal")
-        add_column("orders", "tip NUMERIC(10, 2) DEFAULT 0", "tip")
-        add_column("orders", "payment_intent TEXT DEFAULT ''", "payment_intent")
-        add_column("orders", "updated_at TIMESTAMP", "updated_at")
+        add_column_if_missing("orders", "customer_phone TEXT DEFAULT ''", "customer_phone")
+        add_column_if_missing("orders", "pickup_code TEXT DEFAULT ''", "pickup_code")
+        add_column_if_missing("orders", "modifiers JSON", "modifiers")
+        add_column_if_missing("orders", "notes TEXT DEFAULT ''", "notes")
+        add_column_if_missing("orders", "cafe_id INTEGER", "cafe_id")
+        add_column_if_missing("orders", "updated_at TIMESTAMP", "updated_at")
+        add_column_if_missing("owners", "is_superadmin BOOLEAN DEFAULT false", "is_superadmin")
+        add_column_if_missing("owners", "totp_secret TEXT", "totp_secret")
+        add_column_if_missing("owners", "totp_enabled BOOLEAN DEFAULT false", "totp_enabled")
+        add_column_if_missing("owners", "phone TEXT DEFAULT ''", "phone")
+        add_column_if_missing("owners", "cafe_id INTEGER", "cafe_id")
+        add_column_if_missing("feedback", "order_id INTEGER", "order_id")
+        add_column_if_missing("feedback", "cafe_id INTEGER", "cafe_id")
         _seed_sqlalchemy_from_json()
-    app.logger.info("SQLAlchemy database schema ready: %s", app.config["SQLALCHEMY_DATABASE_URI"])
+    app.logger.info("DB schema ready: %s", app.config["SQLALCHEMY_DATABASE_URI"])
+
+
+def _initialize_runtime_state(force: bool = False) -> bool:
+    global _DB_READY, _DB_INIT_ERROR, _DB_INIT_LAST_ATTEMPT
+    if _DB_READY:
+        return True
+    now = time.monotonic()
+    if not force and now - _DB_INIT_LAST_ATTEMPT < 5:
+        return False
+    with _DB_INIT_LOCK:
+        if _DB_READY:
+            return True
+        now = time.monotonic()
+        if not force and now - _DB_INIT_LAST_ATTEMPT < 5:
+            return False
+        _DB_INIT_LAST_ATTEMPT = now
+        try:
+            _init_db()
+            _make_superadmin_if_missing()
+            _DB_READY = True
+            _DB_INIT_ERROR = ""
+            return True
+        except Exception as exc:
+            _DB_INIT_ERROR = str(exc)
+            app.logger.exception("Database initialization failed; app will keep serving /health and retry.")
+            return False
+
 
 # ---------------------------------------------------------------------------
 # Security headers
@@ -360,17 +423,12 @@ def _init_db() -> None:
 @app.after_request
 def extra_security_headers(response: Response) -> Response:
     response.headers["Server"] = "CafePortal"
-    response.headers["Permissions-Policy"] = (
-        "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
-    )
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
     response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
     return response
 
-# ---------------------------------------------------------------------------
-# Security logging
-# ---------------------------------------------------------------------------
 
 security_log = logging.getLogger("cafe.security")
 if not security_log.handlers:
@@ -393,17 +451,18 @@ def validate_uploaded_file(uploaded_file, file_bytes: bytes) -> tuple[str | None
     filename = (uploaded_file.filename or "").lower()
     ext = Path(filename).suffix
     if ext not in _ALLOWED_UPLOADS:
-        return "Unsupported file type. Upload .json, .jpg, or .png only.", None
+        return "Unsupported file type.", None
     guessed_type = (mimetypes.guess_type(filename)[0] or "").lower()
     provided_type = (uploaded_file.mimetype or "").split(";", 1)[0].lower()
     allowed_types = _ALLOWED_UPLOADS[ext]
     if guessed_type not in allowed_types:
-        return "Uploaded file extension does not match an allowed MIME type.", None
+        return "File extension does not match MIME type.", None
     if provided_type and provided_type not in allowed_types and provided_type != "application/octet-stream":
-        return "Uploaded file MIME type is not allowed.", None
+        return "File MIME type not allowed.", None
     if not file_bytes:
-        return "Uploaded file is empty.", None
+        return "File is empty.", None
     return None, "image" if ext in {".jpg", ".jpeg", ".png"} else "json"
+
 
 def _client_ip() -> str:
     return request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
@@ -412,8 +471,9 @@ def _client_ip() -> str:
 def log_security(event: str, detail: str = "") -> None:
     security_log.info("%s ip=%s %s", event, _client_ip(), detail)
 
+
 # ---------------------------------------------------------------------------
-# JSON file helpers (fallback when no DATABASE_URL)
+# JSON file helpers (fallback)
 # ---------------------------------------------------------------------------
 
 def _json_lock_path(path: Path) -> str:
@@ -427,13 +487,7 @@ def safe_read_json(path: Path, default):
                 return default
             with path.open("r", encoding="utf-8") as handle:
                 return json.load(handle)
-    except json.JSONDecodeError as exc:
-        app.logger.error("Corrupt JSON in %s (%s) — returning default", path, exc)
-        try:
-            corrupt = path.with_suffix(path.suffix + f".corrupt.{int(time.time())}")
-            path.replace(corrupt)
-        except OSError:
-            pass
+    except json.JSONDecodeError:
         return default
     except (OSError, portalocker.exceptions.LockException) as exc:
         app.logger.error("Failed to read %s: %s", path, exc)
@@ -455,51 +509,15 @@ def atomic_write_json(path: Path, data) -> None:
         app.logger.error("Failed to write %s: %s", path, exc)
         raise
     finally:
-        if tmp_path:
+        if tmp_path and os.path.exists(tmp_path):
             try:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
+                os.unlink(tmp_path)
             except OSError:
                 pass
 
 
-def read_json(path: Path, default):
-    return safe_read_json(path, default)
-
-
-def write_json(path: Path, data) -> None:
-    atomic_write_json(path, data)
-
-
-_MENU_CACHE_TTL_SECONDS = 30
-_menu_cache: dict[str, object] = {"expires_at": 0.0, "data": None}
-_menu_cache_lock = threading.Lock()
-
-
-def _clone_json_data(data):
-    return json.loads(json.dumps(data))
-
-
-def _get_cached_menu():
-    with _menu_cache_lock:
-        if _menu_cache["data"] is not None and time.monotonic() < float(_menu_cache["expires_at"]):
-            return _clone_json_data(_menu_cache["data"])
-    return None
-
-
-def _set_cached_menu(menu: dict) -> None:
-    with _menu_cache_lock:
-        _menu_cache["data"] = _clone_json_data(menu)
-        _menu_cache["expires_at"] = time.monotonic() + _MENU_CACHE_TTL_SECONDS
-
-
-def _invalidate_menu_cache() -> None:
-    with _menu_cache_lock:
-        _menu_cache["data"] = None
-        _menu_cache["expires_at"] = 0.0
-
 # ---------------------------------------------------------------------------
-# Data access — SQLAlchemy
+# Data access helpers
 # ---------------------------------------------------------------------------
 
 def _iso(dt) -> str:
@@ -524,18 +542,23 @@ def _owner_dict(owner: Owner) -> dict:
         "email": owner.email,
         "passwordHash": owner.password_hash,
         "cafeName": owner.cafe_name or "",
+        "cafeId": owner.cafe_id,
         "googlePlaceId": owner.google_place_id or "",
         "isActive": bool(owner.is_active),
+        "isSuperadmin": bool(owner.is_superadmin),
+        "totpEnabled": bool(owner.totp_enabled),
+        "phone": owner.phone or "",
         "createdAt": _iso(owner.created_at),
     }
 
 
-def _table_dict(table: CafeTable) -> dict:
+def _cafe_dict(cafe: Cafe) -> dict:
     return {
-        "id": table.id,
-        "name": table.name,
-        "ownerId": table.owner_id,
-        "createdAt": _iso(table.created_at),
+        "id": cafe.id,
+        "name": cafe.name,
+        "slug": cafe.slug or "",
+        "isActive": bool(cafe.is_active),
+        "createdAt": _iso(cafe.created_at),
     }
 
 
@@ -543,17 +566,21 @@ def _order_dict(order: Order) -> dict:
     return {
         "id": order.id,
         "ownerId": order.owner_id,
+        "cafeId": order.cafe_id,
         "tableId": order.table_id,
         "tableName": order.table_name,
         "customerName": order.customer_name or "Guest",
         "customerEmail": order.customer_email or "",
+        "customerPhone": order.customer_phone or "",
         "items": order.items if isinstance(order.items, list) else [],
+        "modifiers": order.modifiers if isinstance(order.modifiers, dict) else {},
         "subtotal": float(order.subtotal or 0),
         "tip": float(order.tip or 0),
         "total": float(order.total or 0),
         "status": order.status or "pending",
+        "pickupCode": order.pickup_code or "",
         "origin": order.origin or "table",
-        "paymentIntent": order.payment_intent or "",
+        "notes": order.notes or "",
         "createdAt": _iso(order.created_at),
         "updatedAt": _iso(order.updated_at),
     }
@@ -563,6 +590,8 @@ def _feedback_dict(feedback: Feedback) -> dict:
     return {
         "id": feedback.id,
         "ownerId": feedback.owner_id,
+        "cafeId": feedback.cafe_id,
+        "orderId": feedback.order_id,
         "tableId": feedback.table_id,
         "customerName": feedback.customer_name or "Guest",
         "rating": feedback.rating,
@@ -574,47 +603,51 @@ def _feedback_dict(feedback: Feedback) -> dict:
 def _settings_dict(settings: Settings | None) -> dict:
     if not settings:
         return {"logoUrl": "", "brandColor": "#4f46e5"}
-    return {
-        "logoUrl": settings.logo_url or "",
-        "brandColor": settings.brand_color or "#4f46e5",
-    }
+    return {"logoUrl": settings.logo_url or "", "brandColor": settings.brand_color or "#4f46e5"}
 
 
 def load_owners() -> list[dict]:
-    return [_owner_dict(owner) for owner in Owner.query.order_by(Owner.id).all()]
+    return [_owner_dict(o) for o in Owner.query.order_by(Owner.id).all()]
 
 
-def save_owners(owners: list[dict]) -> None:
-    keep_ids = {owner.get("id") for owner in owners if owner.get("id")}
-    for existing in Owner.query.all():
-        if existing.id not in keep_ids:
-            db.session.delete(existing)
-    for owner in owners:
-        record = db.session.get(Owner, owner.get("id")) if owner.get("id") else Owner()
-        record.username = owner["username"]
-        record.email = owner.get("email")
-        record.password_hash = owner.get("passwordHash", "")
-        record.cafe_name = owner.get("cafeName", "")
-        record.google_place_id = owner.get("googlePlaceId", "")
-        record.is_active = owner.get("isActive", True)
-        record.created_at = _parse_dt(owner.get("createdAt")) or record.created_at
-        db.session.add(record)
+def load_cafes() -> list[dict]:
+    return [_cafe_dict(c) for c in Cafe.query.order_by(Cafe.id).all()]
+
+
+def create_cafe_in_db(name: str, slug: str | None = None) -> dict:
+    cafe = Cafe(name=name, slug=slug)
+    db.session.add(cafe)
     db.session.commit()
+    return _cafe_dict(cafe)
 
 
-def create_owner_in_db(username: str, email: str | None, password_hash: str, cafe_name: str = "") -> dict:
-    owner = Owner(username=username, email=email or None, password_hash=password_hash, cafe_name=cafe_name)
+def create_owner_in_db(username: str, email: str | None, password_hash: str,
+                       cafe_name: str = "", cafe_id: int | None = None,
+                       is_superadmin: bool = False) -> dict:
+    owner = Owner(
+        username=username,
+        email=email or None,
+        password_hash=password_hash,
+        cafe_name=cafe_name,
+        cafe_id=cafe_id,
+        is_superadmin=is_superadmin,
+    )
     db.session.add(owner)
     db.session.commit()
     return _owner_dict(owner)
 
 
 def load_tables() -> list[dict]:
-    return [_table_dict(table) for table in CafeTable.query.order_by(CafeTable.created_at).all()]
+    rows = CafeTable.query.order_by(CafeTable.created_at).all()
+    return [
+        {"id": t.id, "name": t.name, "ownerId": t.owner_id,
+         "cafeId": t.cafe_id, "createdAt": _iso(t.created_at)}
+        for t in rows
+    ]
 
 
 def save_tables(tables: list[dict]) -> None:
-    keep_ids = {table["id"] for table in tables}
+    keep_ids = {t["id"] for t in tables}
     for existing in CafeTable.query.all():
         if existing.id not in keep_ids:
             db.session.delete(existing)
@@ -622,24 +655,20 @@ def save_tables(tables: list[dict]) -> None:
         record = db.session.get(CafeTable, table["id"]) or CafeTable(id=table["id"])
         record.name = table["name"]
         record.owner_id = table.get("ownerId")
-        record.created_at = _parse_dt(table.get("createdAt")) or record.created_at
+        record.cafe_id = table.get("cafeId")
         db.session.add(record)
     db.session.commit()
 
 
 def load_menu() -> dict:
-    cached_menu = _get_cached_menu()
-    if cached_menu is not None:
-        return cached_menu
     all_categories = []
     for menu in Menu.query.all():
         for category in (menu.data or {}).get("categories", []):
-            category_copy = dict(category)
-            category_copy["ownerId"] = menu.owner_id
-            all_categories.append(category_copy)
-    result = {"categories": all_categories}
-    _set_cached_menu(result)
-    return _clone_json_data(result)
+            cat = dict(category)
+            cat["ownerId"] = menu.owner_id
+            cat["cafeId"] = menu.cafe_id
+            all_categories.append(cat)
+    return {"categories": all_categories}
 
 
 def save_menu(menu: dict) -> None:
@@ -648,67 +677,73 @@ def save_menu(menu: dict) -> None:
         owner_id = category.get("ownerId")
         if owner_id is None:
             continue
-        category_copy = {k: v for k, v in category.items() if k != "ownerId"}
-        by_owner.setdefault(owner_id, []).append(category_copy)
-    owner_ids = {owner.id for owner in Owner.query.all()} | {m.owner_id for m in Menu.query.all()}
+        cat_copy = {k: v for k, v in category.items() if k not in ("ownerId", "cafeId")}
+        by_owner.setdefault(owner_id, []).append(cat_copy)
+    owner_ids = {o.id for o in Owner.query.all()} | {m.owner_id for m in Menu.query.all()}
     for owner_id in owner_ids:
         categories = by_owner.get(owner_id, [])
         record = db.session.get(Menu, owner_id) or Menu(owner_id=owner_id)
         record.data = {"categories": categories}
+        owner = db.session.get(Owner, owner_id)
+        if owner:
+            record.cafe_id = owner.cafe_id
         db.session.add(record)
     db.session.commit()
-    _set_cached_menu(menu)
 
 
 def load_orders() -> list[dict]:
-    return [_order_dict(order) for order in Order.query.order_by(Order.id).all()]
-
-
-def save_orders(orders: list[dict]) -> None:
-    keep_ids = {order.get("id") for order in orders if isinstance(order.get("id"), int)}
-    for existing in Order.query.all():
-        if existing.id not in keep_ids:
-            db.session.delete(existing)
-    for order in orders:
-        record = db.session.get(Order, order.get("id")) if order.get("id") else Order()
-        record.owner_id = order.get("ownerId")
-        record.table_id = order.get("tableId")
-        record.table_name = order.get("tableName")
-        record.customer_name = order.get("customerName", "Guest")
-        record.customer_email = order.get("customerEmail", "")
-        record.items = order.get("items", [])
-        record.subtotal = order.get("subtotal", order.get("total", 0))
-        record.tip = order.get("tip", 0)
-        record.total = order.get("total", 0)
-        record.status = order.get("status", "pending")
-        record.origin = order.get("origin", "table")
-        record.payment_intent = order.get("paymentIntent", "")
-        record.created_at = _parse_dt(order.get("createdAt")) or record.created_at
-        record.updated_at = datetime.now(timezone.utc)
-        db.session.add(record)
-    db.session.commit()
+    return [_order_dict(o) for o in Order.query.order_by(Order.id).all()]
 
 
 def place_order_in_db(order: dict) -> dict:
+    pickup_code = _generate_pickup_code()
     record = Order(
         owner_id=order.get("ownerId"),
+        cafe_id=order.get("cafeId"),
         table_id=order.get("tableId"),
         table_name=order.get("tableName"),
         customer_name=order.get("customerName", "Guest"),
         customer_email=order.get("customerEmail", ""),
+        customer_phone=order.get("customerPhone", ""),
         items=order.get("items", []),
+        modifiers=order.get("modifiers", {}),
         subtotal=order.get("subtotal", order.get("total", 0)),
         tip=order.get("tip", 0),
         total=order.get("total", 0),
         status=order.get("status", "pending"),
+        pickup_code=pickup_code,
         origin=order.get("origin", "table"),
-        payment_intent=order.get("paymentIntent", ""),
+        notes=order.get("notes", ""),
         created_at=_parse_dt(order.get("createdAt")) or datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
     db.session.add(record)
     db.session.commit()
+    _deduct_inventory(record.owner_id, record.items)
     return _order_dict(record)
+
+
+def _generate_pickup_code() -> str:
+    return "".join(random.choices(string.digits, k=6))
+
+
+def _deduct_inventory(owner_id: int | None, items: list) -> None:
+    if not owner_id or not items:
+        return
+    try:
+        for item in items:
+            item_id = item.get("id")
+            qty = int(item.get("quantity", 1))
+            if not item_id:
+                continue
+            ingredients = Ingredient.query.filter_by(owner_id=owner_id, menu_item_id=item_id).all()
+            for ing in ingredients:
+                deduct = float(ing.qty_per_order or 1) * qty
+                ing.stock = max(0, float(ing.stock or 0) - deduct)
+                db.session.add(ing)
+        db.session.commit()
+    except Exception as exc:
+        app.logger.warning("Inventory deduction failed: %s", exc)
 
 
 def _db_update_order_status(order_id: int, new_status: str) -> bool:
@@ -735,25 +770,15 @@ def _db_delete_order(order_id: int) -> bool:
     return True
 
 
-def _db_set_payment_intent(order_id: int, payment_intent: str, status: str | None = None) -> dict | None:
-    order = db.session.get(Order, order_id)
-    if not order:
-        return None
-    order.payment_intent = payment_intent or order.payment_intent
-    if status:
-        order.status = status
-    order.updated_at = datetime.now(timezone.utc)
-    db.session.commit()
-    return _order_dict(order)
-
-
 def load_feedback() -> list[dict]:
-    return [_feedback_dict(feedback) for feedback in Feedback.query.order_by(Feedback.id.desc()).all()]
+    return [_feedback_dict(f) for f in Feedback.query.order_by(Feedback.id.desc()).all()]
 
 
 def save_feedback_entry(entry: dict) -> dict:
     feedback = Feedback(
         owner_id=entry.get("ownerId"),
+        cafe_id=entry.get("cafeId"),
+        order_id=entry.get("orderId"),
         table_id=entry.get("tableId"),
         customer_name=entry.get("customerName", "Guest"),
         rating=entry["rating"],
@@ -788,24 +813,35 @@ def _seed_sqlalchemy_from_json() -> None:
     tables = safe_read_json(TABLES_PATH, [])
     menu = safe_read_json(MENU_PATH, {"categories": []})
     orders = safe_read_json(ORDERS_PATH, [])
-    feedback = safe_read_json(FEEDBACK_PATH, [])
+    feedback_list = safe_read_json(FEEDBACK_PATH, [])
     if owners:
-        save_owners(owners)
+        for o in owners:
+            rec = Owner(
+                username=o["username"],
+                email=o.get("email"),
+                password_hash=o.get("passwordHash", ""),
+                cafe_name=o.get("cafeName", ""),
+                is_active=o.get("isActive", True),
+            )
+            db.session.add(rec)
+        db.session.commit()
     if tables:
         save_tables(tables)
     if menu.get("categories"):
         save_menu(menu)
-    if orders:
-        save_orders(orders)
-    for entry in feedback:
+    for order in orders:
+        place_order_in_db(order)
+    for entry in feedback_list:
         save_feedback_entry(entry)
 
+
 # ---------------------------------------------------------------------------
-# Persistent "remember me" token system
+# Remember-me tokens
 # ---------------------------------------------------------------------------
 
 _REMEMBER_COOKIE = "cafe_remember"
 _REMEMBER_DAYS = 90
+
 
 def _hash_token(raw: str) -> str:
     import hashlib
@@ -860,15 +896,13 @@ def revoke_all_tokens_for_owner(owner_id: int) -> None:
     RememberToken.query.filter_by(owner_id=owner_id).delete()
     db.session.commit()
 
+
 # ---------------------------------------------------------------------------
-# ID generation (used in JSON fallback mode)
+# Utility helpers
 # ---------------------------------------------------------------------------
 
 def next_id(records: list[dict]) -> int:
-    return max(
-        (r.get("id", 0) for r in records if isinstance(r.get("id"), int)),
-        default=0,
-    ) + 1
+    return max((r.get("id", 0) for r in records if isinstance(r.get("id"), int)), default=0) + 1
 
 
 def next_table_number(tables: list[dict]) -> int:
@@ -887,8 +921,7 @@ def normalize_id(name: str) -> str:
     slug = name.lower().strip()
     slug = re.sub(r"[^\w\s-]", "", slug)
     slug = re.sub(r"[\s_]+", "-", slug)
-    slug = re.sub(r"-+", "-", slug).strip("-")
-    return slug or "item"
+    return re.sub(r"-+", "-", slug).strip("-") or "item"
 
 
 def unique_id(base: str, existing: set) -> str:
@@ -898,6 +931,7 @@ def unique_id(base: str, existing: set) -> str:
     while f"{base}-{counter}" in existing:
         counter += 1
     return f"{base}-{counter}"
+
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -913,6 +947,15 @@ def logged_in_owner_id() -> int | None:
     if current_user.is_authenticated:
         return current_user.id
     return session.get("owner_id")
+
+
+def logged_in_owner_obj() -> Owner | None:
+    if current_user.is_authenticated:
+        return current_user
+    owner_id = session.get("owner_id")
+    if owner_id:
+        return db.session.get(Owner, owner_id)
+    return None
 
 
 @login_manager.user_loader
@@ -931,6 +974,16 @@ def login_required(view_func):
         if not logged_in_owner():
             log_security("UNAUTHORISED_ACCESS", f"path={request.path}")
             return redirect(url_for("owner_login"))
+        return view_func(*args, **kwargs)
+    return wrapper
+
+
+def superadmin_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        owner = logged_in_owner_obj()
+        if not owner or not getattr(owner, "is_superadmin", False):
+            abort(403)
         return view_func(*args, **kwargs)
     return wrapper
 
@@ -955,8 +1008,9 @@ def _password_matches(password_hash: str, password: str) -> bool:
     except ValueError:
         return False
 
+
 # ---------------------------------------------------------------------------
-# IP-based login lockout
+# IP login lockout
 # ---------------------------------------------------------------------------
 
 _failed_logins: dict[str, list[float]] = {}
@@ -985,9 +1039,6 @@ def _clear_failed_logins(ip: str) -> None:
     with _failed_logins_lock:
         _failed_logins.pop(ip, None)
 
-# ---------------------------------------------------------------------------
-# API auth decorator
-# ---------------------------------------------------------------------------
 
 def api_login_required(view_func):
     @wraps(view_func)
@@ -998,8 +1049,9 @@ def api_login_required(view_func):
         return view_func(*args, **kwargs)
     return wrapper
 
+
 # ---------------------------------------------------------------------------
-# Cache-control helper
+# Cache control
 # ---------------------------------------------------------------------------
 
 def _no_store(response):
@@ -1009,20 +1061,8 @@ def _no_store(response):
     return response
 
 
-def _resolve_order_table_labels(order: dict, tables: list[dict]) -> dict:
-    order_copy = dict(order)
-    table_id = order_copy.get("tableId")
-    table_name = order_copy.get("tableName")
-    if table_id:
-        matched = next((t for t in tables if t["id"] == table_id), None)
-        if matched:
-            order_copy["tableName"] = matched["name"]
-        elif not table_name:
-            order_copy["tableName"] = table_id
-    return order_copy
-
 # ---------------------------------------------------------------------------
-# Order computation — scoped to owner's menu
+# Order computation
 # ---------------------------------------------------------------------------
 
 def compute_order_summary(items: list[dict], owner_menu: dict | None = None) -> dict:
@@ -1054,7 +1094,6 @@ def compute_order_summary(items: list[dict], owner_menu: dict | None = None) -> 
             abort(400, description=f"Unknown item id: {item_id!r}")
         if not menu_item.get("available", True):
             abort(400, description=f"Sorry, '{menu_item['name']}' is currently sold out.")
-        # Handle per-item modifiers
         modifiers = entry.get("modifiers", [])
         modifier_total = 0.0
         modifier_list = []
@@ -1070,18 +1109,32 @@ def compute_order_summary(items: list[dict], owner_menu: dict | None = None) -> 
         item_unit_price = menu_item["price"] + modifier_total
         item_total = item_unit_price * quantity
         total += item_total
-        summary.append(
-            {
-                "id": item_id,
-                "name": menu_item["name"],
-                "price": menu_item["price"],
-                "quantity": quantity,
-                "modifiers": modifier_list,
-                "lineTotal": round(item_total, 2),
-            }
-        )
+        summary.append({
+            "id": item_id,
+            "name": menu_item["name"],
+            "price": menu_item["price"],
+            "quantity": quantity,
+            "modifiers": modifier_list,
+            "size": str(entry.get("size", ""))[:50],
+            "extras": str(entry.get("extras", ""))[:200],
+            "notes": str(entry.get("notes", ""))[:500],
+            "lineTotal": round(item_total, 2),
+        })
 
     return {"items": summary, "total": round(total, 2)}
+
+
+def _resolve_order_table_labels(order: dict, tables: list[dict]) -> dict:
+    order_copy = dict(order)
+    table_id = order_copy.get("tableId")
+    table_name = order_copy.get("tableName")
+    if table_id:
+        matched = next((t for t in tables if t["id"] == table_id), None)
+        if matched:
+            order_copy["tableName"] = matched["name"]
+        elif not table_name:
+            order_copy["tableName"] = table_id
+    return order_copy
 
 
 def _mail_enabled() -> bool:
@@ -1097,6 +1150,7 @@ def _send_order_confirmation(order: dict) -> None:
             f"- {item.get('name')} x{item.get('quantity', 1)}: ₹{float(item.get('lineTotal', 0)):.2f}"
             for item in order.get("items", [])
         )
+        pickup_code = order.get("pickupCode", "")
         message = Message(
             subject=f"Order #{order.get('id')} confirmation",
             recipients=[recipient],
@@ -1104,6 +1158,7 @@ def _send_order_confirmation(order: dict) -> None:
                 f"Thanks for your order, {order.get('customerName', 'Guest')}.\n\n"
                 f"{item_lines}\n\n"
                 f"Total: ₹{float(order.get('total') or 0):.2f}\n"
+                f"Pickup Code: {pickup_code}\n"
                 f"Status: {order.get('status', 'pending')}\n"
             ),
         )
@@ -1112,46 +1167,16 @@ def _send_order_confirmation(order: dict) -> None:
         app.logger.warning("Order confirmation email failed: %s", exc)
 
 
-def _stripe_enabled() -> bool:
-    return stripe is not None and bool(os.environ.get("STRIPE_SECRET_KEY"))
-
-
-def _create_stripe_checkout_session(order: dict, table_id: str | None):
-    if not _stripe_enabled():
-        return None
-    success_url = url_for("table_order", table_id=table_id, _external=True) if table_id else url_for("home", _external=True)
-    cancel_url = success_url
-    return stripe.checkout.Session.create(
-        mode="payment",
-        payment_method_types=["card"],
-        customer_email=order.get("customerEmail") or None,
-        line_items=[
-            {
-                "price_data": {
-                    "currency": os.environ.get("STRIPE_CURRENCY", "inr").lower(),
-                    "product_data": {"name": f"Cafe order #{order['id']}"},
-                    "unit_amount": max(int(round(float(order.get("total") or 0) * 100)), 50),
-                },
-                "quantity": 1,
-            }
-        ],
-        metadata={"order_id": str(order["id"])},
-        payment_intent_data={"metadata": {"order_id": str(order["id"])}},
-        success_url=f"{success_url}?order={order['id']}&payment=success",
-        cancel_url=f"{cancel_url}?order={order['id']}&payment=cancelled",
-    )
-
 # ---------------------------------------------------------------------------
-# SSE — server-sent events for live order updates (owner + customer)
+# SSE
 # ---------------------------------------------------------------------------
 
-_sse_subscribers: dict[int, list] = {}          # owner_id → [queue, ...]
-_sse_customer_subs: dict[int, list] = {}        # order_id → [queue, ...]
+_sse_subscribers: dict[int, list] = {}
+_sse_customer_subs: dict[int, list] = {}
 _sse_lock = threading.Lock()
 
 
 def _notify_owner(owner_id: int, event_type: str, data: dict) -> None:
-    """Push an SSE event to all connected dashboards for this owner."""
     payload = json.dumps({"type": event_type, "data": data})
     with _sse_lock:
         queues = _sse_subscribers.get(owner_id, [])
@@ -1166,7 +1191,6 @@ def _notify_owner(owner_id: int, event_type: str, data: dict) -> None:
 
 
 def _notify_order_status(order_id: int, status: str) -> None:
-    """Push a status update to customer SSE streams watching this order."""
     payload = json.dumps({"status": status, "id": order_id})
     with _sse_lock:
         queues = _sse_customer_subs.get(order_id, [])
@@ -1179,127 +1203,6 @@ def _notify_order_status(order_id: int, status: str) -> None:
         for q in dead:
             queues.remove(q)
 
-# ---------------------------------------------------------------------------
-# Menu AI extraction
-# ---------------------------------------------------------------------------
-
-def _extract_menu_from_pdf_bytes(pdf_bytes: bytes) -> dict | None:
-    """Extract menu text from a PDF using pypdf (pure Python, no binary deps)."""
-    try:
-        import pypdf  # type: ignore
-        reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
-        all_text = ""
-        for page in reader.pages:
-            all_text += (page.extract_text() or "") + "\n"
-        text = all_text.strip()
-        if not text:
-            return None
-        return _parse_menu_text(text)
-    except ImportError:
-        app.logger.warning("pypdf not available for PDF menu extraction")
-        return None
-    except Exception as exc:
-        app.logger.warning("pypdf extraction failed: %s", exc)
-        return None
-
-
-def _extract_menu_with_gemini(img_bytes: bytes) -> dict | None:
-    """Use Google Gemini Vision API to extract a structured menu from an image."""
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        return None
-    try:
-        import google.generativeai as genai  # type: ignore
-        from PIL import Image as PILImage
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        img = PILImage.open(io.BytesIO(img_bytes))
-        prompt = (
-            "You are a restaurant menu digitiser. Extract every menu item visible in this image. "
-            "Return ONLY valid JSON — no markdown, no code fences — in this exact format: "
-            "{\"categories\": [{\"name\": \"Category Name\", \"items\": "
-            "[{\"name\": \"Item Name\", \"price\": 150.0, \"description\": \"\", \"tags\": []}]}]}. "
-            "If no price is visible, use 0. Group items under sensible category names. "
-            "Output only the JSON object."
-        )
-        response = model.generate_content([prompt, img])
-        text = response.text.strip()
-        # Strip any accidental markdown code fences
-        text = re.sub(r"^```[a-z]*\s*", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*```$", "", text)
-        return json.loads(text.strip())
-    except ImportError:
-        app.logger.warning("google-generativeai package not installed")
-        return None
-    except Exception as exc:
-        app.logger.warning("Gemini extraction failed: %s", exc)
-        return None
-
-
-def _extract_menu_from_image_bytes(img_bytes: bytes, mime_type: str) -> dict | None:
-    """Extract menu structure from image bytes.
-
-    Priority:
-    1. pytesseract OCR (if installed locally)
-    2. Google Gemini Vision API (if GEMINI_API_KEY env var is set)
-    Returns a dict with 'categories' on success, else None.
-    """
-    # 1. Try local pytesseract
-    try:
-        import pytesseract  # type: ignore
-        from PIL import Image
-        img = Image.open(io.BytesIO(img_bytes))
-        text = pytesseract.image_to_string(img)
-        if text.strip():
-            return _parse_menu_text(text)
-    except ImportError:
-        pass
-    except Exception as exc:
-        app.logger.debug("pytesseract failed: %s", exc)
-
-    # 2. Try Gemini Vision
-    result = _extract_menu_with_gemini(img_bytes)
-    if result is not None:
-        return result
-
-    return None
-
-
-def _parse_menu_text(text: str) -> dict:
-    """Parse raw OCR text into a basic menu structure."""
-    categories = []
-    current_cat = None
-
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-
-        # Detect price pattern (e.g. "Espresso  ₹120" or "Latte - 150")
-        price_match = re.search(r'[₹$£€]?\s*(\d{1,5}(?:\.\d{1,2})?)\s*$', line)
-        if price_match and current_cat is not None:
-            price_str = price_match.group(1)
-            item_name = line[:price_match.start()].strip().rstrip('-–—:').strip()
-            if item_name and 2 <= len(item_name) <= 100:
-                try:
-                    price = float(price_str)
-                    current_cat["items"].append({
-                        "name": item_name,
-                        "price": price,
-                        "description": "",
-                        "tags": [],
-                    })
-                except ValueError:
-                    pass
-        elif len(line) <= 50 and not any(c.isdigit() for c in line[:5]):
-            # Looks like a category heading
-            current_cat = {"name": line.title(), "items": []}
-            categories.append(current_cat)
-
-    if not categories:
-        categories = [{"name": "Imported Items", "items": []}]
-
-    return {"categories": [c for c in categories if c["items"]]}
 
 # ---------------------------------------------------------------------------
 # Error handlers
@@ -1312,6 +1215,16 @@ def _wants_json() -> bool:
         return True
     best = request.accept_mimetypes.best_match(["application/json", "text/html"])
     return best == "application/json"
+
+
+def _safe_redirect_target(target: str | None, fallback: str) -> str:
+    if not target:
+        return fallback
+    host_url = urlparse(request.host_url)
+    test_url = urlparse(urljoin(request.host_url, target))
+    if test_url.scheme in {"http", "https"} and test_url.netloc == host_url.netloc:
+        return target
+    return fallback
 
 
 @app.errorhandler(400)
@@ -1338,23 +1251,16 @@ def err_not_found(e):
 @app.errorhandler(CSRFError)
 def err_csrf(e):
     log_security("CSRF_VIOLATION", f"path={request.path}")
-    flash("Your session has expired or the request was invalid. Please try again.")
-    return redirect(request.referrer or url_for("home")), 302
+    flash("Your session has expired. Please try again.")
+    return redirect(_safe_redirect_target(request.referrer, url_for("home"))), 302
 
 
 @app.errorhandler(429)
 def err_rate_limit(e):
     log_security("RATE_LIMIT_HIT", f"path={request.path}")
     if _wants_json():
-        return jsonify(description="Too many requests. Please slow down."), 429
+        return jsonify(description="Too many requests."), 429
     return render_template("errors/429.html"), 429
-
-
-@app.errorhandler(413)
-def err_payload_too_large(e):
-    if _wants_json():
-        return jsonify(description="Request payload too large (max 16 MB)."), 413
-    return render_template("errors/400.html"), 413
 
 
 @app.errorhandler(500)
@@ -1364,15 +1270,35 @@ def err_server(e):
         return jsonify(description="An internal error occurred."), 500
     return render_template("errors/500.html"), 500
 
+
 # ---------------------------------------------------------------------------
-# Health check (Railway / Render / any load-balancer)
+# Health check
 # ---------------------------------------------------------------------------
 
 @app.route("/health")
 @limiter.exempt
 def health_check():
-    """Simple liveness probe — returns 200 so Railway knows the app is up."""
-    return {"status": "ok", "service": "cafe-ordering"}, 200
+    return jsonify(status="ok", service="cafe-ordering-saas"), 200
+
+
+@app.route("/ready")
+@limiter.exempt
+def readiness_check():
+    if not _initialize_runtime_state(force=True):
+        return jsonify(status="degraded",
+                       service="cafe-ordering-saas",
+                       db="error",
+                       db_error=_DB_INIT_ERROR), 503
+    db_status = "ok"
+    try:
+        db.session.execute(text("SELECT 1"))
+    except Exception as exc:
+        app.logger.warning("Readiness database probe failed: %s", exc)
+        db_status = "error"
+    status_code = 200 if db_status == "ok" else 503
+    return jsonify(status="ok" if db_status == "ok" else "degraded",
+                   service="cafe-ordering-saas",
+                   db=db_status), status_code
 
 
 # ---------------------------------------------------------------------------
@@ -1383,17 +1309,13 @@ def health_check():
 def home() -> str:
     owner_id = logged_in_owner_id()
     owner_cafe = ""
-    google_place_id = ""
     if owner_id:
-        owners = load_owners()
-        owner = next((o for o in owners if o["id"] == owner_id), None)
+        owner = db.session.get(Owner, owner_id)
         if owner:
-            owner_cafe = owner.get("cafeName", "")
-            google_place_id = owner.get("googlePlaceId", "")
+            owner_cafe = owner.cafe_name or ""
     return render_template("index.html",
                            owner_username=logged_in_owner(),
-                           owner_cafe=owner_cafe,
-                           google_place_id=google_place_id)
+                           owner_cafe=owner_cafe)
 
 
 @app.route("/table/<table_id>")
@@ -1405,26 +1327,35 @@ def table_order(table_id: str) -> str:
     table = next((t for t in tables if t["id"] == table_id), None)
     if not table:
         abort(404, description="Table not found.")
-    # Get owner info for branding
     owner_id = table.get("ownerId")
-    owners = load_owners()
-    owner = next((o for o in owners if o["id"] == owner_id), None)
-    cafe_name = (owner or {}).get("cafeName", "") or "Cafe 11:11"
-    google_place_id = (owner or {}).get("googlePlaceId", "")
+    owner = db.session.get(Owner, owner_id) if owner_id else None
+    cafe_name = (owner.cafe_name if owner else None) or "Cafe 11:11"
     branding = load_settings(owner_id)
     return render_template("table_order.html", table=table,
                            cafe_name=cafe_name,
-                           google_place_id=google_place_id,
+                           google_place_id="",
                            branding=branding,
-                           stripe_publishable_key=os.environ.get("STRIPE_PUBLISHABLE_KEY", ""))
+                           stripe_publishable_key="")
+
 
 # ---------------------------------------------------------------------------
-# Auth routes — login
+# Auth routes
 # ---------------------------------------------------------------------------
 
 @app.before_request
+def _ensure_runtime_ready():
+    if request.endpoint in {"health_check", "readiness_check", "static"}:
+        return None
+    if _initialize_runtime_state():
+        return None
+    message = "Service is starting. Database is not ready yet."
+    if _wants_json():
+        return jsonify(status="starting", description=message, db_error=_DB_INIT_ERROR), 503
+    return message, 503
+
+
+@app.before_request
 def _auto_login_from_token() -> None:
-    """If there is no active session but a valid remember-me cookie exists, restore the session."""
     if logged_in_owner():
         return
     raw = request.cookies.get(_REMEMBER_COOKIE)
@@ -1454,7 +1385,6 @@ def owner_login() -> str | Response:
 
     if request.method == "POST":
         if _is_ip_locked_out(ip):
-            log_security("LOGIN_LOCKOUT_BLOCKED", f"ip={ip!r}")
             flash("Too many failed attempts. Please try again in 15 minutes.")
             return _no_store(app.make_response(render_template("owner_login.html")))
 
@@ -1462,57 +1392,76 @@ def owner_login() -> str | Response:
         password = str(request.form.get("password", ""))[:256]
         remember_me = request.form.get("remember_me") == "on"
 
-        owners = load_owners()
-        owner = next(
-            (
-                o for o in owners
-                if o["username"] == identifier
-                or (o.get("email") or "").lower() == identifier.lower()
-            ),
-            None,
-        )
+        owner = Owner.query.filter(
+            (Owner.username == identifier) | (Owner.email == identifier)
+        ).first()
 
-        if owner and not owner.get("isActive", True):
-            log_security("LOGIN_BLOCKED_INACTIVE", f"user={owner['username']!r} ip={ip!r}")
-            flash("This account has been suspended. Please contact support.")
+        if owner and not owner.is_active:
+            flash("This account has been suspended.")
             return _no_store(app.make_response(render_template("owner_login.html")))
 
-        if owner and _password_matches(owner["passwordHash"], password):
+        if owner and _password_matches(owner.password_hash, password):
             _clear_failed_logins(ip)
-            session.clear()
-            session["owner_username"] = owner["username"]
-            session["owner_id"] = owner["id"]
-            session.permanent = True  # always keep session alive across browser restarts
-            owner_model = db.session.get(Owner, owner["id"])
-            if owner_model:
-                login_user(owner_model, remember=False)
-            log_security("LOGIN_SUCCESS", f"user={owner['username']!r} remember={remember_me}")
 
+            if owner.totp_enabled:
+                session["pending_totp_owner_id"] = owner.id
+                session["pending_totp_remember"] = remember_me
+                return redirect(url_for("owner_login_totp_verify"))
+
+            _complete_login(owner, remember_me)
+            log_security("LOGIN_SUCCESS", f"user={owner.username!r}")
             resp = redirect(url_for("owner_dashboard"))
-
             if remember_me:
-                # Issue a long-lived persistent token stored server-side
-                raw_token = create_remember_token(owner["id"])
-                resp.set_cookie(
-                    _REMEMBER_COOKIE,
-                    raw_token,
-                    max_age=int(timedelta(days=_REMEMBER_DAYS).total_seconds()),
-                    httponly=True,
-                    secure=IS_PRODUCTION,
-                    samesite="Lax",
-                    path="/",
-                )
+                raw_token = create_remember_token(owner.id)
+                resp.set_cookie(_REMEMBER_COOKIE, raw_token,
+                                max_age=int(timedelta(days=_REMEMBER_DAYS).total_seconds()),
+                                httponly=True, secure=IS_PRODUCTION, samesite="Lax", path="/")
             return resp
 
         _record_failed_login(ip)
-        log_security("LOGIN_FAILURE", f"identifier={identifier!r} ip={ip!r}")
-        flash("Sign in failed. Check your credentials and try again.")
+        log_security("LOGIN_FAILURE", f"identifier={identifier!r}")
+        flash("Sign in failed. Check your credentials.")
 
     return _no_store(app.make_response(render_template("owner_login.html")))
 
-# ---------------------------------------------------------------------------
-# Auth routes — signup
-# ---------------------------------------------------------------------------
+
+def _complete_login(owner: Owner, remember_me: bool = False) -> None:
+    session.clear()
+    session["owner_username"] = owner.username
+    session["owner_id"] = owner.id
+    session.permanent = True
+    login_user(owner, remember=False)
+
+
+@app.route("/owner/login/totp", methods=["GET", "POST"])
+def owner_login_totp_verify():
+    pending_id = session.get("pending_totp_owner_id")
+    if not pending_id:
+        return redirect(url_for("owner_login"))
+    owner = db.session.get(Owner, pending_id)
+    if not owner:
+        session.pop("pending_totp_owner_id", None)
+        return redirect(url_for("owner_login"))
+
+    if request.method == "POST":
+        code = str(request.form.get("totp_code", "")).strip()
+        totp = pyotp.TOTP(owner.totp_secret)
+        if totp.verify(code):
+            remember_me = session.pop("pending_totp_remember", False)
+            session.pop("pending_totp_owner_id", None)
+            _complete_login(owner, remember_me)
+            log_security("LOGIN_TOTP_SUCCESS", f"user={owner.username!r}")
+            resp = redirect(url_for("owner_dashboard"))
+            if remember_me:
+                raw_token = create_remember_token(owner.id)
+                resp.set_cookie(_REMEMBER_COOKIE, raw_token,
+                                max_age=int(timedelta(days=_REMEMBER_DAYS).total_seconds()),
+                                httponly=True, secure=IS_PRODUCTION, samesite="Lax", path="/")
+            return resp
+        flash("Invalid TOTP code. Please try again.")
+
+    return render_template("owner_login_otp_verify.html")
+
 
 @app.route("/owner/signup", methods=["GET", "POST"])
 @limiter.limit("10 per hour", methods=["POST"])
@@ -1531,7 +1480,7 @@ def owner_signup() -> str | Response:
             return render_template("owner_signup.html")
 
         if not re.fullmatch(r"[a-zA-Z0-9_\-\.]{3,64}", username):
-            flash("Username may only contain letters, digits, underscores, hyphens, and dots (3–64 chars).")
+            flash("Username may only contain letters, digits, underscores, hyphens, and dots (3-64 chars).")
             return render_template("owner_signup.html")
 
         if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
@@ -1539,46 +1488,21 @@ def owner_signup() -> str | Response:
             return render_template("owner_signup.html")
 
         if not _is_strong_password(password):
-            flash("Password must be at least 8 characters and contain at least one letter and one digit.")
+            flash("Password must be at least 8 characters with a letter and digit.")
             return render_template("owner_signup.html")
 
-        owners = load_owners()
-        if any(o["username"] == username for o in owners):
-            flash("That username is already taken. Please choose another.")
+        if Owner.query.filter_by(username=username).first():
+            flash("That username is already taken.")
             return render_template("owner_signup.html")
-        if email and any((o.get("email") or "").lower() == email.lower() for o in owners):
+
+        if email and Owner.query.filter(Owner.email == email).first():
             flash("An account with that email already exists.")
             return render_template("owner_signup.html")
 
         password_hash = _make_password_hash(password)
-
-        if USE_DB:
-            try:
-                new_owner = create_owner_in_db(username, email, password_hash, cafe_name)
-            except Exception as e:
-                app.logger.error("DB owner creation failed: %s", e)
-                flash("Could not create account. Please try again.")
-                return render_template("owner_signup.html")
-        else:
-            new_owner = {
-                "id": next_id(owners),
-                "username": username,
-                "email": email,
-                "cafeName": cafe_name,
-                "googlePlaceId": "",
-                "passwordHash": password_hash,
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-            }
-            owners.append(new_owner)
-            save_owners(owners)
-
-        session.clear()
-        session["owner_username"] = new_owner["username"]
-        session["owner_id"] = new_owner["id"]
-        session.permanent = True
+        new_owner = create_owner_in_db(username, email, password_hash, cafe_name)
         owner_model = db.session.get(Owner, new_owner["id"])
-        if owner_model:
-            login_user(owner_model, remember=False)
+        _complete_login(owner_model)
         log_security("SIGNUP_SUCCESS", f"user={username!r}")
         return redirect(url_for("owner_dashboard"))
 
@@ -1589,30 +1513,81 @@ def owner_signup() -> str | Response:
 def owner_logout() -> Response:
     username = logged_in_owner()
     logout_user()
-    session.clear()
-    if username:
-        log_security("LOGOUT", f"user={username!r}")
-    resp = redirect(url_for("home"))
-    # Revoke the remember-me token and clear the cookie
     raw_token = request.cookies.get(_REMEMBER_COOKIE)
     if raw_token:
         try:
             revoke_remember_token(raw_token)
         except Exception:
             pass
-        resp.delete_cookie(_REMEMBER_COOKIE, path="/")
+    session.clear()
+    if username:
+        log_security("LOGOUT", f"user={username!r}")
+    resp = redirect(url_for("home"))
+    resp.delete_cookie(_REMEMBER_COOKIE, path="/")
     return resp
 
+
 # ---------------------------------------------------------------------------
-# Profile management
+# TOTP 2FA setup
+# ---------------------------------------------------------------------------
+
+@app.route("/owner/2fa/setup", methods=["GET", "POST"])
+@login_required
+def totp_setup():
+    owner = logged_in_owner_obj()
+    if not owner:
+        return redirect(url_for("owner_logout"))
+
+    if request.method == "POST":
+        code = str(request.form.get("totp_code", "")).strip()
+        pending_secret = session.get("pending_totp_secret")
+        if not pending_secret:
+            flash("Session expired. Please start 2FA setup again.")
+            return redirect(url_for("totp_setup"))
+        totp = pyotp.TOTP(pending_secret)
+        if totp.verify(code):
+            owner.totp_secret = pending_secret
+            owner.totp_enabled = True
+            db.session.commit()
+            session.pop("pending_totp_secret", None)
+            flash("Two-factor authentication enabled successfully.")
+            return redirect(url_for("owner_profile"))
+        flash("Invalid code. Please try again.")
+
+    secret = session.get("pending_totp_secret") or pyotp.random_base32()
+    session["pending_totp_secret"] = secret
+    totp = pyotp.TOTP(secret)
+    otp_uri = totp.provisioning_uri(name=owner.username, issuer_name="CafePortal")
+    qr_img = qrcode.make(otp_uri)
+    buf = io.BytesIO()
+    qr_img.save(buf, format="PNG")
+    buf.seek(0)
+    qr_b64 = base64.b64encode(buf.read()).decode()
+    return render_template("owner_2fa_setup.html", secret=secret, qr_b64=qr_b64)
+
+
+@app.route("/owner/2fa/disable", methods=["POST"])
+@login_required
+def totp_disable():
+    owner = logged_in_owner_obj()
+    if not owner:
+        return redirect(url_for("owner_logout"))
+    owner.totp_enabled = False
+    owner.totp_secret = None
+    db.session.commit()
+    flash("Two-factor authentication disabled.")
+    return redirect(url_for("owner_profile"))
+
+
+# ---------------------------------------------------------------------------
+# Profile
 # ---------------------------------------------------------------------------
 
 @app.route("/owner/profile", methods=["GET", "POST"])
 @login_required
 def owner_profile() -> str | Response:
     owner_id = logged_in_owner_id()
-    owners = load_owners()
-    owner = next((o for o in owners if o["id"] == owner_id), None)
+    owner = db.session.get(Owner, owner_id)
     if not owner:
         return redirect(url_for("owner_logout"))
 
@@ -1622,7 +1597,7 @@ def owner_profile() -> str | Response:
         if action == "profile":
             cafe_name = str(request.form.get("cafe_name", "")).strip()[:200]
             email = str(request.form.get("email", "")).strip()[:254] or None
-            google_place_id = str(request.form.get("google_place_id", "")).strip()[:300]
+            phone = str(request.form.get("phone", "")).strip()[:30]
             logo_url = str(request.form.get("logo_url", "")).strip()[:500]
             brand_color = str(request.form.get("brand_color", "#4f46e5")).strip()[:7]
 
@@ -1630,27 +1605,23 @@ def owner_profile() -> str | Response:
                 flash("Please enter a valid email address.")
                 return redirect(url_for("owner_profile"))
 
-            # Check email uniqueness (excluding self)
-            if email and any(
-                (o.get("email") or "").lower() == email.lower() and o["id"] != owner_id
-                for o in owners
-            ):
+            if email and Owner.query.filter(Owner.email == email, Owner.id != owner_id).first():
                 flash("That email is already used by another account.")
                 return redirect(url_for("owner_profile"))
 
-            owner["cafeName"] = cafe_name
-            owner["email"] = email
-            owner["googlePlaceId"] = google_place_id
-            save_owners(owners)
+            owner.cafe_name = cafe_name
+            owner.email = email
+            owner.phone = phone
+            db.session.commit()
             save_settings(owner_id, logo_url, brand_color)
-            flash("Profile updated successfully.")
+            flash("Profile updated.")
 
         elif action == "password":
             current_pw = str(request.form.get("current_password", ""))[:256]
             new_pw = str(request.form.get("new_password", ""))[:256]
             confirm_pw = str(request.form.get("confirm_password", ""))[:256]
 
-            if not _password_matches(owner["passwordHash"], current_pw):
+            if not _password_matches(owner.password_hash, current_pw):
                 flash("Current password is incorrect.")
                 return redirect(url_for("owner_profile"))
 
@@ -1662,25 +1633,23 @@ def owner_profile() -> str | Response:
                 flash("Password must be at least 8 characters with a letter and digit.")
                 return redirect(url_for("owner_profile"))
 
-            owner["passwordHash"] = _make_password_hash(new_pw)
-            save_owners(owners)
-            # Revoke all persistent tokens — force relogin on all devices after password change
-            try:
-                revoke_all_tokens_for_owner(owner_id)
-            except Exception:
-                pass
+            owner.password_hash = _make_password_hash(new_pw)
+            db.session.commit()
+            revoke_all_tokens_for_owner(owner_id)
             session.clear()
-            flash("Password changed successfully. Please sign in again.")
+            flash("Password changed. Please sign in again.")
+            return redirect(url_for("owner_login"))
 
         return redirect(url_for("owner_profile"))
 
     resp = app.make_response(render_template(
         "owner_profile.html",
-        owner=owner,
+        owner=_owner_dict(owner),
         owner_username=logged_in_owner(),
         branding=load_settings(owner_id),
     ))
     return _no_store(resp)
+
 
 # ---------------------------------------------------------------------------
 # Dashboard
@@ -1702,21 +1671,21 @@ def owner_dashboard() -> Response:
     total_items = sum(len(cat.get("items", [])) for cat in menu.get("categories", []))
     total_revenue = round(sum(float(o.get("total") or 0) for o in completed_orders), 2)
 
-    # Load owner info
-    owners = load_owners()
-    owner = next((o for o in owners if o["id"] == owner_id), {})
+    owner = db.session.get(Owner, owner_id)
 
-    # Recent feedback
     all_feedback = load_feedback()
     owner_feedback = [f for f in all_feedback if f.get("ownerId") == owner_id]
     avg_rating = 0.0
     if owner_feedback:
         avg_rating = round(sum(f["rating"] for f in owner_feedback) / len(owner_feedback), 1)
 
+    ingredients = Ingredient.query.filter_by(owner_id=owner_id).all()
+    low_stock = [i for i in ingredients if float(i.stock or 0) <= float(i.low_stock_threshold or 5)]
+
     resp = app.make_response(render_template(
         "owner_dashboard.html",
         owner_username=logged_in_owner(),
-        owner=owner,
+        owner=_owner_dict(owner) if owner else {},
         tables=tables,
         menu=menu,
         menu_json=json.dumps(menu, indent=2),
@@ -1727,18 +1696,318 @@ def owner_dashboard() -> Response:
         owner_feedback=owner_feedback[:10],
         avg_rating=avg_rating,
         total_feedback=len(owner_feedback),
+        low_stock_alerts=low_stock,
     ))
     return _no_store(resp)
 
+
 # ---------------------------------------------------------------------------
-# SSE — live order stream for the dashboard
+# Kitchen view
+# ---------------------------------------------------------------------------
+
+@app.route("/kitchen")
+@login_required
+def kitchen_view():
+    owner_id = logged_in_owner_id()
+    all_tables = load_tables()
+    tables = {t["id"]: t["name"] for t in all_tables if t.get("ownerId") == owner_id}
+    active_statuses = {"pending", "confirmed", "preparing", "ready"}
+    orders = Order.query.filter(
+        Order.owner_id == owner_id,
+        Order.status.in_(active_statuses)
+    ).order_by(Order.created_at.asc()).all()
+    orders_dicts = []
+    for o in orders:
+        od = _order_dict(o)
+        od["tableName"] = tables.get(o.table_id, o.table_name or o.table_id or "—")
+        orders_dicts.append(od)
+    return render_template("kitchen.html",
+                           orders=orders_dicts,
+                           owner_username=logged_in_owner())
+
+
+# ---------------------------------------------------------------------------
+# Reorder — past orders by phone
+# ---------------------------------------------------------------------------
+
+@app.route("/owner/reorder")
+@login_required
+def reorder_view():
+    owner_id = logged_in_owner_id()
+    phone = request.args.get("phone", "").strip()[:30]
+    past_orders = []
+    if phone:
+        past_orders = Order.query.filter_by(owner_id=owner_id, customer_phone=phone).order_by(Order.created_at.desc()).limit(20).all()
+    return render_template("reorder.html",
+                           phone=phone,
+                           past_orders=[_order_dict(o) for o in past_orders],
+                           owner_username=logged_in_owner())
+
+
+@app.route("/api/reorder/<int:order_id>", methods=["POST"])
+@api_login_required
+@csrf.exempt
+def reorder_api(order_id: int):
+    owner_id = logged_in_owner_id()
+    original = db.session.get(Order, order_id)
+    if not original or original.owner_id != owner_id:
+        abort(404)
+    new_order_data = {
+        "ownerId": owner_id,
+        "cafeId": original.cafe_id,
+        "tableId": original.table_id,
+        "tableName": original.table_name,
+        "customerName": original.customer_name,
+        "customerEmail": original.customer_email,
+        "customerPhone": original.customer_phone,
+        "items": original.items,
+        "modifiers": original.modifiers or {},
+        "subtotal": float(original.subtotal or 0),
+        "tip": 0,
+        "total": float(original.subtotal or 0),
+        "status": "pending",
+        "origin": "reorder",
+        "notes": "",
+    }
+    new_record = place_order_in_db(new_order_data)
+    if owner_id:
+        _notify_owner(owner_id, "new_order", {"id": new_record["id"], "customerName": new_record["customerName"], "total": new_record["total"], "status": "pending"})
+    return jsonify(order=new_record), 201
+
+
+# ---------------------------------------------------------------------------
+# Inventory management
+# ---------------------------------------------------------------------------
+
+@app.route("/owner/inventory")
+@login_required
+def inventory_view():
+    owner_id = logged_in_owner_id()
+    ingredients = Ingredient.query.filter_by(owner_id=owner_id).order_by(Ingredient.name).all()
+    all_menu = load_menu()
+    menu_items = [
+        item
+        for cat in all_menu.get("categories", [])
+        if cat.get("ownerId") == owner_id
+        for item in cat.get("items", [])
+    ]
+    return render_template("inventory.html",
+                           ingredients=ingredients,
+                           menu_items=menu_items,
+                           owner_username=logged_in_owner())
+
+
+@app.route("/owner/inventory/add", methods=["POST"])
+@login_required
+def add_ingredient():
+    owner_id = logged_in_owner_id()
+    name = str(request.form.get("name", "")).strip()[:200]
+    unit = str(request.form.get("unit", "unit")).strip()[:50]
+    menu_item_id = str(request.form.get("menu_item_id", "")).strip()[:100] or None
+    qty_per_order = str(request.form.get("qty_per_order", "1")).strip()
+    low_stock_threshold = str(request.form.get("low_stock_threshold", "5")).strip()
+    stock = str(request.form.get("stock", "0")).strip()
+
+    if not name:
+        flash("Ingredient name is required.")
+        return redirect(url_for("inventory_view"))
+    try:
+        qty_per_order_f = float(qty_per_order)
+        low_stock_f = float(low_stock_threshold)
+        stock_f = float(stock)
+    except ValueError:
+        flash("Invalid numeric value.")
+        return redirect(url_for("inventory_view"))
+
+    owner = db.session.get(Owner, owner_id)
+    ing = Ingredient(
+        owner_id=owner_id,
+        cafe_id=owner.cafe_id if owner else None,
+        name=name,
+        unit=unit,
+        stock=stock_f,
+        low_stock_threshold=low_stock_f,
+        menu_item_id=menu_item_id,
+        qty_per_order=qty_per_order_f,
+    )
+    db.session.add(ing)
+    db.session.commit()
+    flash(f"Ingredient '{name}' added.")
+    return redirect(url_for("inventory_view"))
+
+
+@app.route("/owner/inventory/<int:ing_id>/update", methods=["POST"])
+@login_required
+def update_ingredient(ing_id: int):
+    owner_id = logged_in_owner_id()
+    ing = db.session.get(Ingredient, ing_id)
+    if not ing or ing.owner_id != owner_id:
+        abort(403)
+    try:
+        ing.stock = float(request.form.get("stock", ing.stock))
+        ing.low_stock_threshold = float(request.form.get("low_stock_threshold", ing.low_stock_threshold))
+    except ValueError:
+        flash("Invalid value.")
+        return redirect(url_for("inventory_view"))
+    db.session.commit()
+    flash("Ingredient updated.")
+    return redirect(url_for("inventory_view"))
+
+
+@app.route("/owner/inventory/<int:ing_id>/delete", methods=["POST"])
+@login_required
+def delete_ingredient(ing_id: int):
+    owner_id = logged_in_owner_id()
+    ing = db.session.get(Ingredient, ing_id)
+    if not ing or ing.owner_id != owner_id:
+        abort(403)
+    db.session.delete(ing)
+    db.session.commit()
+    flash("Ingredient deleted.")
+    return redirect(url_for("inventory_view"))
+
+
+# ---------------------------------------------------------------------------
+# CSV Export
+# ---------------------------------------------------------------------------
+
+@app.route("/owner/export/orders")
+@login_required
+def export_orders_csv():
+    owner_id = logged_in_owner_id()
+    date_from = request.args.get("date_from", "")
+    date_to = request.args.get("date_to", "")
+
+    query = Order.query.filter_by(owner_id=owner_id)
+    if date_from:
+        try:
+            dt_from = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+            query = query.filter(Order.created_at >= dt_from)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            dt_to = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc)
+            query = query.filter(Order.created_at <= dt_to)
+        except ValueError:
+            pass
+
+    orders = query.order_by(Order.created_at.asc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "id", "status", "pickup_code", "table_name", "customer_name",
+        "customer_email", "customer_phone", "subtotal", "tip", "total",
+        "items_count", "origin", "created_at"
+    ])
+    for o in orders:
+        writer.writerow([
+            o.id, o.status, o.pickup_code or "",
+            o.table_name or "", o.customer_name or "Guest",
+            o.customer_email or "", o.customer_phone or "",
+            float(o.subtotal or 0), float(o.tip or 0), float(o.total or 0),
+            len(o.items) if isinstance(o.items, list) else 0,
+            o.origin or "", _iso(o.created_at),
+        ])
+
+    output.seek(0)
+    filename = f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# PDF Daily Report
+# ---------------------------------------------------------------------------
+
+@app.route("/owner/report/daily")
+@login_required
+def daily_report_pdf():
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    owner_id = logged_in_owner_id()
+    date_str = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
+    try:
+        report_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        report_date = datetime.now(timezone.utc)
+
+    day_start = report_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = report_date.replace(hour=23, minute=59, second=59)
+
+    orders = Order.query.filter(
+        Order.owner_id == owner_id,
+        Order.created_at >= day_start,
+        Order.created_at <= day_end,
+    ).order_by(Order.created_at.asc()).all()
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    owner = db.session.get(Owner, owner_id)
+    cafe_name = (owner.cafe_name if owner else None) or "Cafe"
+    elements.append(Paragraph(f"{cafe_name} — Daily Report", styles["Title"]))
+    elements.append(Paragraph(f"Date: {date_str}", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    total_revenue = sum(float(o.total or 0) for o in orders if o.status == "completed")
+    elements.append(Paragraph(f"Total Orders: {len(orders)}", styles["Normal"]))
+    elements.append(Paragraph(f"Completed Orders: {sum(1 for o in orders if o.status == 'completed')}", styles["Normal"]))
+    elements.append(Paragraph(f"Total Revenue: ₹{total_revenue:.2f}", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    table_data = [["ID", "Table", "Customer", "Items", "Total", "Status", "Pickup Code"]]
+    for o in orders:
+        items_count = len(o.items) if isinstance(o.items, list) else 0
+        table_data.append([
+            str(o.id),
+            o.table_name or "—",
+            o.customer_name or "Guest",
+            str(items_count),
+            f"₹{float(o.total or 0):.2f}",
+            o.status or "pending",
+            o.pickup_code or "—",
+        ])
+
+    if len(table_data) > 1:
+        tbl = Table(table_data, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4f46e5")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f3f4f6")]),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("PADDING", (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(tbl)
+    else:
+        elements.append(Paragraph("No orders for this date.", styles["Normal"]))
+
+    doc.build(elements)
+    buf.seek(0)
+    filename = f"daily_report_{date_str}.pdf"
+    return send_file(buf, mimetype="application/pdf",
+                     as_attachment=True, download_name=filename)
+
+
+# ---------------------------------------------------------------------------
+# SSE endpoints
 # ---------------------------------------------------------------------------
 
 @app.route("/api/orders/stream")
 @csrf.exempt
 @api_login_required
 def orders_stream():
-    """Server-Sent Events endpoint for real-time order updates."""
     owner_id = logged_in_owner_id()
 
     def generate():
@@ -1749,20 +2018,15 @@ def orders_stream():
             _sse_subscribers[owner_id].append(my_queue)
 
         try:
-            # Send initial ping
             yield "event: ping\ndata: connected\n\n"
             last_heartbeat = time.time()
             while True:
-                # Send pending events
                 while my_queue:
                     payload = my_queue.pop(0)
                     yield f"data: {payload}\n\n"
-
-                # Heartbeat every 25 seconds
                 if time.time() - last_heartbeat > 25:
                     yield "event: ping\ndata: heartbeat\n\n"
                     last_heartbeat = time.time()
-
                 time.sleep(0.5)
         except GeneratorExit:
             pass
@@ -1775,12 +2039,9 @@ def orders_stream():
     return Response(
         stream_with_context(generate()),
         mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
     )
+
 
 # ---------------------------------------------------------------------------
 # Menu management
@@ -1795,7 +2056,6 @@ def create_menu_category() -> Response:
     if not name:
         flash("Category name cannot be empty.")
         return redirect(url_for("owner_dashboard") + "#menu")
-
     menu = load_menu()
     existing_ids = {c["id"] for c in menu["categories"] if c.get("ownerId") == owner_id}
     category_id = unique_id(normalize_id(name), existing_ids)
@@ -1814,7 +2074,7 @@ def delete_menu_category(category_id: str) -> Response:
     menu = load_menu()
     category = next((c for c in menu["categories"] if c["id"] == category_id), None)
     if not category or category.get("ownerId") != owner_id:
-        abort(403, description="You do not own this category.")
+        abort(403)
     menu["categories"] = [c for c in menu["categories"] if c["id"] != category_id]
     save_menu(menu)
     flash("Category deleted.")
@@ -1831,15 +2091,13 @@ def rename_menu_category(category_id: str) -> Response:
     if not new_name:
         flash("Category name cannot be empty.")
         return redirect(url_for("owner_dashboard") + "#menu")
-
     menu = load_menu()
     category = next((c for c in menu["categories"] if c["id"] == category_id), None)
     if not category:
         flash("Category not found.")
         return redirect(url_for("owner_dashboard") + "#menu")
     if category.get("ownerId") != owner_id:
-        abort(403, description="You do not own this category.")
-
+        abort(403)
     category["name"] = new_name
     save_menu(menu)
     flash("Category renamed.")
@@ -1866,19 +2124,19 @@ def save_menu_item() -> Response:
     try:
         price = round(float(price_text), 2)
         if price < 0 or price > 99999.99:
-            raise ValueError("Price out of range")
+            raise ValueError
     except ValueError:
-        flash("Item price must be a valid positive number (up to ₹99,999.99).")
+        flash("Item price must be a valid positive number.")
         return redirect(url_for("owner_dashboard") + "#menu")
 
     tags = [t.strip()[:50] for t in tags_text.split(",") if t.strip()][:10]
     menu = load_menu()
     category = next((c for c in menu["categories"] if c["id"] == category_id), None)
     if not category:
-        flash("Selected category does not exist.")
+        flash("Category not found.")
         return redirect(url_for("owner_dashboard") + "#menu")
     if category.get("ownerId") != owner_id:
-        abort(403, description="You do not own this category.")
+        abort(403)
 
     if item_id:
         item = next((i for i in category["items"] if i["id"] == item_id), None)
@@ -1890,9 +2148,10 @@ def save_menu_item() -> Response:
     else:
         existing_item_ids = {i["id"] for i in category["items"]}
         new_item_id = unique_id(normalize_id(name), existing_item_ids)
-        category["items"].append(
-            {"id": new_item_id, "name": name, "description": description, "price": price, "tags": tags}
-        )
+        category["items"].append({
+            "id": new_item_id, "name": name, "description": description,
+            "price": price, "tags": tags, "available": True,
+        })
         flash(f"'{name}' added to menu.")
 
     save_menu(menu)
@@ -1918,11 +2177,11 @@ def delete_menu_item(item_id: str) -> Response:
     flash("Item not found or you do not have permission.")
     return redirect(url_for("owner_dashboard") + "#menu")
 
+
 @app.route("/owner/menu/item/<item_id>/toggle-availability", methods=["POST"])
 @login_required
 @limiter.limit("60 per hour")
 def toggle_menu_item_availability(item_id: str) -> Response:
-    """Flip an item's available flag (sold-out ↔ available)."""
     owner_id = logged_in_owner_id()
     if not re.fullmatch(r"[a-zA-Z0-9_\-]{1,100}", item_id):
         abort(400)
@@ -1937,191 +2196,8 @@ def toggle_menu_item_availability(item_id: str) -> Response:
             label = "available" if item["available"] else "sold out"
             flash(f"'{item['name']}' marked as {label}.")
             return redirect(url_for("owner_dashboard") + "#menu")
-    flash("Item not found or you do not have permission.")
+    flash("Item not found.")
     return redirect(url_for("owner_dashboard") + "#menu")
-
-# ---------------------------------------------------------------------------
-# Table management
-# ---------------------------------------------------------------------------
-
-@app.route("/owner/table", methods=["POST"])
-@login_required
-@limiter.limit("30 per hour")
-def create_table() -> Response:
-    owner_id = logged_in_owner_id()
-    name = str(request.form.get("tableName", "")).strip()[:100]
-    if not name:
-        flash("Table name cannot be empty.")
-        return redirect(url_for("owner_dashboard") + "#tables")
-
-    with _tables_lock:
-        tables = load_tables()
-        table_num = next_table_number(tables)
-        table_id = f"table-{table_num}"
-        table_url = url_for("table_order", table_id=table_id, _external=True)
-        tables.append(
-            {
-                "id": table_id,
-                "name": name,
-                "ownerId": owner_id,
-                "url": table_url,
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        save_tables(tables)
-    flash(f"Table '{name}' created.")
-    return redirect(url_for("owner_dashboard") + "#tables")
-
-
-@app.route("/owner/table/<table_id>/delete", methods=["POST"])
-@login_required
-def delete_table(table_id: str) -> Response:
-    owner_id = logged_in_owner_id()
-    if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
-        abort(400)
-    with _tables_lock:
-        tables = load_tables()
-        table = next((t for t in tables if t["id"] == table_id), None)
-        if not table or table.get("ownerId") != owner_id:
-            abort(403, description="You do not own this table.")
-        tables = [t for t in tables if t["id"] != table_id]
-        save_tables(tables)
-    flash("Table deleted.")
-    return redirect(url_for("owner_dashboard") + "#tables")
-
-
-@app.route("/owner/table/<table_id>/rename", methods=["POST"])
-@login_required
-def rename_table(table_id: str) -> Response:
-    owner_id = logged_in_owner_id()
-    if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
-        abort(400)
-    new_name = str(request.form.get("tableName", "")).strip()[:100]
-    if not new_name:
-        flash("Table name cannot be empty.")
-        return redirect(url_for("owner_dashboard") + "#tables")
-    with _tables_lock:
-        tables = load_tables()
-        table = next((t for t in tables if t["id"] == table_id), None)
-        if not table or table.get("ownerId") != owner_id:
-            abort(403, description="You do not own this table.")
-        table["name"] = new_name
-        save_tables(tables)
-    flash("Table renamed.")
-    return redirect(url_for("owner_dashboard") + "#tables")
-
-
-@app.route("/owner/table/<table_id>/qr")
-@login_required
-def table_qr(table_id: str) -> Response:
-    owner_id = logged_in_owner_id()
-    if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
-        abort(400)
-    tables = load_tables()
-    table = next((t for t in tables if t["id"] == table_id), None)
-    if not table or table.get("ownerId") != owner_id:
-        abort(403, description="You do not own this table.")
-    table_url = url_for("table_order", table_id=table_id, _external=True)
-    qr_img = qrcode.make(table_url)
-    buf = io.BytesIO()
-    qr_img.save(buf, format="PNG")
-    buf.seek(0)
-    return Response(buf.read(), mimetype="image/png")
-
-# ---------------------------------------------------------------------------
-# Order management
-# ---------------------------------------------------------------------------
-
-@app.route("/owner/order/<int:order_id>/status", methods=["POST"])
-@login_required
-def update_order_status(order_id: int) -> Response:
-    owner_id = logged_in_owner_id()
-    new_status = str(request.form.get("status", "")).strip()[:32]
-    allowed = {"pending", "preparing", "ready", "completed", "cancelled"}
-    if new_status not in allowed:
-        flash("Invalid status value.")
-        return redirect(url_for("owner_dashboard") + "#orders")
-
-    if USE_DB:
-        order = _db_get_order(order_id)
-        if not order:
-            flash("Order not found.")
-            return redirect(url_for("owner_dashboard") + "#orders")
-        if order.get("ownerId") != owner_id:
-            abort(403, description="You do not own this order.")
-        _db_update_order_status(order_id, new_status)
-    else:
-        with _orders_lock:
-            orders = load_orders()
-            found = False
-            for order in orders:
-                if order["id"] == order_id:
-                    if order.get("ownerId") != owner_id:
-                        abort(403, description="You do not own this order.")
-                    order["status"] = new_status
-                    found = True
-                    break
-            if not found:
-                flash("Order not found.")
-                return redirect(url_for("owner_dashboard") + "#orders")
-            save_orders(orders)
-
-    _notify_owner(owner_id, "order_updated", {"id": order_id, "status": new_status})
-    _notify_order_status(order_id, new_status)
-    return redirect(url_for("owner_dashboard") + "#orders")
-
-
-@app.route("/owner/order/<int:order_id>/complete", methods=["POST"])
-@login_required
-def complete_order(order_id: int) -> Response:
-    owner_id = logged_in_owner_id()
-    if USE_DB:
-        order = _db_get_order(order_id)
-        if not order:
-            flash("Order not found.")
-            return redirect(url_for("owner_dashboard") + "#orders")
-        if order.get("ownerId") != owner_id:
-            abort(403, description="You do not own this order.")
-        _db_update_order_status(order_id, "completed")
-    else:
-        with _orders_lock:
-            orders = load_orders()
-            found = False
-            for order in orders:
-                if order["id"] == order_id:
-                    if order.get("ownerId") != owner_id:
-                        abort(403, description="You do not own this order.")
-                    order["status"] = "completed"
-                    found = True
-                    break
-            if not found:
-                flash("Order not found.")
-                return redirect(url_for("owner_dashboard") + "#orders")
-            save_orders(orders)
-    _notify_owner(owner_id, "order_updated", {"id": order_id, "status": "completed"})
-    _notify_order_status(order_id, "completed")
-    return redirect(url_for("owner_dashboard") + "#orders")
-
-
-@app.route("/owner/order/<int:order_id>/delete", methods=["POST"])
-@login_required
-def delete_order(order_id: int) -> Response:
-    owner_id = logged_in_owner_id()
-    if USE_DB:
-        order = _db_get_order(order_id)
-        if not order or order.get("ownerId") != owner_id:
-            abort(403, description="You do not own this order.")
-        _db_delete_order(order_id)
-    else:
-        with _orders_lock:
-            orders = load_orders()
-            order = next((o for o in orders if o["id"] == order_id), None)
-            if not order or order.get("ownerId") != owner_id:
-                abort(403, description="You do not own this order.")
-            orders = [o for o in orders if o["id"] != order_id]
-            save_orders(orders)
-    flash("Order deleted.")
-    return redirect(url_for("owner_dashboard") + "#orders")
 
 
 @app.route("/owner/menu/download")
@@ -2141,10 +2217,8 @@ def download_menu() -> Response:
 @login_required
 @limiter.limit("10 per hour")
 def update_menu() -> Response:
-    """Import a menu from pasted JSON, uploaded menu.json, or JPG/PNG."""
     owner_id = logged_in_owner_id()
     raw_json: str | None = None
-    imported_from_image = False
 
     uploaded_file = request.files.get("menu_file")
     if uploaded_file and uploaded_file.filename:
@@ -2153,46 +2227,31 @@ def update_menu() -> Response:
         if upload_error:
             flash(upload_error)
             return redirect(url_for("owner_dashboard") + "#menu")
-
-        if upload_kind == "image":
-            imported_from_image = True
-            mime_type = mimetypes.guess_type(uploaded_file.filename or "")[0] or "image/jpeg"
-            extracted_menu = _extract_menu_from_image_bytes(file_bytes, mime_type)
-            if not extracted_menu:
-                has_gemini_key = bool(os.environ.get("GEMINI_API_KEY"))
-                if has_gemini_key:
-                    tip = "Gemini API is configured but extraction failed. Try a clearer, well-lit photo."
-                else:
-                    tip = (
-                        "To enable AI image extraction, add a GEMINI_API_KEY environment variable. "
-                        "Until then, paste your menu as JSON or upload a .json file."
-                    )
-                flash(f"Could not extract menu from image. {tip}")
-                return redirect(url_for("owner_dashboard") + "#menu")
-            imported = extracted_menu
-        else:
+        if upload_kind == "json":
             try:
                 raw_json = file_bytes.decode("utf-8")
             except Exception:
-                flash("Could not read the uploaded file. Please upload a valid UTF-8 JSON file.")
+                flash("Could not read the uploaded file.")
                 return redirect(url_for("owner_dashboard") + "#menu")
+        else:
+            flash("Only JSON menu files can be imported.")
+            return redirect(url_for("owner_dashboard") + "#menu")
     else:
         raw_json = request.form.get("menu_data", "").strip()
 
-    if not imported_from_image:
-        if not raw_json:
-            flash("No menu data provided.")
-            return redirect(url_for("owner_dashboard") + "#menu")
+    if not raw_json:
+        flash("No menu data provided.")
+        return redirect(url_for("owner_dashboard") + "#menu")
 
-        try:
-            imported = json.loads(raw_json)
-        except json.JSONDecodeError:
-            flash("Invalid JSON — please check the format and try again.")
-            return redirect(url_for("owner_dashboard") + "#menu")
+    try:
+        imported = json.loads(raw_json)
+    except json.JSONDecodeError:
+        flash("Invalid JSON.")
+        return redirect(url_for("owner_dashboard") + "#menu")
 
-        if not isinstance(imported, dict) or "categories" not in imported:
-            flash("JSON must be an object with a 'categories' key.")
-            return redirect(url_for("owner_dashboard") + "#menu")
+    if not isinstance(imported, dict) or "categories" not in imported:
+        flash("JSON must be an object with a 'categories' key.")
+        return redirect(url_for("owner_dashboard") + "#menu")
 
     categories = imported.get("categories", [])
     if not isinstance(categories, list):
@@ -2201,7 +2260,6 @@ def update_menu() -> Response:
 
     existing_menu = load_menu()
     other_categories = [c for c in existing_menu.get("categories", []) if c.get("ownerId") != owner_id]
-
     existing_ids: set[str] = {c.get("id", "") for c in other_categories}
     new_categories = []
     for cat in categories:
@@ -2223,24 +2281,370 @@ def update_menu() -> Response:
             item_id = unique_id(normalize_id(item_name), item_ids)
             item_ids.add(item_id)
             items.append({
-                "id": item_id,
-                "name": item_name,
+                "id": item_id, "name": item_name,
                 "description": str(item.get("description", ""))[:500],
                 "price": item_price,
                 "tags": [str(t)[:50] for t in item.get("tags", []) if isinstance(t, str)][:10],
+                "available": True,
             })
-        new_categories.append({
-            "id": cat_id,
-            "name": cat_name,
-            "ownerId": owner_id,
-            "items": items,
-        })
+        new_categories.append({"id": cat_id, "name": cat_name, "ownerId": owner_id, "items": items})
 
     existing_menu["categories"] = other_categories + new_categories
     save_menu(existing_menu)
-    method = "extracted from image" if imported_from_image else "imported"
-    flash(f"Menu {method} — {len(new_categories)} categor{'y' if len(new_categories) == 1 else 'ies'} loaded.")
+    flash(f"Menu imported — {len(new_categories)} categor{'y' if len(new_categories) == 1 else 'ies'} loaded.")
     return redirect(url_for("owner_dashboard") + "#menu")
+
+
+# ---------------------------------------------------------------------------
+# Table management
+# ---------------------------------------------------------------------------
+
+@app.route("/owner/table", methods=["POST"])
+@login_required
+@limiter.limit("30 per hour")
+def create_table() -> Response:
+    owner_id = logged_in_owner_id()
+    name = str(request.form.get("tableName", "")).strip()[:100]
+    if not name:
+        flash("Table name cannot be empty.")
+        return redirect(url_for("owner_dashboard") + "#tables")
+    with _tables_lock:
+        tables = load_tables()
+        table_num = next_table_number(tables)
+        table_id = f"table-{table_num}"
+        table_url = url_for("table_order", table_id=table_id, _external=True)
+        owner = db.session.get(Owner, owner_id)
+        tables.append({
+            "id": table_id, "name": name, "ownerId": owner_id,
+            "cafeId": owner.cafe_id if owner else None,
+            "url": table_url,
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+        })
+        save_tables(tables)
+    flash(f"Table '{name}' created.")
+    return redirect(url_for("owner_dashboard") + "#tables")
+
+
+@app.route("/owner/table/<table_id>/delete", methods=["POST"])
+@login_required
+def delete_table(table_id: str) -> Response:
+    owner_id = logged_in_owner_id()
+    if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
+        abort(400)
+    with _tables_lock:
+        tables = load_tables()
+        table = next((t for t in tables if t["id"] == table_id), None)
+        if not table or table.get("ownerId") != owner_id:
+            abort(403)
+        tables = [t for t in tables if t["id"] != table_id]
+        save_tables(tables)
+    flash("Table deleted.")
+    return redirect(url_for("owner_dashboard") + "#tables")
+
+
+@app.route("/owner/table/<table_id>/rename", methods=["POST"])
+@login_required
+def rename_table(table_id: str) -> Response:
+    owner_id = logged_in_owner_id()
+    if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
+        abort(400)
+    new_name = str(request.form.get("tableName", "")).strip()[:100]
+    if not new_name:
+        flash("Table name cannot be empty.")
+        return redirect(url_for("owner_dashboard") + "#tables")
+    with _tables_lock:
+        tables = load_tables()
+        table = next((t for t in tables if t["id"] == table_id), None)
+        if not table or table.get("ownerId") != owner_id:
+            abort(403)
+        table["name"] = new_name
+        save_tables(tables)
+    flash("Table renamed.")
+    return redirect(url_for("owner_dashboard") + "#tables")
+
+
+@app.route("/owner/table/<table_id>/qr")
+@login_required
+def table_qr(table_id: str) -> Response:
+    owner_id = logged_in_owner_id()
+    if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
+        abort(400)
+    tables = load_tables()
+    table = next((t for t in tables if t["id"] == table_id), None)
+    if not table or table.get("ownerId") != owner_id:
+        abort(403)
+    table_url = url_for("table_order", table_id=table_id, _external=True)
+    qr_img = qrcode.make(table_url)
+    buf = io.BytesIO()
+    qr_img.save(buf, format="PNG")
+    buf.seek(0)
+    return Response(buf.read(), mimetype="image/png")
+
+
+# ---------------------------------------------------------------------------
+# Order management
+# ---------------------------------------------------------------------------
+
+@app.route("/owner/order/<int:order_id>/status", methods=["POST"])
+@login_required
+def update_order_status(order_id: int) -> Response:
+    owner_id = logged_in_owner_id()
+    new_status = str(request.form.get("status", "")).strip()[:32]
+    allowed = {"pending", "confirmed", "preparing", "ready", "completed", "cancelled"}
+    if new_status not in allowed:
+        flash("Invalid status value.")
+        return redirect(url_for("owner_dashboard") + "#orders")
+    order = _db_get_order(order_id)
+    if not order:
+        flash("Order not found.")
+        return redirect(url_for("owner_dashboard") + "#orders")
+    if order.get("ownerId") != owner_id:
+        abort(403)
+    _db_update_order_status(order_id, new_status)
+    _notify_owner(owner_id, "order_updated", {"id": order_id, "status": new_status})
+    _notify_order_status(order_id, new_status)
+    return redirect(_safe_redirect_target(request.referrer, url_for("owner_dashboard") + "#orders"))
+
+
+@app.route("/owner/order/<int:order_id>/complete", methods=["POST"])
+@login_required
+def complete_order(order_id: int) -> Response:
+    owner_id = logged_in_owner_id()
+    order = _db_get_order(order_id)
+    if not order or order.get("ownerId") != owner_id:
+        abort(403)
+    _db_update_order_status(order_id, "completed")
+    _notify_owner(owner_id, "order_updated", {"id": order_id, "status": "completed"})
+    _notify_order_status(order_id, "completed")
+    return redirect(url_for("owner_dashboard") + "#orders")
+
+
+@app.route("/owner/order/<int:order_id>/delete", methods=["POST"])
+@login_required
+def delete_order(order_id: int) -> Response:
+    owner_id = logged_in_owner_id()
+    order = _db_get_order(order_id)
+    if not order or order.get("ownerId") != owner_id:
+        abort(403)
+    _db_delete_order(order_id)
+    flash("Order deleted.")
+    return redirect(url_for("owner_dashboard") + "#orders")
+
+
+# ---------------------------------------------------------------------------
+# Analytics
+# ---------------------------------------------------------------------------
+
+@app.route("/owner/analytics")
+@login_required
+def owner_analytics():
+    owner_id = logged_in_owner_id()
+    orders = Order.query.filter_by(owner_id=owner_id).all()
+    feedback_list = Feedback.query.filter_by(owner_id=owner_id).all()
+
+    daily: dict[str, dict] = {}
+    for o in orders:
+        if not o.created_at:
+            continue
+        date_key = o.created_at.strftime("%Y-%m-%d")
+        if date_key not in daily:
+            daily[date_key] = {"orders": 0, "revenue": 0.0}
+        daily[date_key]["orders"] += 1
+        if o.status == "completed":
+            daily[date_key]["revenue"] += float(o.total or 0)
+
+    item_counts: dict[str, int] = {}
+    for o in orders:
+        for item in (o.items if isinstance(o.items, list) else []):
+            name = item.get("name", "Unknown")
+            item_counts[name] = item_counts.get(name, 0) + item.get("quantity", 1)
+
+    top_items = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    avg_rating = 0.0
+    if feedback_list:
+        avg_rating = round(sum(f.rating for f in feedback_list) / len(feedback_list), 1)
+
+    return render_template(
+        "owner_analytics.html",
+        owner_username=logged_in_owner(),
+        daily=sorted(daily.items()),
+        top_items=top_items,
+        total_orders=len(orders),
+        total_revenue=round(sum(float(o.total or 0) for o in orders if o.status == "completed"), 2),
+        avg_rating=avg_rating,
+        total_feedback=len(feedback_list),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Superadmin dashboard
+# ---------------------------------------------------------------------------
+
+@app.route("/superadmin")
+@app.route("/superadmin/dashboard")
+@login_required
+@superadmin_required
+def superadmin_dashboard():
+    owners = Owner.query.order_by(Owner.created_at.desc()).all()
+    cafes = Cafe.query.order_by(Cafe.created_at.desc()).all()
+    total_orders = Order.query.count()
+    total_revenue = db.session.query(db.func.sum(Order.total)).filter_by(status="completed").scalar() or 0
+    total_feedback = Feedback.query.count()
+    avg_rating_row = db.session.query(db.func.avg(Feedback.rating)).scalar()
+    avg_rating = round(float(avg_rating_row), 1) if avg_rating_row else 0.0
+
+    recent_orders = Order.query.order_by(Order.created_at.desc()).limit(20).all()
+
+    return render_template(
+        "superadmin/dashboard.html",
+        owners=owners,
+        cafes=cafes,
+        total_orders=total_orders,
+        total_revenue=round(float(total_revenue), 2),
+        total_feedback=total_feedback,
+        avg_rating=avg_rating,
+        recent_orders=[_order_dict(o) for o in recent_orders],
+        owner_count=len(owners),
+        active_owner_count=sum(1 for o in owners if o.is_active),
+        cafe_count=len(cafes),
+        active_cafe_count=sum(1 for c in cafes if c.is_active),
+    )
+
+
+@app.route("/superadmin/cafes/create", methods=["POST"])
+@login_required
+@superadmin_required
+def superadmin_create_cafe():
+    name = str(request.form.get("name", "")).strip()[:200]
+    if not name:
+        flash("Cafe name is required.")
+        return redirect(url_for("superadmin_dashboard"))
+    slug = normalize_id(name)
+    existing_slugs = {c.slug for c in Cafe.query.all() if c.slug}
+    slug = unique_id(slug, existing_slugs)
+    create_cafe_in_db(name=name, slug=slug)
+    flash(f"Cafe '{name}' created.")
+    return redirect(url_for("superadmin_dashboard"))
+
+
+@app.route("/superadmin/cafes/<int:cafe_id>/toggle", methods=["POST"])
+@login_required
+@superadmin_required
+def superadmin_toggle_cafe(cafe_id: int):
+    cafe = db.session.get(Cafe, cafe_id)
+    if not cafe:
+        abort(404)
+    cafe.is_active = not cafe.is_active
+    db.session.commit()
+    status = "activated" if cafe.is_active else "deactivated"
+    flash(f"Cafe '{cafe.name}' {status}.")
+    return redirect(url_for("superadmin_dashboard"))
+
+
+@app.route("/superadmin/owners/create", methods=["POST"])
+@login_required
+@superadmin_required
+def superadmin_create_owner():
+    username = str(request.form.get("username", "")).strip()[:64]
+    email = str(request.form.get("email", "")).strip()[:254] or None
+    cafe_name = str(request.form.get("cafe_name", "")).strip()[:200]
+    password = str(request.form.get("password", ""))[:256]
+    cafe_id_str = request.form.get("cafe_id", "")
+    cafe_id = int(cafe_id_str) if cafe_id_str and cafe_id_str.isdigit() else None
+
+    if not username or not password:
+        flash("Username and password are required.")
+        return redirect(url_for("superadmin_dashboard"))
+
+    if not re.fullmatch(r"[a-zA-Z0-9_\-\.]{3,64}", username):
+        flash("Invalid username format.")
+        return redirect(url_for("superadmin_dashboard"))
+
+    if Owner.query.filter_by(username=username).first():
+        flash("Username already exists.")
+        return redirect(url_for("superadmin_dashboard"))
+
+    password_hash = _make_password_hash(password)
+    create_owner_in_db(username, email, password_hash, cafe_name, cafe_id)
+    flash(f"Owner '{username}' created.")
+    return redirect(url_for("superadmin_dashboard"))
+
+
+@app.route("/superadmin/owners/<int:owner_id>/toggle", methods=["POST"])
+@login_required
+@superadmin_required
+def superadmin_toggle_owner(owner_id: int):
+    owner = db.session.get(Owner, owner_id)
+    if not owner:
+        abort(404)
+    if owner.is_superadmin:
+        flash("Cannot deactivate a superadmin.")
+        return redirect(url_for("superadmin_dashboard"))
+    owner.is_active = not owner.is_active
+    db.session.commit()
+    status = "activated" if owner.is_active else "deactivated"
+    flash(f"Owner '{owner.username}' {status}.")
+    return redirect(url_for("superadmin_dashboard"))
+
+
+@app.route("/superadmin/owners/<int:owner_id>/reset", methods=["POST"])
+@login_required
+@superadmin_required
+def superadmin_reset_password(owner_id: int):
+    owner = db.session.get(Owner, owner_id)
+    if not owner:
+        abort(404)
+    tmp_password = secrets.token_urlsafe(12)
+    owner.password_hash = _make_password_hash(tmp_password)
+    db.session.commit()
+    revoke_all_tokens_for_owner(owner_id)
+    flash(f"Password for '{owner.username}' reset. Temp password: {tmp_password}", "password_reset")
+    return redirect(url_for("superadmin_dashboard"))
+
+
+@app.route("/superadmin/owners/<int:owner_id>/assign-cafe", methods=["POST"])
+@login_required
+@superadmin_required
+def superadmin_assign_cafe(owner_id: int):
+    owner = db.session.get(Owner, owner_id)
+    if not owner:
+        abort(404)
+    cafe_id_str = request.form.get("cafe_id", "")
+    owner.cafe_id = int(cafe_id_str) if cafe_id_str and cafe_id_str.isdigit() else None
+    db.session.commit()
+    flash(f"Owner '{owner.username}' assigned to cafe.")
+    return redirect(url_for("superadmin_dashboard"))
+
+
+@app.route("/superadmin/analytics")
+@login_required
+@superadmin_required
+def superadmin_analytics():
+    per_cafe: list[dict] = []
+    cafes = Cafe.query.all()
+    for cafe in cafes:
+        owners = Owner.query.filter_by(cafe_id=cafe.id).all()
+        owner_ids = [o.id for o in owners]
+        if not owner_ids:
+            continue
+        orders = Order.query.filter(Order.owner_id.in_(owner_ids)).all()
+        revenue = sum(float(o.total or 0) for o in orders if o.status == "completed")
+        per_cafe.append({
+            "cafe": _cafe_dict(cafe),
+            "total_orders": len(orders),
+            "revenue": round(revenue, 2),
+            "owner_count": len(owners),
+        })
+
+    orphan_orders = Order.query.filter(Order.cafe_id == None).count()
+    return render_template(
+        "superadmin/analytics.html",
+        per_cafe=per_cafe,
+        orphan_orders=orphan_orders,
+        owner_username=logged_in_owner(),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Public JSON API
@@ -2263,7 +2667,6 @@ def menu_api() -> Response:
         filtered = {"categories": []}
     response = jsonify(filtered)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
     return response
 
 
@@ -2279,12 +2682,9 @@ def order_preview() -> tuple[dict, int]:
         table = next((t for t in load_tables() if t["id"] == table_id), None)
         if table:
             all_menu = load_menu()
-            owner_menu = {
-                "categories": [
-                    c for c in all_menu.get("categories", [])
-                    if c.get("ownerId") == table.get("ownerId")
-                ]
-            }
+            owner_menu = {"categories": [
+                c for c in all_menu.get("categories", []) if c.get("ownerId") == table.get("ownerId")
+            ]}
     return compute_order_summary(payload.get("items", []), owner_menu), 200
 
 
@@ -2296,8 +2696,10 @@ def checkout() -> tuple[dict, int]:
     payload = request.get_json(silent=True) or {}
     customer_name = str(payload.get("customerName", "Guest")).strip()[:100] or "Guest"
     customer_email = str(payload.get("customerEmail", "")).strip()[:254]
+    customer_phone = str(payload.get("customerPhone", "")).strip()[:30]
     table_id = str(payload.get("tableId", "")).strip()[:64] if payload.get("tableId") else None
     items = payload.get("items", [])
+    notes = str(payload.get("notes", "")).strip()[:500]
 
     if customer_email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", customer_email):
         abort(400, description="Invalid email address.")
@@ -2307,27 +2709,26 @@ def checkout() -> tuple[dict, int]:
 
     table_name = None
     owner_id = None
+    cafe_id = None
     owner_menu = None
     if table_id:
-        table = next((t for t in load_tables() if t["id"] == table_id), None)
+        tables = load_tables()
+        table = next((t for t in tables if t["id"] == table_id), None)
         if table:
             table_name = table["name"]
             owner_id = table.get("ownerId")
+            cafe_id = table.get("cafeId")
             all_menu = load_menu()
-            owner_menu = {
-                "categories": [
-                    c for c in all_menu.get("categories", [])
-                    if c.get("ownerId") == owner_id
-                ]
-            }
+            owner_menu = {"categories": [
+                c for c in all_menu.get("categories", []) if c.get("ownerId") == owner_id
+            ]}
         else:
             table_name = table_id
     else:
-        table_name = "Online"
+        table_name = "Counter"
 
     order_summary = compute_order_summary(items, owner_menu)
 
-    # Tip handling
     try:
         tip = round(float(payload.get("tip", 0)), 2)
         if tip < 0 or tip > 10000:
@@ -2340,29 +2741,23 @@ def checkout() -> tuple[dict, int]:
     order_data = {
         "customerName": customer_name,
         "customerEmail": customer_email,
+        "customerPhone": customer_phone,
         "tableId": table_id,
         "tableName": table_name,
         "ownerId": owner_id,
+        "cafeId": cafe_id,
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "items": order_summary["items"],
         "subtotal": order_summary["total"],
         "tip": tip,
         "total": grand_total,
         "status": "pending",
-        "origin": "table" if table_id else "online",
+        "origin": "table" if table_id else "counter",
+        "notes": notes,
     }
 
-    if USE_DB:
-        order_record = place_order_in_db(order_data)
-    else:
-        with _orders_lock:
-            orders = load_orders()
-            order_data["id"] = next_id(orders)
-            orders.append(order_data)
-            save_orders(orders)
-            order_record = order_data
+    order_record = place_order_in_db(order_data)
 
-    # Notify dashboard via SSE
     if owner_id:
         _notify_owner(owner_id, "new_order", {
             "id": order_record["id"],
@@ -2370,65 +2765,17 @@ def checkout() -> tuple[dict, int]:
             "customerName": customer_name,
             "total": order_record["total"],
             "status": "pending",
+            "pickupCode": order_record["pickupCode"],
         })
 
     log_security("ORDER_PLACED", f"table={table_id!r} total={order_record['total']}")
-    try:
-        checkout_session = _create_stripe_checkout_session(order_record, table_id)
-    except Exception as exc:
-        app.logger.error("Stripe Checkout creation failed: %s", exc)
-        return {"description": "Payment could not be started. Please try again."}, 502
-
-    if checkout_session:
-        payment_intent = checkout_session.get("payment_intent") or ""
-        if payment_intent:
-            updated = _db_set_payment_intent(order_record["id"], payment_intent)
-            if updated:
-                order_record = updated
-        return {
-            "message": "Order created. Redirecting to payment.",
-            "order": order_record,
-            "checkoutUrl": checkout_session.url,
-        }, 201
-
     _send_order_confirmation(order_record)
-    return {"message": "Order placed successfully.", "order": order_record}, 201
-
-
-@app.route("/stripe/webhook", methods=["POST"])
-@csrf.exempt
-@limiter.exempt
-def stripe_webhook() -> tuple[dict, int]:
-    if stripe is None:
-        return {"received": True}, 200
-    payload = request.get_data()
-    signature = request.headers.get("Stripe-Signature", "")
-    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
-    try:
-        if webhook_secret:
-            event = stripe.Webhook.construct_event(payload, signature, webhook_secret)
-        else:
-            event = json.loads(payload.decode("utf-8"))
-    except Exception as exc:
-        app.logger.warning("Invalid Stripe webhook: %s", exc)
-        return {"description": "Invalid webhook."}, 400
-
-    event_type = event.get("type")
-    data = event.get("data", {}).get("object", {})
-    if event_type == "checkout.session.completed":
-        order_id = data.get("metadata", {}).get("order_id")
-        payment_intent = data.get("payment_intent") or ""
-        if order_id and str(order_id).isdigit():
-            order = _db_set_payment_intent(int(order_id), payment_intent, "pending")
-            if order:
-                _send_order_confirmation(order)
-                if order.get("ownerId"):
-                    _notify_owner(order["ownerId"], "order_paid", {"id": order["id"], "status": order["status"]})
-    elif event_type == "payment_intent.succeeded":
-        order_id = data.get("metadata", {}).get("order_id")
-        if order_id and str(order_id).isdigit():
-            _db_set_payment_intent(int(order_id), data.get("id") or "", "pending")
-    return {"received": True}, 200
+    return {
+        "message": "Order placed. Pay at counter.",
+        "order": order_record,
+        "pickupCode": order_record["pickupCode"],
+        "paymentMethod": "pay_at_counter",
+    }, 201
 
 
 @app.route("/api/orders", methods=["GET"])
@@ -2446,8 +2793,7 @@ def orders_api() -> tuple[dict, int]:
 @csrf.exempt
 @limiter.limit("20 per minute; 60 per hour")
 def get_order(order_id: int) -> tuple[dict, int]:
-    orders = load_orders()
-    order = next((o for o in orders if o["id"] == order_id), None)
+    order = _db_get_order(order_id)
     if not order:
         abort(404, description="Order not found.")
     safe_order = {
@@ -2457,6 +2803,7 @@ def get_order(order_id: int) -> tuple[dict, int]:
         "customerName": order.get("customerName", ""),
         "items": order.get("items", []),
         "total": order.get("total", 0),
+        "pickupCode": order.get("pickupCode", ""),
         "createdAt": order.get("createdAt", ""),
     }
     return {"order": safe_order}, 200
@@ -2466,9 +2813,7 @@ def get_order(order_id: int) -> tuple[dict, int]:
 @csrf.exempt
 @limiter.limit("30 per minute")
 def customer_order_stream(order_id: int) -> Response:
-    """SSE stream giving real-time status updates for one order (customer-facing)."""
-    orders = load_orders()
-    order = next((o for o in orders if o["id"] == order_id), None)
+    order = _db_get_order(order_id)
     if not order:
         abort(404, description="Order not found.")
     initial_status = order.get("status", "pending")
@@ -2478,7 +2823,6 @@ def customer_order_stream(order_id: int) -> Response:
         _sse_customer_subs.setdefault(order_id, []).append(my_queue)
 
     def generate():
-        # Send current status immediately so the client is always in sync
         yield f"data: {json.dumps({'status': initial_status, 'id': order_id})}\n\n"
         if initial_status in ("completed", "cancelled"):
             return
@@ -2511,32 +2855,20 @@ def customer_order_stream(order_id: int) -> Response:
     return Response(
         stream_with_context(generate()),
         mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
     )
 
-# ---------------------------------------------------------------------------
-# Customer order cancellation (within grace period)
-# ---------------------------------------------------------------------------
 
-_CANCEL_GRACE_SECONDS = 120  # 2 minutes
+_CANCEL_GRACE_SECONDS = 120
+
 
 @app.route("/api/orders/<int:order_id>/cancel", methods=["POST"])
 @limiter.limit("10 per minute")
 def customer_cancel_order(order_id: int) -> tuple[dict, int]:
-    """Allow a customer to cancel their own order within the grace period."""
     if not request.is_json:
         abort(400, description="JSON required.")
 
-    if USE_DB:
-        order = _db_get_order(order_id)
-    else:
-        orders = load_orders()
-        order = next((o for o in orders if o["id"] == order_id), None)
-
+    order = _db_get_order(order_id)
     if not order:
         abort(404, description="Order not found.")
 
@@ -2544,30 +2876,17 @@ def customer_cancel_order(order_id: int) -> tuple[dict, int]:
     if status not in ("pending",):
         return {"description": f"Order cannot be cancelled (status: {status})."}, 409
 
-    # Enforce grace period
     created_at_str = order.get("createdAt", "")
     if created_at_str:
         try:
             created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
             elapsed = (datetime.now(timezone.utc) - created_at).total_seconds()
             if elapsed > _CANCEL_GRACE_SECONDS:
-                return {
-                    "description": f"Cancellation window expired. Orders can only be cancelled within {_CANCEL_GRACE_SECONDS // 60} minutes of placing."
-                }, 409
+                return {"description": f"Cancellation window expired ({_CANCEL_GRACE_SECONDS // 60} min)."}, 409
         except (ValueError, TypeError):
             pass
 
-    if USE_DB:
-        _db_update_order_status(order_id, "cancelled")
-    else:
-        with _orders_lock:
-            orders = load_orders()
-            for o in orders:
-                if o["id"] == order_id:
-                    o["status"] = "cancelled"
-                    break
-            save_orders(orders)
-
+    _db_update_order_status(order_id, "cancelled")
     owner_id = order.get("ownerId")
     if owner_id:
         _notify_owner(owner_id, "order_updated", {"id": order_id, "status": "cancelled"})
@@ -2588,312 +2907,133 @@ def submit_feedback() -> tuple[dict, int]:
     payload = request.get_json(silent=True) or {}
     table_id = str(payload.get("tableId", "")).strip()[:64] if payload.get("tableId") else None
     customer_name = str(payload.get("customerName", "Guest")).strip()[:100] or "Guest"
+    order_id = payload.get("orderId")
     rating = payload.get("rating")
     comment = str(payload.get("comment", "")).strip()[:1000]
 
     try:
         rating = int(rating)
-        if not (1 <= rating <= 5):
-            raise ValueError()
+        if rating < 1 or rating > 5:
+            raise ValueError
     except (TypeError, ValueError):
         abort(400, description="Rating must be an integer between 1 and 5.")
 
     owner_id = None
+    cafe_id = None
     if table_id and re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
         table = next((t for t in load_tables() if t["id"] == table_id), None)
         if table:
             owner_id = table.get("ownerId")
+            cafe_id = table.get("cafeId")
+
+    if order_id:
+        order = _db_get_order(int(order_id))
+        if order:
+            owner_id = owner_id or order.get("ownerId")
+            cafe_id = cafe_id or order.get("cafeId")
 
     entry = {
         "ownerId": owner_id,
+        "cafeId": cafe_id,
+        "orderId": int(order_id) if order_id else None,
         "tableId": table_id,
         "customerName": customer_name,
         "rating": rating,
         "comment": comment,
-        "createdAt": datetime.now(timezone.utc).isoformat(),
     }
-    result = save_feedback_entry(entry)
-    return {"message": "Thank you for your feedback!", "feedback": {"id": result["id"]}}, 201
+    saved = save_feedback_entry(entry)
+    return {"message": "Thank you for your feedback!", "feedback": saved}, 201
 
 
-@app.route("/api/feedback", methods=["GET"])
+@app.route("/api/feedback/summary")
 @csrf.exempt
-@limiter.limit("30 per minute")
-def get_feedback() -> tuple[dict, int]:
-    """Get public feedback for a table/owner."""
-    table_id = request.args.get("table_id", "").strip()[:64]
-    if not table_id:
-        return {"feedback": []}, 200
-    tables = load_tables()
-    table = next((t for t in tables if t["id"] == table_id), None)
-    if not table:
-        return {"feedback": []}, 200
-    owner_id = table.get("ownerId")
-    all_feedback = load_feedback()
-    owner_feedback = [
-        {
-            "id": f["id"],
-            "customerName": f.get("customerName", "Guest"),
-            "rating": f["rating"],
-            "comment": f.get("comment", ""),
-            "createdAt": f.get("createdAt", ""),
-        }
-        for f in all_feedback
-        if f.get("ownerId") == owner_id
-    ]
-    avg = round(sum(f["rating"] for f in owner_feedback) / len(owner_feedback), 1) if owner_feedback else 0
-    return {"feedback": owner_feedback[:20], "average": avg, "total": len(owner_feedback)}, 200
-
-
-# ---------------------------------------------------------------------------
-# Analytics — revenue charts with 1-hour cache
-# ---------------------------------------------------------------------------
-
-_analytics_cache: dict = {}
-_analytics_cache_ts: float = 0.0
-_ANALYTICS_TTL: int = 3600
-
-
-def _build_analytics(owner_id: int) -> dict:
-    """Aggregate order data into analytics payload."""
-    from collections import defaultdict
-    all_orders = load_orders()
-    orders = [o for o in all_orders if o.get("ownerId") == owner_id and o.get("status") == "completed"]
-
-    daily: dict = defaultdict(float)
-    item_counts: dict = defaultdict(int)
-    hourly: dict = defaultdict(int)
-
-    for o in orders:
-        created = o.get("createdAt", "")[:10]
-        daily[created] = round(daily[created] + float(o.get("total") or 0), 2)
-        try:
-            hour = datetime.fromisoformat(o.get("createdAt", "").replace("Z", "+00:00")).hour
-            hourly[hour] += 1
-        except (ValueError, TypeError):
-            pass
-        for it in o.get("items", []):
-            item_counts[it.get("name", "?")] += it.get("quantity", 1)
-
-    sorted_days = sorted(daily.keys())[-30:]
-    revenue_by_day = [{"date": d, "revenue": daily[d]} for d in sorted_days]
-
-    top_items = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-    top_items_data = [{"name": n, "count": c} for n, c in top_items]
-    peak_hours = [
-        {"hour": f"{hour:02d}:00", "count": hourly.get(hour, 0)}
-        for hour in range(24)
-    ]
-
-    total_revenue = round(sum(float(o.get("total") or 0) for o in orders), 2)
-    total_orders = len(orders)
-    avg_order = round(total_revenue / total_orders, 2) if total_orders else 0
-
-    return {
-        "revenueByDay": revenue_by_day,
-        "topItems": top_items_data,
-        "peakHours": peak_hours,
-        "totalRevenue": total_revenue,
-        "totalOrders": total_orders,
-        "avgOrderValue": avg_order,
-    }
-
-
-@app.route("/api/owner/analytics")
-@login_required
-def owner_analytics_data() -> tuple[dict, int]:
-    """Cached analytics JSON for Chart.js."""
-    global _analytics_cache, _analytics_cache_ts
+@api_login_required
+def feedback_summary():
     owner_id = logged_in_owner_id()
-    now = time.time()
-    cache_key = f"analytics_{owner_id}"
-    if cache_key in _analytics_cache and (now - _analytics_cache_ts) < _ANALYTICS_TTL:
-        return _analytics_cache[cache_key], 200
-    data = _build_analytics(owner_id)
-    _analytics_cache[cache_key] = data
-    _analytics_cache_ts = now
-    return data, 200
-
-
-@app.route("/owner/analytics")
-@login_required
-def owner_analytics_page():
-    """Analytics dashboard with Chart.js charts."""
-    owner_id = logged_in_owner_id()
-    data = _build_analytics(owner_id)
-    resp = app.make_response(render_template(
-        "owner_analytics.html",
-        owner_username=logged_in_owner(),
-        analytics=data,
-    ))
-    return _no_store(resp)
+    feedback_list = Feedback.query.filter_by(owner_id=owner_id).all()
+    avg = 0.0
+    if feedback_list:
+        avg = round(sum(f.rating for f in feedback_list) / len(feedback_list), 1)
+    breakdown = {str(i): sum(1 for f in feedback_list if f.rating == i) for i in range(1, 6)}
+    return jsonify(average=avg, count=len(feedback_list), breakdown=breakdown)
 
 
 # ---------------------------------------------------------------------------
-# Customer insights
+# Customers route
 # ---------------------------------------------------------------------------
-
 
 @app.route("/owner/customers")
 @login_required
-def owner_customers_page():
-    """Top customers by spend and order frequency."""
-    from collections import defaultdict
+def owner_customers():
     owner_id = logged_in_owner_id()
-    all_orders = load_orders()
-    orders = [o for o in all_orders if o.get("ownerId") == owner_id and o.get("status") == "completed"]
-
-    customer_spend: dict = defaultdict(float)
-    customer_count: dict = defaultdict(int)
-
+    orders = Order.query.filter_by(owner_id=owner_id).order_by(Order.created_at.desc()).all()
+    customer_map: dict[str, dict] = {}
     for o in orders:
-        name = o.get("customerName") or "Guest"
-        total = float(o.get("total") or 0)
-        customer_spend[name] = round(customer_spend[name] + total, 2)
-        customer_count[name] += 1
-
-    customers = [
-        {
-            "name": name,
-            "totalSpend": customer_spend[name],
-            "orderCount": customer_count[name],
-            "avgOrder": round(customer_spend[name] / customer_count[name], 2),
-        }
-        for name in customer_spend
-    ]
-    customers.sort(key=lambda x: x["totalSpend"], reverse=True)
-
-    total_orders = len(orders)
-    repeat_customers = sum(1 for c in customers if c["orderCount"] > 1)
-    repeat_rate = round(repeat_customers / len(customers) * 100, 1) if customers else 0
-
-    resp = app.make_response(render_template(
-        "owner_customers.html",
-        owner_username=logged_in_owner(),
-        customers=customers[:20],
-        total_orders=total_orders,
-        repeat_rate=repeat_rate,
-    ))
-    return _no_store(resp)
+        key = (o.customer_phone or o.customer_email or o.customer_name or "Guest").lower()
+        if key not in customer_map:
+            customer_map[key] = {
+                "name": o.customer_name or "Guest",
+                "email": o.customer_email or "",
+                "phone": o.customer_phone or "",
+                "orders": 0,
+                "total_spent": 0.0,
+                "last_order": _iso(o.created_at),
+            }
+        customer_map[key]["orders"] += 1
+        if o.status == "completed":
+            customer_map[key]["total_spent"] += float(o.total or 0)
+    customers = sorted(customer_map.values(), key=lambda c: c["orders"], reverse=True)
+    return render_template("owner_customers.html",
+                           customers=customers,
+                           owner_username=logged_in_owner())
 
 
 # ---------------------------------------------------------------------------
-# CSV export routes
+# Admin blueprint (legacy superadmin via key)
 # ---------------------------------------------------------------------------
 
+from admin import admin_bp
+app.register_blueprint(admin_bp)
 
-@app.route("/owner/export/orders")
-@login_required
-def export_orders_csv():
-    """Download orders as CSV."""
-    owner_id = logged_in_owner_id()
-    date_from = request.args.get("from", "")[:10]
-    date_to = request.args.get("to", "")[:10]
 
-    all_orders = load_orders()
-    rows = [o for o in all_orders if o.get("ownerId") == owner_id]
-    if date_from:
-        rows = [o for o in rows if o.get("createdAt", "")[:10] >= date_from]
-    if date_to:
-        rows = [o for o in rows if o.get("createdAt", "")[:10] <= date_to]
+# ---------------------------------------------------------------------------
+# App init
+# ---------------------------------------------------------------------------
 
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["ID", "Date", "Customer", "Table", "Items", "Subtotal", "Tip", "Total", "Status"])
-    for o in rows:
-        items_str = "; ".join(
-            f"{it.get('name')} x{it.get('quantity', 1)}" for it in o.get("items", [])
+def _make_superadmin_if_missing() -> None:
+    sa_user = os.environ.get("SUPERADMIN_USERNAME", "superadmin")
+    sa_pass = os.environ.get("SUPERADMIN_PASSWORD", "")
+    if not sa_pass:
+        return
+    with app.app_context():
+        existing = Owner.query.filter_by(username=sa_user).first()
+        if existing:
+            if not existing.is_superadmin:
+                existing.is_superadmin = True
+                db.session.commit()
+                app.logger.info("Promoted '%s' to superadmin.", sa_user)
+            return
+        pw_hash = _make_password_hash(sa_pass)
+        owner = Owner(
+            username=sa_user,
+            email=None,
+            password_hash=pw_hash,
+            cafe_name="",
+            is_superadmin=True,
+            is_active=True,
         )
-        writer.writerow([
-            o.get("id", ""),
-            o.get("createdAt", "")[:19],
-            o.get("customerName", "Guest"),
-            o.get("tableName", ""),
-            items_str,
-            o.get("subtotal", o.get("total", 0)),
-            o.get("tip", 0),
-            o.get("total", 0),
-            o.get("status", ""),
-        ])
-
-    return Response(
-        buf.getvalue().encode("utf-8"),
-        mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=orders.csv"},
-    )
+        db.session.add(owner)
+        db.session.commit()
+        app.logger.info("Superadmin '%s' created.", sa_user)
 
 
-@app.route("/owner/export/menu")
-@login_required
-def export_menu_csv():
-    """Download menu as CSV."""
-    owner_id = logged_in_owner_id()
-    menu = load_menu()
-    owner_cats = [c for c in menu.get("categories", []) if c.get("ownerId") == owner_id]
+if not IS_PRODUCTION:
+    _initialize_runtime_state(force=True)
+else:
+    app.logger.info("Deferring database initialization until first non-health request.")
 
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["Category", "Item ID", "Name", "Description", "Price", "Available", "Dietary Tags", "Prep Time (min)", "Modifiers"])
-    for cat in owner_cats:
-        for item in cat.get("items", []):
-            mods = "; ".join(
-                f"{m.get('name')} +{m.get('price', 0)}" for m in item.get("modifiers", [])
-            )
-            writer.writerow([
-                cat.get("name", ""),
-                item.get("id", ""),
-                item.get("name", ""),
-                item.get("description", ""),
-                item.get("price", 0),
-                item.get("available", True),
-                ", ".join(item.get("dietary_tags", [])),
-                item.get("prep_time", ""),
-                mods,
-            ])
-
-    return Response(
-        buf.getvalue().encode("utf-8"),
-        mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=menu.csv"},
-    )
-
-# ---------------------------------------------------------------------------
-# Admin blueprint
-# ---------------------------------------------------------------------------
-
-try:
-    from admin.routes import admin_bp  # noqa: E402 (after app setup)
-
-    @admin_bp.context_processor
-    def _inject_now():
-        return {"now": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
-
-    app.register_blueprint(admin_bp)
-    app.logger.info("Super Admin blueprint registered at /admin")
-except Exception as _admin_import_err:  # noqa: BLE001
-    app.logger.error(
-        "Failed to load admin blueprint — /admin will not be available: %s",
-        _admin_import_err,
-        exc_info=True,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Init
-# ---------------------------------------------------------------------------
-
-try:
-    _init_db()
-except Exception as exc:
-    import sys as _sys
-    print(f"ERROR: Could not initialise SQLAlchemy data store: {exc}", file=_sys.stderr, flush=True)
-    raise
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", "5000"))
     debug = os.environ.get("FLASK_ENV") == "development"
     app.run(host="0.0.0.0", port=port, debug=debug)

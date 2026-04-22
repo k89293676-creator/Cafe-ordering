@@ -55,15 +55,45 @@
         {% endif %}
       </button>
 
+      <div class="sidebar-section-label" style="margin-top:1rem;">Operations</div>
+      <a class="sidebar-link" href="{{ url_for('kitchen_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2v6a1 1 0 01-1 1H4"/><path d="M15 2v6a1 1 0 001 1h4"/><path d="M12 19v3M8 19h8"/><rect x="3" y="9" width="18" height="10" rx="2"/></svg>
+        Kitchen View
+      </a>
+      <a class="sidebar-link" href="{{ url_for('inventory_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        Inventory
+        {% if low_stock_alerts %}<span class="link-badge" style="background:var(--danger,#ef4444);">{{ low_stock_alerts|length }}</span>{% endif %}
+      </a>
+      <a class="sidebar-link" href="{{ url_for('reorder_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        Reorder
+      </a>
+
       <div class="sidebar-section-label" style="margin-top:1rem;">Insights</div>
-      <a class="sidebar-link" href="/owner/analytics">
+      <a class="sidebar-link" href="{{ url_for('owner_analytics') }}">
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         Analytics
       </a>
-      <a class="sidebar-link" href="/owner/customers">
+      <a class="sidebar-link" href="{{ url_for('owner_customers') }}">
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
         Customers
       </a>
+      <a class="sidebar-link" href="{{ url_for('export_orders_csv') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17"/></svg>
+        Export CSV
+      </a>
+      <a class="sidebar-link" href="{{ url_for('daily_report_pdf') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Daily PDF Report
+      </a>
+      {% if owner.isSuperadmin %}
+      <div class="sidebar-section-label" style="margin-top:1rem;">Admin</div>
+      <a class="sidebar-link" href="{{ url_for('superadmin_dashboard') }}" style="color:#ef4444;">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Superadmin
+      </a>
+      {% endif %}
     </div>
 
     <div class="sidebar-footer">
@@ -123,6 +153,19 @@
       </div>
       {% endif %}
       {% endwith %}
+
+      {% if low_stock_alerts %}
+      <div class="alert" style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:.75rem;padding:.75rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:.75rem;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <strong>Low Stock Alert:</strong>
+        {% for ing in low_stock_alerts %}
+        <span style="background:#fee2e2;padding:.1rem .5rem;border-radius:.4rem;font-size:.85rem;">
+          {{ ing.name }}: {{ ing.stock }} {{ ing.unit }} (threshold: {{ ing.low_stock_threshold }})
+        </span>
+        {% endfor %}
+        <a href="{{ url_for('inventory_view') }}" style="margin-left:auto;color:#dc2626;font-weight:600;text-decoration:none;">Manage →</a>
+      </div>
+      {% endif %}
 
       <!-- Stats Row -->
       <div class="stats-grid-5">
@@ -225,23 +268,20 @@
                       {% endif %}
                     </div>
                     <div class="order-row-total">₹{{ '%.2f' | format((order.total or 0) | float) }}</div>
-                    <div class="order-row-actions">
-                      {% if order.status == 'pending' or not order.status %}
-                      <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                        <input type="hidden" name="status" value="preparing" />
-                        <button class="btn btn-secondary btn-sm" type="submit">Prepare</button>
-                      </form>
-                      {% elif order.status == 'preparing' %}
-                      <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                        <input type="hidden" name="status" value="ready" />
-                        <button class="btn btn-secondary btn-sm" type="submit">Mark Ready</button>
-                      </form>
+                    <div class="order-row-actions" style="gap:.5rem;">
+                      {% if order.pickupCode %}
+                      <span title="Pickup Code" style="font-family:monospace;background:#f3f4f6;padding:.15rem .5rem;border-radius:.4rem;font-size:.85rem;">🎫 {{ order.pickupCode }}</span>
                       {% endif %}
-                      <form action="{{ url_for('complete_order', order_id=order.id) }}" method="post">
+                      <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="display:inline;">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                        <button class="btn btn-primary btn-sm" type="submit">Done</button>
+                        <select name="status" onchange="this.form.submit()" class="btn btn-secondary btn-sm" style="padding:.2rem .5rem;cursor:pointer;">
+                          <option value="pending" {% if order.status=='pending' %}selected{% endif %}>Pending</option>
+                          <option value="confirmed" {% if order.status=='confirmed' %}selected{% endif %}>Confirmed</option>
+                          <option value="preparing" {% if order.status=='preparing' %}selected{% endif %}>Preparing</option>
+                          <option value="ready" {% if order.status=='ready' %}selected{% endif %}>Ready</option>
+                          <option value="completed" {% if order.status=='completed' %}selected{% endif %}>Completed</option>
+                          <option value="cancelled" {% if order.status=='cancelled' %}selected{% endif %}>Cancelled</option>
+                        </select>
                       </form>
                     </div>
                   </div>
@@ -633,15 +673,20 @@
                   <span class="order-total-label">Total</span>
                   <span class="order-total-value">₹{{ '%.2f' | format((order.total or 0) | float) }}</span>
                 </div>
+                {% if order.pickupCode %}
+                <div style="font-family:monospace;background:#f3f4f6;padding:.2rem .6rem;border-radius:.4rem;font-size:.82rem;margin-bottom:.5rem;">🎫 Pickup: {{ order.pickupCode }}</div>
+                {% endif %}
                 <div class="order-card-actions">
                   <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="flex:1;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                    <input type="hidden" name="status" value="preparing" />
-                    <button class="btn btn-secondary btn-sm btn-full" type="submit">Start Preparing</button>
-                  </form>
-                  <form action="{{ url_for('complete_order', order_id=order.id) }}" method="post">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                    <button class="btn btn-primary btn-sm" type="submit">Done</button>
+                    <select name="status" onchange="this.form.submit()" class="btn btn-secondary btn-sm btn-full" style="cursor:pointer;">
+                      <option value="pending" selected>Pending</option>
+                      <option value="confirmed">Confirmed</option>
+                      <option value="preparing">Preparing</option>
+                      <option value="ready">Ready</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
                   </form>
                 </div>
               </div>
@@ -689,19 +734,20 @@
                   <span class="order-total-label">Total</span>
                   <span class="order-total-value">₹{{ '%.2f' | format((order.total or 0) | float) }}</span>
                 </div>
+                {% if order.pickupCode %}
+                <div style="font-family:monospace;background:#f3f4f6;padding:.2rem .6rem;border-radius:.4rem;font-size:.82rem;margin-bottom:.5rem;">🎫 Pickup: {{ order.pickupCode }}</div>
+                {% endif %}
                 <div class="order-card-actions">
-                  {% if order.status == 'preparing' %}
                   <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="flex:1;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                    <input type="hidden" name="status" value="ready" />
-                    <button class="btn btn-secondary btn-sm btn-full" type="submit">Mark Ready</button>
-                  </form>
-                  {% else %}
-                  <div style="flex:1;padding:0.5rem 1rem;background:var(--success-light);color:var(--success);border-radius:var(--radius-sm);font-weight:600;text-align:center;font-size:0.8125rem;">Ready for pickup</div>
-                  {% endif %}
-                  <form action="{{ url_for('complete_order', order_id=order.id) }}" method="post">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                    <button class="btn btn-primary btn-sm" type="submit">Done</button>
+                    <select name="status" onchange="this.form.submit()" class="btn btn-secondary btn-sm btn-full" style="cursor:pointer;">
+                      <option value="pending" {% if order.status=='pending' %}selected{% endif %}>Pending</option>
+                      <option value="confirmed" {% if order.status=='confirmed' %}selected{% endif %}>Confirmed</option>
+                      <option value="preparing" {% if order.status=='preparing' %}selected{% endif %}>Preparing</option>
+                      <option value="ready" {% if order.status=='ready' %}selected{% endif %}>Ready</option>
+                      <option value="completed" {% if order.status=='completed' %}selected{% endif %}>Completed</option>
+                      <option value="cancelled" {% if order.status=='cancelled' %}selected{% endif %}>Cancelled</option>
+                    </select>
                   </form>
                 </div>
               </div>

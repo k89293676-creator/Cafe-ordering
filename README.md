@@ -37,11 +37,11 @@ The app will run at `http://127.0.0.1:8000` with PostgreSQL available in the `db
 ## Railway Deployment
 
 1. Create a new Railway project from this GitHub repository and branch.
-2. Add a Railway PostgreSQL database service.
-3. Set the app service start command to use the Dockerfile, or use:
+2. Add a Railway PostgreSQL database service for durable production data; production startup requires `DATABASE_URL`.
+3. Railway reads `railway.json`; the deploy start command is:
 
    ```bash
-   gunicorn --bind 0.0.0.0:$PORT --worker-class gevent --workers 1 --threads 4 app:app
+   python start.py
    ```
 
 4. Add the required environment variables below.
@@ -49,13 +49,19 @@ The app will run at `http://127.0.0.1:8000` with PostgreSQL available in the `db
 6. In Stripe, create a webhook endpoint pointing to `https://YOUR_DOMAIN/stripe/webhook` and subscribe to `checkout.session.completed` and `payment_intent.succeeded`.
 7. Open `/owner/signup`, create an owner account, configure branding in Profile, then create tables and menu items.
 
+Railway uses `/health` as a liveness check. Use `/ready` to verify database readiness after deployment.
+
 ## Environment Variables
 
 ### Required for production
 
-- `DATABASE_URL` - Railway PostgreSQL connection string. If omitted, SQLite is used.
 - `SECRET_KEY` - Flask session/CSRF secret.
 - `ADMIN_SECRET_KEY` - secret key for super-admin routes.
+- `DATABASE_URL` - Railway PostgreSQL connection string for durable order/menu/account storage.
+
+### Recommended for production
+
+- `REDIS_URL` - shared rate-limit storage. If omitted, in-memory limiting is used.
 
 ### Stripe
 
@@ -78,14 +84,15 @@ Use either SendGrid or SMTP settings:
 
 ### Optional
 
-- `REDIS_URL` - enables shared rate-limit storage.
 - `GEMINI_API_KEY` - enables AI menu helper features if configured.
 - `FLASK_ENV` - set to `development` locally for debug mode.
 - `DATA_DIR` - optional path for legacy JSON seed files.
+- `ALLOW_SQLITE_IN_PRODUCTION` - temporary escape hatch for test deployments only; do not enable for real Railway production.
+- `WEB_CONCURRENCY`, `GUNICORN_THREADS`, `GUNICORN_TIMEOUT` - optional server tuning used by `start.py`.
 
 ## Database Migrations
 
-The app initializes tables automatically on startup and includes additive column creation for upgraded deployments. For explicit migrations, run:
+The app initializes tables automatically on startup and includes additive column creation for upgraded deployments. For explicit manual migrations, run:
 
 ```bash
 flask --app app db init

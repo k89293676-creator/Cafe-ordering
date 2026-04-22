@@ -1,50 +1,55 @@
 #!/usr/bin/env bash
-# Run this script from the cafe-ordering directory to push the changes to GitHub.
-# Usage: bash push_to_github.sh
+# Push the saas-upgrade branch to GitHub.
+# Usage: GITHUB_PAT=<token> bash push_to_github.sh
 set -e
 
-BRANCH="fixes-admin-upgrade"
+BRANCH="saas-upgrade"
+REMOTE="https://${GITHUB_PAT}@github.com/k89293676-creator/Cafe-ordering.git"
 
-echo "Creating branch: $BRANCH"
-git checkout -b "$BRANCH"
+echo "==> Initialising git repo in current directory..."
+git init
+git config user.email "agent@replit.com"
+git config user.name "Replit Agent"
 
-echo "Staging all changes..."
+echo "==> Configuring remote..."
+git remote remove origin 2>/dev/null || true
+git remote add origin "$REMOTE"
+
+echo "==> Creating branch: $BRANCH"
+git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
+
+echo "==> Staging all files..."
 git add -A
 
-echo "Committing..."
-git commit -m "Bug fixes + Super Admin dashboard
+echo "==> Committing..."
+git commit -m "feat: SaaS upgrade - multi-tenant, pay-at-counter, 2FA, kitchen, inventory, reports
 
-- Add is_active field to owners (DB + JSON modes)
-- Block login for deactivated owner accounts
-- Register Super Admin blueprint at /admin
-  - /admin/dashboard  — summary stats + owner list
-  - /admin/owners     — manage owners, reset passwords, toggle active
-  - /admin/analytics  — global revenue + top items + daily chart
-  - /admin/status     — disk usage, DB health, file sizes
-- Admin login via session (ADMIN_SECRET_KEY env var)
-- All bug fixes already in codebase:
-  - Atomic JSON writes (portalocker + os.replace)
-  - SECRET_KEY enforcement in production
-  - File upload MIME type validation
-  - Rate limiter with Redis fallback
-  - Structured JSON logging + rotating file handler
-  - Health endpoint at /health"
+- Remove Stripe; add Pay at Counter with 6-digit pickup codes
+- Order lifecycle: pending -> confirmed -> preparing -> ready -> completed
+- Add Superadmin with /superadmin dashboard (owner/cafe CRUD, analytics)
+- Multi-tenant Cafe model scoping all data by cafe_id
+- Railway /health endpoint returning DB status
+- TOTP 2FA (pyotp + QR code) with /owner/2fa/setup
+- Menu modifiers (size, extras, notes per item)
+- Kitchen view with 30s auto-refresh and print CSS
+- Ingredient inventory with auto-deduct and low-stock alerts
+- Phone-based reorder at /owner/reorder
+- CSV export with date filter (/owner/export/orders)
+- PDF daily report via reportlab (/owner/report/daily)
+- 1-5 star feedback with averages
+- Flask-Migrate migrations (idempotent initial schema)
+- FLASK_APP=app set in Procfile, railway.json, Dockerfile
+- Updated requirements.txt (pyotp, reportlab, pandas, waitress)"
 
-echo "Setting remote with PAT..."
-git remote set-url origin "https://${PAT_TOKEN}@github.com/k89293676-creator/Cafe-ordering.git"
-
-echo "Pushing to origin/$BRANCH..."
-git push origin "$BRANCH"
+echo "==> Pushing to origin/$BRANCH..."
+git push -u origin "$BRANCH" --force
 
 echo ""
-echo "Done! Branch pushed: $BRANCH"
+echo "Done! Pushed to: $BRANCH"
+echo "Railway will auto-deploy from the saas-upgrade branch."
 echo ""
-echo "Railway deploy URL:"
-echo "https://railway.app/new/template?template=https://github.com/k89293676-creator/Cafe-ordering&branch=$BRANCH&env=SECRET_KEY,IS_PRODUCTION,DATABASE_URL,REDIS_URL,ADMIN_SECRET_KEY"
-echo ""
-echo "Remember to set in Railway dashboard:"
-echo "  SECRET_KEY       = <long random string>"
-echo "  ADMIN_SECRET_KEY = <separate long random string>"
-echo "  IS_PRODUCTION    = true"
-echo ""
-echo "Access admin panel at: https://your-app.railway.app/admin"
+echo "Required Railway env vars:"
+echo "  SECRET_KEY           = <long random string>"
+echo "  SUPERADMIN_USERNAME  = <your superadmin username>"
+echo "  SUPERADMIN_PASSWORD  = <your superadmin password>"
+echo "  IS_PRODUCTION        = true"

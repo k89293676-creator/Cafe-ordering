@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Set Up Two-Factor Authentication — CafePortal</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+</head>
+<body class="bg-light d-flex align-items-center min-vh-100">
+<div class="container" style="max-width:480px;">
+  <div class="card border-0 shadow-sm">
+    <div class="card-body p-4">
+      <h4 class="mb-1"><i class="bi bi-shield-lock me-2 text-primary"></i>Set Up 2FA</h4>
+      <p class="text-muted mb-4">Scan the QR code with your authenticator app (Google Authenticator, Authy, etc.) then enter the 6-digit code to confirm.</p>
+
+      {% for msg in get_flashed_messages() %}
+      <div class="alert alert-danger">{{ msg }}</div>
+      {% endfor %}
+
+      <div class="text-center mb-4">
+        <img src="data:image/png;base64,{{ qr_b64 }}" alt="TOTP QR Code" class="img-fluid border rounded" style="max-width:220px;"/>
+      </div>
+
+      <p class="text-muted small text-center mb-3">
+        Can't scan? Enter this secret manually:<br/>
+        <code class="user-select-all">{{ secret }}</code>
+      </p>
+
+      <form method="post" action="{{ url_for('totp_setup') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Verification Code</label>
+          <input type="text" name="totp_code" class="form-control form-control-lg text-center letter-spacing-wider"
+                 placeholder="000000" maxlength="6" autocomplete="one-time-code" autofocus inputmode="numeric"/>
+        </div>
+        <button type="submit" class="btn btn-primary w-100">Enable 2FA</button>
+      </form>
+
+      <div class="text-center mt-3">
+        <a href="{{ url_for('owner_profile') }}" class="text-muted small">Cancel</a>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

@@ -117,11 +117,8 @@
                 <input type="email" name="email" value="{{ owner.email or '' }}" placeholder="you@example.com" />
               </div>
               <div class="field">
-                <label>Google Place ID <span style="font-size:0.8rem;color:var(--text-muted);">(for Google Reviews widget)</span></label>
-                <input name="google_place_id" value="{{ owner.googlePlaceId or '' }}" placeholder="ChIJ..." maxlength="300" />
-                <div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.375rem;">
-                  Find your Place ID at <a href="https://developers.google.com/maps/documentation/places/web-service/place-id" target="_blank" rel="noopener" style="color:var(--primary);">Google's Place ID finder</a>
-                </div>
+                <label>Phone Number</label>
+                <input type="tel" name="phone" value="{{ owner.phone or '' }}" placeholder="+91 9999999999" maxlength="30" />
               </div>
               <div class="field">
                 <label>Logo URL</label>
@@ -201,6 +198,29 @@
                 <div class="kpi-label"><span class="kpi-dot" style="background:#ec4899;"></span> Member Since</div>
                 <div class="kpi-value">{{ (owner.createdAt or '')[:10] or '—' }}</div>
               </div>
+              <div class="kpi-row">
+                <div class="kpi-label"><span class="kpi-dot" style="background:#6366f1;"></span> 2FA Status</div>
+                <div class="kpi-value">
+                  {% if owner.totpEnabled %}
+                  <span style="color:#10b981;">Enabled</span>
+                  &nbsp;
+                  <form method="post" action="{{ url_for('totp_disable') }}" style="display:inline;" onsubmit="return confirm('Disable 2FA?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <button type="submit" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:.85rem;text-decoration:underline;">Disable</button>
+                  </form>
+                  {% else %}
+                  <span style="color:#6b7280;">Disabled</span>
+                  &nbsp;
+                  <a href="{{ url_for('totp_setup') }}" style="font-size:.85rem;color:#6366f1;">Enable 2FA</a>
+                  {% endif %}
+                </div>
+              </div>
+              {% if owner.isSuperadmin %}
+              <div class="kpi-row">
+                <div class="kpi-label"><span class="kpi-dot" style="background:#ef4444;"></span> Role</div>
+                <div class="kpi-value"><span style="color:#ef4444;font-weight:600;">Superadmin</span> &nbsp; <a href="{{ url_for('superadmin_dashboard') }}" style="color:#6366f1;font-size:.85rem;">Go to Superadmin</a></div>
+              </div>
+              {% endif %}
             </div>
           </div>
         </div>

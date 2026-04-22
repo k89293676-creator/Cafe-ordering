@@ -1,81 +1,58 @@
-# Deploying Cafe Ordering on Railway
+# Deploying Cafe Ordering SaaS on Railway
 
 ## Prerequisites
 
-- GitHub repository pushed to the `prod-upgrade` branch.
+- GitHub repository pushed to the `saas-upgrade` branch.
 - Railway account.
-- Stripe account for paid checkout.
-- SendGrid or SMTP credentials for receipt emails.
 
 ## 1. Create the Railway project
 
 1. In Railway, choose **New Project**.
 2. Select **Deploy from GitHub repo**.
-3. Pick `k89293676-creator/Cafe-ordering` and the `prod-upgrade` branch.
-4. Add a PostgreSQL database service to the project.
+3. Pick `k89293676-creator/Cafe-ordering` and the `saas-upgrade` branch.
+4. Railway will detect Nixpacks automatically and use `railway.json` for config.
 
 ## 2. Configure environment variables
 
-Required:
+Set these in the Railway project's **Variables** tab:
 
-- `DATABASE_URL` - provided by Railway PostgreSQL.
-- `SECRET_KEY` - random session/CSRF secret.
-- `ADMIN_SECRET_KEY` - random secret for `/admin/login`.
+| Variable | Required | Notes |
+|---|---|---|
+| `SECRET_KEY` | ✅ | Long random string for session/CSRF |
+| `SUPERADMIN_USERNAME` | Optional | Superadmin login username, defaults to `superadmin` |
+| `SUPERADMIN_PASSWORD` | Optional | When set, creates or promotes the superadmin account |
+| `DATABASE_URL` | ✅ | Railway Postgres connection string; required in production for durable data |
+| `REDIS_URL` | Recommended | Shared rate-limit storage; in-memory storage is only for single-process deployments |
+| `IS_PRODUCTION` | Optional | Railway is detected automatically, but `true` is acceptable |
 
-Stripe:
-
-- `STRIPE_SECRET_KEY`
-- `STRIPE_WEBHOOK_SECRET`
-- `STRIPE_PUBLISHABLE_KEY`
-- `STRIPE_CURRENCY` - optional, defaults to `inr`.
-
-Email:
-
-- `SENDGRID_API_KEY` or SMTP variables.
-- `MAIL_SERVER`
-- `MAIL_PORT`
-- `MAIL_USE_TLS`
-- `MAIL_USERNAME`
-- `MAIL_PASSWORD`
-- `MAIL_DEFAULT_SENDER`
-
-Optional:
-
-- `REDIS_URL`
-- `GEMINI_API_KEY`
-- `FLASK_ENV=production`
-
-## 3. Start command
-
-Railway can use the included Dockerfile. If you deploy with Nixpacks, use:
+## 3. Start command (auto-configured via railway.json)
 
 ```bash
-gunicorn app:app --bind 0.0.0.0:$PORT --worker-class gevent --workers 1 --threads 4
+python start.py
 ```
 
-## 4. Stripe webhook
+- The app initializes tables and additive upgrade columns on startup.
+- Production startup fails fast without `DATABASE_URL` so orders are not accidentally stored on Railway's ephemeral filesystem.
+- `start.py` reads Railway's `PORT` environment variable directly, avoiding shell-specific parsing issues.
+- Railway liveness health check is at `/health`.
+- Database readiness is available at `/ready` for diagnostics.
 
-Create a Stripe webhook endpoint:
+## 4. First-time setup
 
-```text
-https://YOUR_RAILWAY_DOMAIN/stripe/webhook
-```
+1. Add a Railway PostgreSQL service and confirm `DATABASE_URL` is present in the app service variables.
+2. Set `ADMIN_SECRET_KEY` for `/admin/login`.
+3. Optionally set `SUPERADMIN_USERNAME` and `SUPERADMIN_PASSWORD` before first boot to create a superadmin owner.
+4. Log in as an Owner at `/owner/login`, or create an owner at `/owner/signup`.
+5. Add menu items, tables, and ingredients.
+6. Share the table QR codes with customers.
 
-Subscribe to:
+## 5. Feature overview
 
-- `checkout.session.completed`
-- `payment_intent.succeeded`
-
-Copy the webhook signing secret into `STRIPE_WEBHOOK_SECRET`.
-
-## 5. First-time setup
-
-1. Open `/owner/signup` on the deployed domain.
-2. Create an owner account.
-3. Add tables and menu items.
-4. Configure logo/color in `/owner/profile`.
-5. Share table QR codes with customers.
-
-## Notes
-
-The app uses PostgreSQL when `DATABASE_URL` is set and SQLite otherwise. Legacy JSON files are imported into the database on first startup if the owner table is empty.
+- **Pay at Counter** — 6-digit pickup codes on every order (no Stripe required).
+- **Order lifecycle** — Pending → Confirmed → Preparing → Ready → Completed.
+- **Kitchen view** — `/kitchen` with 30-second auto-refresh and print CSS.
+- **Inventory** — Auto-deduct ingredients per order, low-stock alerts on dashboard.
+- **2FA** — TOTP via Google Authenticator for owner accounts (`/owner/2fa/setup`).
+- **Reports** — CSV export (`/owner/export/orders`) and PDF daily report (`/owner/report/daily`).
+- **Feedback** — 1-5 star ratings linked to orders, averages shown on dashboard.
+- **Reorder** — Phone-based repeat ordering at `/owner/reorder`.

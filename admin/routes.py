@@ -25,12 +25,9 @@ admin_bp = Blueprint(
     template_folder=None,
 )
 
-# ---------------------------------------------------------------------------
-# Helpers — lazy-import to avoid circular dependency with app.py
-# ---------------------------------------------------------------------------
 
 def _store():
-    import app as _app  # noqa: PLC0415
+    import app as _app
     return _app
 
 
@@ -43,26 +40,18 @@ def _key_valid(key: str) -> bool:
     return bool(secret) and bool(key) and secrets.compare_digest(secret, key)
 
 
-# ---------------------------------------------------------------------------
-# Authentication
-# ---------------------------------------------------------------------------
-
 def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if session.get("admin_authenticated"):
             return f(*args, **kwargs)
-        key = request.args.get("key", "") or request.headers.get("X-Admin-Key", "")
+        key = request.headers.get("X-Admin-Key", "")
         if _key_valid(key):
             session["admin_authenticated"] = True
             return f(*args, **kwargs)
         return redirect(url_for("admin.login"))
     return decorated
 
-
-# ---------------------------------------------------------------------------
-# Login / Logout
-# ---------------------------------------------------------------------------
 
 @admin_bp.route("/login", methods=["GET", "POST"])
 def login():
@@ -88,10 +77,6 @@ def logout():
     return redirect(url_for("admin.login"))
 
 
-# ---------------------------------------------------------------------------
-# Dashboard
-# ---------------------------------------------------------------------------
-
 @admin_bp.route("/")
 @admin_bp.route("/dashboard")
 @admin_required
@@ -99,6 +84,7 @@ def dashboard():
     store = _store()
     owners = store.load_owners()
     stats = _global_stats(store)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     return render_template(
         "admin/dashboard.html",
         owners=owners,
@@ -106,61 +92,52 @@ def dashboard():
         active_owners=sum(1 for o in owners if o.get("isActive", True)),
         total_orders=stats["total_orders"],
         total_revenue=stats["total_revenue"],
+        now=now,
     )
 
-
-# ---------------------------------------------------------------------------
-# Owners management
-# ---------------------------------------------------------------------------
 
 @admin_bp.route("/owners")
 @admin_required
 def owners():
     store = _store()
     all_owners = store.load_owners()
-    return render_template("admin/owners.html", owners=all_owners)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return render_template("admin/owners.html", owners=all_owners, now=now)
 
 
 @admin_bp.route("/owners/<int:owner_id>/reset", methods=["POST"])
 @admin_required
 def reset_password(owner_id: int):
     store = _store()
-    tmp_password = secrets.token_urlsafe(12)
-    new_hash = store._make_password_hash(tmp_password)
-    all_owners = store.load_owners()
-    owner = next((o for o in all_owners if o["id"] == owner_id), None)
+    from app import Owner, db, revoke_all_tokens_for_owner
+    owner = db.session.get(Owner, owner_id)
     if not owner:
         abort(404)
-    username = owner["username"]
-    owner["passwordHash"] = new_hash
-    store.save_owners(all_owners)
-    store.revoke_all_tokens_for_owner(owner_id)
-
-    flash(f"Password for <strong>{username}</strong> reset. Temporary password: <code>{tmp_password}</code>", "password_reset")
+    tmp_password = secrets.token_urlsafe(12)
+    new_hash = store._make_password_hash(tmp_password)
+    owner.password_hash = new_hash
+    db.session.commit()
+    revoke_all_tokens_for_owner(owner_id)
+    flash(f"Password for <strong>{owner.username}</strong> reset. Temp: <code>{tmp_password}</code>", "password_reset")
     return redirect(url_for("admin.owners"))
 
 
 @admin_bp.route("/owners/<int:owner_id>/toggle", methods=["POST"])
 @admin_required
 def toggle_owner(owner_id: int):
-    store = _store()
-    all_owners = store.load_owners()
-    owner = next((o for o in all_owners if o["id"] == owner_id), None)
+    from app import Owner, db
+    owner = db.session.get(Owner, owner_id)
     if not owner:
         abort(404)
-    owner["isActive"] = not owner.get("isActive", True)
-    is_active = owner["isActive"]
-    username = owner["username"]
-    store.save_owners(all_owners)
-
-    status_word = "activated" if is_active else "deactivated"
-    flash(f"Owner <strong>{username}</strong> has been {status_word}.", "success")
+    if owner.is_superadmin:
+        flash("Cannot deactivate a superadmin.")
+        return redirect(url_for("admin.owners"))
+    owner.is_active = not owner.is_active
+    db.session.commit()
+    status_word = "activated" if owner.is_active else "deactivated"
+    flash(f"Owner <strong>{owner.username}</strong> has been {status_word}.", "success")
     return redirect(url_for("admin.owners"))
 
-
-# ---------------------------------------------------------------------------
-# Global analytics
-# ---------------------------------------------------------------------------
 
 @admin_bp.route("/analytics")
 @admin_required
@@ -169,11 +146,13 @@ def analytics():
     stats = _global_stats(store)
     top_items = _top_items(store)
     daily = _daily_revenue(store)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     return render_template(
         "admin/analytics.html",
         stats=stats,
         top_items=top_items,
         daily=daily,
+        now=now,
     )
 
 
@@ -198,8 +177,8 @@ def _top_items(store, limit: int = 10) -> list[dict]:
 
 
 def _daily_revenue(store, days: int = 14) -> list[dict]:
-    orders = store.load_orders()
     from datetime import timedelta
+    orders = store.load_orders()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     daily: dict[str, float] = {}
     for order in orders:
@@ -213,17 +192,12 @@ def _daily_revenue(store, days: int = 14) -> list[dict]:
     return [{"date": day, "revenue": round(value, 2)} for day, value in sorted(daily.items())]
 
 
-# ---------------------------------------------------------------------------
-# System status
-# ---------------------------------------------------------------------------
-
 @admin_bp.route("/status")
 @admin_required
 def status():
     store = _store()
     data_dir = store.DATA_DIR
 
-    # Disk usage
     try:
         disk = shutil.disk_usage(str(data_dir))
         disk_total_gb = round(disk.total / 1e9, 1)
@@ -233,7 +207,6 @@ def status():
     except Exception:
         disk_total_gb = disk_used_gb = disk_free_gb = disk_pct = None
 
-    # DB status
     db_ok = False
     db_msg = "SQLAlchemy storage"
     if store.USE_DB:
@@ -244,7 +217,6 @@ def status():
         except Exception as exc:
             db_msg = f"Database error: {exc}"
 
-    # Data file sizes
     file_stats = []
     for label, path in [
         ("owners.json", store.OWNERS_PATH),
@@ -259,6 +231,7 @@ def status():
         except FileNotFoundError:
             file_stats.append({"name": label, "size_kb": 0, "exists": False})
 
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     return render_template(
         "admin/status.html",
         disk_total_gb=disk_total_gb,
@@ -270,4 +243,5 @@ def status():
         file_stats=file_stats,
         use_db=store.USE_DB,
         server_time=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        now=now,
     )

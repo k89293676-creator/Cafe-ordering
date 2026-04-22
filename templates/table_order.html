@@ -186,10 +186,46 @@
           maxlength="254"
           aria-label="Email for receipt (optional)"
         />
+        <input
+          id="customer-phone"
+          class="o-name-input"
+          type="tel"
+          name="customerPhone"
+          placeholder="Phone for reorder (optional)"
+          autocomplete="tel"
+          maxlength="30"
+          aria-label="Phone number (optional)"
+        />
+        <textarea
+          id="order-notes"
+          class="o-name-input"
+          name="notes"
+          placeholder="Special requests / notes (optional)"
+          rows="2"
+          maxlength="500"
+          style="resize:vertical;font-family:inherit;padding:.65rem 1rem;"
+          aria-label="Order notes"
+        ></textarea>
+
+        <div style="background:var(--gold-bg,#f3f4f6);border:1.5px solid var(--gold-border,#e5e7eb);border-radius:.75rem;padding:.75rem 1rem;margin-bottom:.75rem;font-size:.85rem;color:var(--gold,#4f46e5);font-weight:600;display:flex;align-items:center;gap:.5rem;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+          Pay at Counter — receive your pickup code instantly
+        </div>
+
         <button type="submit" class="o-place-btn" id="place-order-btn">
           Place Order →
         </button>
       </form>
+
+      <!-- Pickup code success screen -->
+      <div id="pickup-success" style="display:none;text-align:center;padding:1.5rem;background:var(--gold-bg,#f0fdf4);border:2px solid var(--gold,#10b981);border-radius:1rem;margin-top:1rem;">
+        <div style="font-size:2.5rem;margin-bottom:.5rem;">✅</div>
+        <h3 style="margin:0 0 .25rem;color:#065f46;">Order Placed!</h3>
+        <p style="color:#374151;font-size:.9rem;margin-bottom:1rem;">Show this code at the counter when paying.</p>
+        <div style="font-size:3rem;font-weight:900;font-family:monospace;letter-spacing:.2em;color:var(--gold,#4f46e5);background:#fff;border:2px dashed currentColor;border-radius:.75rem;padding:.5rem 1rem;margin-bottom:1rem;" id="pickup-code-display">——</div>
+        <div style="font-size:.8rem;color:#6b7280;" id="pickup-order-id"></div>
+        <div id="order-status-tracker" style="margin-top:1rem;font-size:.85rem;"></div>
+      </div>
 
       <div id="checkout-resp" class="o-resp" role="alert" aria-live="assertive"></div>
     </div>
@@ -287,9 +323,139 @@
 <script>
   window.CAFE_TABLE_ID = "{{ table.id | e }}";
   window.CAFE_NAME     = "{{ cafe_name | e }}";
-  window.STRIPE_PUBLISHABLE_KEY = "{{ stripe_publishable_key | e }}";
+  window.STRIPE_PUBLISHABLE_KEY = "";
 </script>
 <script src="/static/js/table.js" defer></script>
+<script>
+// ── Pickup-code checkout override ──────────────────────────────
+(function() {
+  const CSRF_META = document.querySelector('meta[name="csrf-token"]');
+  const CSRF = CSRF_META ? CSRF_META.getAttribute('content') : '';
+  const TABLE_ID = window.CAFE_TABLE_ID;
+
+  function getCart() {
+    try { return JSON.parse(localStorage.getItem('cafe_cart_' + TABLE_ID) || '[]'); } catch(e) { return []; }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('checkout-form');
+    if (!form) return;
+
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const btn = document.getElementById('place-order-btn');
+      const resp = document.getElementById('checkout-resp');
+      const items = getCart();
+
+      if (!items.length) {
+        if (resp) { resp.textContent = 'Your cart is empty.'; resp.className = 'o-resp o-resp--error'; }
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Placing order…';
+
+      const payload = {
+        tableId: TABLE_ID,
+        customerName: (form.querySelector('[name=customerName]') || {}).value || 'Guest',
+        customerEmail: (form.querySelector('[name=customerEmail]') || {}).value || '',
+        customerPhone: (form.querySelector('[name=customerPhone]') || {}).value || '',
+        notes: (form.querySelector('[name=notes]') || {}).value || '',
+        items: items,
+        tip: window._currentTip || 0,
+      };
+
+      try {
+        const r = await fetch('/api/checkout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': CSRF,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await r.json();
+
+        if (r.ok && data.pickupCode) {
+          form.style.display = 'none';
+          const successEl = document.getElementById('pickup-success');
+          if (successEl) {
+            successEl.style.display = 'block';
+            document.getElementById('pickup-code-display').textContent = data.pickupCode;
+            document.getElementById('pickup-order-id').textContent = 'Order #' + data.order.id + ' · Total: ₹' + (data.order.total || 0).toFixed(2);
+          }
+          // Clear cart
+          localStorage.removeItem('cafe_cart_' + TABLE_ID);
+          // Subscribe to order status updates
+          _subscribeOrderStatus(data.order.id);
+          // Show feedback section after delay
+          setTimeout(function() {
+            const rev = document.getElementById('reviews-section');
+            if (rev) { rev.classList.remove('o-reviews--hidden'); }
+            // Store order id for feedback
+            window._lastOrderId = data.order.id;
+          }, 4000);
+        } else {
+          if (resp) {
+            resp.textContent = data.description || 'Failed to place order.';
+            resp.className = 'o-resp o-resp--error';
+          }
+          btn.disabled = false;
+          btn.textContent = 'Place Order →';
+        }
+      } catch(err) {
+        if (resp) {
+          resp.textContent = 'Network error. Please try again.';
+          resp.className = 'o-resp o-resp--error';
+        }
+        btn.disabled = false;
+        btn.textContent = 'Place Order →';
+      }
+    });
+  });
+
+  function _subscribeOrderStatus(orderId) {
+    const tracker = document.getElementById('order-status-tracker');
+    if (!tracker || !window.EventSource) return;
+    const es = new EventSource('/api/orders/' + orderId + '/stream');
+    es.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        const statusMap = {
+          pending: '⏳ Pending',
+          confirmed: '✅ Confirmed',
+          preparing: '👨‍🍳 Being prepared',
+          ready: '🔔 Ready for pickup!',
+          completed: '✅ Completed — enjoy!',
+          cancelled: '❌ Cancelled',
+        };
+        tracker.innerHTML = '<strong>Status:</strong> ' + (statusMap[data.status] || data.status);
+        if (data.status === 'completed' || data.status === 'cancelled') {
+          es.close();
+        }
+      } catch(e) {}
+    };
+    es.onerror = function() { es.close(); };
+  }
+
+  // Patch feedback submit to include order id
+  document.addEventListener('DOMContentLoaded', function() {
+    const submitBtn = document.getElementById('feedback-submit-btn');
+    if (!submitBtn) return;
+    const origClick = submitBtn.onclick;
+    submitBtn.addEventListener('click', function() {
+      if (window._lastOrderId && !document.getElementById('feedback-order-id-hidden')) {
+        const inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.id = 'feedback-order-id-hidden';
+        inp.name = 'orderId';
+        inp.value = window._lastOrderId;
+        submitBtn.parentNode.appendChild(inp);
+      }
+    });
+  });
+})();
+</script>
 
 <script>
 // Dark mode persistence
