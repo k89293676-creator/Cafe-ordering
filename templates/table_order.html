@@ -145,30 +145,30 @@
     const quickStatus  = document.getElementById('ays-quick-status');
     const cancelCallBtn= document.getElementById('ays-cancel-call-btn');
 
-    if (!collapsed || !expanded || !openBtn || !sendBtn) return;  // page not rendered
+    if (!collapsed || !expanded || !openBtn || !sendBtn) return;
 
     const REASON_LABELS = {
       service:'🛎️ Call server', bill:'💳 Ask for the bill',
       water:'💧 Water refill', cutlery:'🍴 Cutlery', help:'❓ Need help'
     };
-    const POLL_INTERVAL_MS  = 4000;
-    const STATUS_URL        = `/api/table/${encodeURIComponent(tableId)}/call-status`;
-    const CALL_URL          = `/api/table/${encodeURIComponent(tableId)}/call`;
-    const CANCEL_URL        = `/api/table/${encodeURIComponent(tableId)}/call/cancel`;
-
-    let selectedReason     = null;
-    let _pollTimer         = null;
-    let _inFlightStatus    = null;     // AbortController for the current poll
-    let _activeCallId      = null;     // last call we know about
-    let _suppressAckMsgUntil = 0;      // timestamp; "Sending…" UI wins until then
-    let _sendInFlight      = false;    // hard mutex for double-tap protection
-    let _cancelInFlight    = false;
-    let _sse               = null;     // EventSource for real-time updates
-    let _sseRetry          = 1500;     // backoff in ms
-    let _sseConnected      = false;
-    let _ageTicker         = null;     // 1 s timer that updates the "sent Xs ago" text
-    let _currentCall       = null;     // most-recent known call object
+    const POLL_INTERVAL_MS = 4000;
+    const STATUS_URL       = `/api/table/${encodeURIComponent(tableId)}/call-status`;
+    const CALL_URL         = `/api/table/${encodeURIComponent(tableId)}/call`;
+    const CANCEL_URL       = `/api/table/${encodeURIComponent(tableId)}/call/cancel`;
     const STREAM_URL       = `/api/table/${encodeURIComponent(tableId)}/call/stream`;
+
+    let selectedReason       = null;
+    let _pollTimer           = null;
+    let _inFlightStatus      = null;
+    let _activeCallId        = null;
+    let _suppressAckMsgUntil = 0;
+    let _sendInFlight        = false;
+    let _cancelInFlight      = false;
+    let _sse                 = null;
+    let _sseRetry            = 1500;
+    let _sseConnected        = false;
+    let _ageTicker           = null;
+    let _currentCall         = null;
 
     /* ── Panel open / close ─────────────────────────────────────────────── */
     function openPanel() {
@@ -185,17 +185,17 @@
       sendBtn.disabled          = false;
       sendBtn.textContent       = 'Send request';
       document.querySelectorAll('#ays-expanded .ays-btn[data-reason]')
-              .forEach(b => b.classList.remove('ays-selected'));
+              .forEach(function(b){ b.classList.remove('ays-selected'); });
     }
 
     openBtn.addEventListener('click', openPanel);
     if (cancelBtn) cancelBtn.addEventListener('click', closePanel);
 
-    document.querySelectorAll('#ays-expanded .ays-btn[data-reason]').forEach(btn => {
-      btn.addEventListener('click', () => {
+    document.querySelectorAll('#ays-expanded .ays-btn[data-reason]').forEach(function(btn){
+      btn.addEventListener('click', function(){
         selectedReason = btn.dataset.reason;
         document.querySelectorAll('#ays-expanded .ays-btn[data-reason]')
-                .forEach(b => b.classList.remove('ays-selected'));
+                .forEach(function(b){ b.classList.remove('ays-selected'); });
         btn.classList.add('ays-selected');
         confirmLabel.textContent  = REASON_LABELS[selectedReason] || selectedReason;
         confirmArea.style.display = 'flex';
@@ -204,60 +204,62 @@
       });
     });
 
+    /* ── Helpers ─────────────────────────────────────────────────────────── */
     function setQuickStatus(text, color, weight) {
-      quickStatus.textContent     = text || '';
-      quickStatus.style.color     = color || '#6b7280';
+      quickStatus.textContent      = text || '';
+      quickStatus.style.color      = color || '#6b7280';
       quickStatus.style.fontWeight = weight || 'normal';
     }
     function ageString(iso) {
-      const t = new Date(iso).getTime();
+      var t = new Date(iso).getTime();
       if (!isFinite(t)) return '';
-      const s = Math.max(0, Math.round((Date.now() - t) / 1000));
-      if (s < 60)   return `${s}s ago`;
-      const m = Math.floor(s / 60);
-      const r = s % 60;
-      return r ? `${m}m ${r}s ago` : `${m}m ago`;
+      var s = Math.max(0, Math.round((Date.now() - t) / 1000));
+      if (s < 60) return s + 's ago';
+      var m = Math.floor(s / 60);
+      var r = s % 60;
+      return r ? (m + 'm ' + r + 's ago') : (m + 'm ago');
     }
     function showCancelBtn(show) {
       if (!cancelCallBtn) return;
       cancelCallBtn.style.display = show ? 'inline-block' : 'none';
       if (show) {
-        cancelCallBtn.disabled  = false;
+        cancelCallBtn.disabled    = false;
         cancelCallBtn.textContent = '✕ Cancel';
       }
     }
 
-    /* ── Live call-status polling (failsafe behind SSE) ──────────────────── */
+    /* ── Polling (failsafe behind SSE) ──────────────────────────────────── */
     function startPoll() {
-      // Backup poll only — when SSE is connected the cadence is much slower
-      // because the server pushes every change instantly anyway.
       if (_pollTimer) return;
-      const interval = _sseConnected ? 30000 : POLL_INTERVAL_MS;
+      var interval = _sseConnected ? 30000 : POLL_INTERVAL_MS;
       setTimeout(pollCallStatus, 1200);
       _pollTimer = setInterval(pollCallStatus, interval);
     }
     function stopPoll() {
       if (_pollTimer) clearInterval(_pollTimer);
       _pollTimer = null;
-      if (_inFlightStatus) { try { _inFlightStatus.abort(); } catch(_){} _inFlightStatus = null; }
+      if (_inFlightStatus) {
+        try { _inFlightStatus.abort(); } catch(_){}
+        _inFlightStatus = null;
+      }
     }
     function restartPoll() { stopPoll(); startPoll(); }
 
-    /* ── Live ticking "Waiting Xs / Acked Xs" updater ────────────────────── */
+    /* ── Age ticker ──────────────────────────────────────────────────────── */
     function startAgeTicker() {
       if (_ageTicker) return;
-      _ageTicker = setInterval(() => {
+      _ageTicker = setInterval(function(){
         if (document.hidden) return;
         if (Date.now() < _suppressAckMsgUntil) return;
         if (!_currentCall) return;
         if (_currentCall.status === 'acknowledged') {
-          const ackedFor = _currentCall.acknowledgedAt ? ageString(_currentCall.acknowledgedAt) : '';
+          var ackedFor = _currentCall.acknowledgedAt ? ageString(_currentCall.acknowledgedAt) : '';
           setQuickStatus(
-            ackedFor ? `✓ Staff on their way! (${ackedFor})` : '✓ Staff on their way!',
+            ackedFor ? ('✓ Staff on their way! (' + ackedFor + ')') : '✓ Staff on their way!',
             '#4f46e5', '600'
           );
         } else {
-          setQuickStatus(`🛎️ Waiting… (sent ${ageString(_currentCall.createdAt)})`, '#6b7280', 'normal');
+          setQuickStatus('🛎️ Waiting… (sent ' + ageString(_currentCall.createdAt) + ')', '#6b7280', 'normal');
         }
       }, 1000);
     }
@@ -266,92 +268,88 @@
       _ageTicker = null;
     }
 
-    /* ── Server-Sent Events: instant push from server ────────────────────── */
+    /* ── SSE: instant push from server ──────────────────────────────────── */
     function connectSSE() {
       if (!('EventSource' in window) || _sse) return;
-      try { _sse = new EventSource(STREAM_URL); }
-      catch (_) { _sse = null; return; }
+      try {
+        _sse = new EventSource(STREAM_URL);
+      } catch(_) {
+        _sse = null;
+        return;
+      }
 
-      _sse.onopen = () => {
+      _sse.onopen = function() {
         _sseConnected = true;
         _sseRetry = 1500;
-        // Slow the failsafe polling now that pushes are flowing.
         restartPoll();
       };
 
-      _sse.onmessage = (evt) => {
+      _sse.onmessage = function(evt) {
         if (!evt || !evt.data) return;
         try {
-          const payload = JSON.parse(evt.data);
-          // Snapshot ships the full current state; updates ship just the
-          // changed call. Both shapes carry the call object in `data` (or
-          // null if no live call exists). `type` may be missing for raw
-          // legacy frames — treat that as an update too.
-          const data = payload.data === undefined ? payload : payload.data;
+          var payload = JSON.parse(evt.data);
+          var data = payload.data === undefined ? payload : payload.data;
           applyCallState(data || null);
-      } catch (err) {
+        } catch(err) {
+          /* parse error — ignore */
+        }
       };
 
-      _sse.onerror = () => {
+      _sse.onerror = function() {
         _sseConnected = false;
-        try { _sse.close(); } catch (_) {}
+        try { _sse.close(); } catch(_) {}
         _sse = null;
-        restartPoll();   // fall back to faster polling while disconnected
-        // Exponential backoff reconnect, capped at 30 s.
+        restartPoll();
         setTimeout(connectSSE, _sseRetry);
         _sseRetry = Math.min(_sseRetry * 2, 30000);
       };
     }
+
     function disconnectSSE() {
-      if (_sse) { try { _sse.close(); } catch (_) {} _sse = null; }
+      if (_sse) { try { _sse.close(); } catch(_) {} _sse = null; }
       _sseConnected = false;
     }
 
+    /* ── Poll call status ────────────────────────────────────────────────── */
     async function pollCallStatus() {
-      if (document.hidden) return;     // save the customer's battery / data
-      if (_inFlightStatus) return;     // never overlap
+      if (document.hidden) return;
+      if (_inFlightStatus) return;
       _inFlightStatus = ('AbortController' in window) ? new AbortController() : null;
       try {
-        const r = await fetch(STATUS_URL, {
-          signal: _inFlightStatus ? _inFlightStatus.signal : undefined,
-          cache: 'no-store',
-        });
+        var opts = { cache: 'no-store' };
+        if (_inFlightStatus) opts.signal = _inFlightStatus.signal;
+        var r = await fetch(STATUS_URL, opts);
         if (!r.ok) return;
-        const { call } = await r.json();
-        applyCallState(call);
-      } catch (err) {
-        // network blip — keep polling on the next tick
+        var body = await r.json();
+        applyCallState(body.call);
+      } catch(err) {
+        /* network blip — keep polling on the next tick */
       } finally {
         _inFlightStatus = null;
       }
     }
 
+    /* ── Apply call state to UI ─────────────────────────────────────────── */
     function applyCallState(call) {
       _currentCall = call || null;
-
-      // Don't clobber the user's "Sending…" optimistic message.
       if (Date.now() < _suppressAckMsgUntil) return;
 
       if (!call || call.status === 'resolved') {
-        // Only celebrate if we knew about a live call before; otherwise
-        // (fresh page, no call ever sent) stay quiet.
         if (_activeCallId !== null) {
-          // Distinguish "staff resolved it" (positive) from "I cancelled it".
-          const note = (call && call.note) || '';
+          var note = (call && call.note) || '';
           if (note.indexOf('[cancelled by customer]') !== -1) {
             setQuickStatus('✓ Request cancelled.', '#6b7280');
           } else {
             setQuickStatus('✅ Service complete — thank you!', '#16a34a', '600');
           }
           openBtn.textContent = '🛎️ Call again';
-          setTimeout(() => {
-            // Only clear if status hasn't been overwritten by a new send.
-            const t = quickStatus.textContent;
+          setTimeout(function(){
+            var t = quickStatus.textContent;
             if (t.startsWith('✅') || t.startsWith('✓ Request cancelled')) setQuickStatus('');
           }, 6000);
         }
         _activeCallId = null;
-        _currentCall = null;
+        _currentCall  = null;
         showCancelBtn(false);
         stopAgeTicker();
         stopPoll();
@@ -360,35 +358,32 @@
 
       _activeCallId = call.id;
       openBtn.textContent = '🛎️ Call again';
-
       if (call.status === 'acknowledged') {
-        const ackedFor = call.acknowledgedAt ? ageString(call.acknowledgedAt) : '';
+        var ackedFor = call.acknowledgedAt ? ageString(call.acknowledgedAt) : '';
         setQuickStatus(
-          ackedFor ? `✓ Staff on their way! (${ackedFor})` : '✓ Staff on their way!',
+          ackedFor ? ('✓ Staff on their way! (' + ackedFor + ')') : '✓ Staff on their way!',
           '#4f46e5', '600'
         );
         showCancelBtn(false);
       } else {
-        setQuickStatus(`🛎️ Waiting… (sent ${ageString(call.createdAt)})`, '#6b7280', 'normal');
+        setQuickStatus('🛎️ Waiting… (sent ' + ageString(call.createdAt) + ')', '#6b7280', 'normal');
         showCancelBtn(true);
       }
       startAgeTicker();
     }
 
-    /* ── Cancel pending call ─────────────────────────────────────────────── */
+    /* ── Cancel call ────────────────────────────────────────────────────── */
     async function cancelCall() {
       if (_cancelInFlight || !cancelCallBtn) return;
-      _cancelInFlight = true;
+      _cancelInFlight           = true;
       cancelCallBtn.disabled    = true;
       cancelCallBtn.textContent = 'Cancelling…';
       try {
-        const r = await fetch(CANCEL_URL, {
-          method: 'POST',
+        var r = await fetch(CANCEL_URL, {
+          method:  'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-          signal: _ac ? _ac.signal : undefined,
         });
-        if (_timeoutId) clearTimeout(_timeoutId);
-        const j = await r.json().catch(() => ({}));
+        var j = await r.json().catch(function(){ return {}; });
         if (r.ok) {
           if (j.cancelled) {
             stopPoll();
@@ -396,11 +391,10 @@
             showCancelBtn(false);
             openBtn.textContent = '🛎️ Call for service';
             setQuickStatus('✓ Request cancelled.', '#6b7280');
-            setTimeout(() => {
+            setTimeout(function(){
               if (quickStatus.textContent.startsWith('✓ Request cancelled')) setQuickStatus('');
             }, 4000);
           } else if (j.reason === 'already_acknowledged') {
-            // Lost the race — staff just acknowledged. Reflect that.
             showCancelBtn(false);
             setQuickStatus('✓ Staff already on the way — cannot cancel.', '#4f46e5', '600');
             pollCallStatus();
@@ -413,7 +407,7 @@
         } else {
           setQuickStatus('Could not cancel — try again.', '#b91c1c');
         }
-      } catch (err) {
+      } catch(err) {
         setQuickStatus('Network error — try again.', '#b91c1c');
       } finally {
         _cancelInFlight = false;
@@ -425,34 +419,32 @@
     }
     if (cancelCallBtn) cancelCallBtn.addEventListener('click', cancelCall);
 
-    /* ── Send call ───────────────────────────────────────────────────────── */
+    /* ── Send call ──────────────────────────────────────────────────────── */
     async function sendCall() {
       if (_sendInFlight || !selectedReason) return;
       _sendInFlight        = true;
       sendBtn.disabled     = true;
       sendBtn.textContent  = 'Sending…';
       statusEl.textContent = '';
-      const reason = selectedReason;
-      const label  = REASON_LABELS[reason] || reason;
+      var reason = selectedReason;
+      var label  = REASON_LABELS[reason] || reason;
+      var _ac       = ('AbortController' in window) ? new AbortController() : null;
+      var _timeoutId = _ac ? setTimeout(function(){ _ac.abort(); }, 10000) : null;
       try {
-        const _ac = ('AbortController' in window) ? new AbortController() : null;
-        const _timeoutId = _ac ? setTimeout(() => _ac.abort(), 10000) : null;
-        const r = await fetch(CALL_URL, {
-          method: 'POST',
+        var r = await fetch(CALL_URL, {
+          method:  'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-          signal: _ac ? _ac.signal : undefined,
-          body: JSON.stringify({ reason, note: noteInput.value.trim() }),
+          signal:  _ac ? _ac.signal : undefined,
+          body:    JSON.stringify({ reason: reason, note: noteInput.value.trim() }),
         });
         if (_timeoutId) clearTimeout(_timeoutId);
-        const j = await r.json().catch(() => ({}));
+        var j = await r.json().catch(function(){ return {}; });
         if (r.ok && j.ok !== false) {
           closePanel();
-          // Hold our optimistic message visible for ~3s so the next poll
-          // doesn't immediately replace "✓ on the way!" with "Waiting…".
           _suppressAckMsgUntil = Date.now() + 1500;
           _activeCallId        = (j.call && j.call.id) || _activeCallId || -1;
           setQuickStatus(
-            j.deduped ? `🔔 Reminder sent for "${label}"!` : `✓ ${label} — on the way!`,
+            j.deduped ? ('🔔 Reminder sent for "' + label + '"!') : ('✓ ' + label + ' — on the way!'),
             '#16a34a', '600'
           );
           openBtn.textContent = '🛎️ Call again';
@@ -465,50 +457,48 @@
           statusEl.textContent = (j && j.error) || 'Could not send. Please flag down a server.';
           statusEl.style.color = '#b91c1c';
         }
-      } catch (err) {
+      } catch(err) {
         if (_timeoutId) clearTimeout(_timeoutId);
-        statusEl.textContent = (err && err.name === 'AbortError') ? 'Request timed out — try again.' : 'Network error — try again.';
+        statusEl.textContent = (err && err.name === 'AbortError')
+          ? 'Request timed out — try again.'
+          : 'Network error — try again.';
         statusEl.style.color = '#b91c1c';
       } finally {
         _sendInFlight = false;
         if (expanded.style.display !== 'none') {
-          // Panel still open — re-arm so the user can retry.
           sendBtn.disabled    = false;
           sendBtn.textContent = 'Send request';
         }
       }
     }
     sendBtn.addEventListener('click', sendCall);
-    noteInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendCall(); });
+    noteInput.addEventListener('keydown', function(e){ if (e.key === 'Enter') sendCall(); });
 
-    /* ── Visibility: pause polling when tab hidden, kick once on return ──── */
-    document.addEventListener('visibilitychange', () => {
+    /* ── Visibility / unload ────────────────────────────────────────────── */
+    document.addEventListener('visibilitychange', function(){
       if (document.hidden) return;
       if (_activeCallId !== null) pollCallStatus();
-      // Reconnect SSE if it dropped while we were away.
       if (!_sse) connectSSE();
     });
-    window.addEventListener('beforeunload', () => { disconnectSSE(); stopPoll(); stopAgeTicker(); });
+    window.addEventListener('beforeunload', function(){
+      disconnectSSE(); stopPoll(); stopAgeTicker();
+    });
 
-    /* ── On page load: connect SSE (delivers the snapshot first frame) ──── */
-    (function init() {
-      // SSE's first frame is a snapshot of the current call (or null), so
-      // we no longer need a separate REST status fetch on page load — the
-      // stream itself bootstraps the UI. Polling kicks in only as a
-      // failsafe when SSE isn't available.
-      connectSSE();
-      if (!('EventSource' in window)) {
-        // Old browser — fall back to the legacy poll-on-load path.
-        (async () => {
-          try {
-            const r = await fetch(STATUS_URL, { cache: 'no-store' });
-            if (!r.ok) return;
-            const { call } = await r.json();
-            if (call) { applyCallState(call); startPoll(); }
-      } catch (err) {
-        })();
-      }
-    })();
+    /* ── Init ───────────────────────────────────────────────────────────── */
+    connectSSE();
+    if (!('EventSource' in window)) {
+      (async function(){
+        try {
+          var r = await fetch(STATUS_URL, { cache: 'no-store' });
+          if (!r.ok) return;
+          var body = await r.json();
+          if (body.call) { applyCallState(body.call); startPoll(); }
+        } catch(err) {
+          /* ignore — old browser fallback */
+        }
+      })();
+    }
+
   })();
   </script>
   {% endif %}
