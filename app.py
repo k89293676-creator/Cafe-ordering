@@ -532,8 +532,32 @@ def _client_ip() -> str:
     return request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
 
 
+import collections as _collections
+
+# Process-local ring buffer of recent security events for the superadmin
+# audit viewer. Persists across requests within the same worker; survives
+# until process restart. Capped to avoid unbounded memory growth.
+SECURITY_EVENT_BUFFER: _collections.deque = _collections.deque(maxlen=2000)
+
+
 def log_security(event: str, detail: str = "") -> None:
-    security_log.info("%s ip=%s %s", event, _client_ip(), detail)
+    ip = _client_ip()
+    security_log.info("%s ip=%s %s", event, ip, detail)
+    try:
+        SECURITY_EVENT_BUFFER.append({
+            "ts": time.time(),
+            "event": event,
+            "ip": ip,
+            "detail": detail,
+            "actor": (
+                session.get("admin_owner_id")
+                or session.get("_user_id")
+                or None
+            ),
+        })
+    except Exception:
+        # Never let logging break the request.
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -3804,6 +3828,55 @@ def superadmin_verify_key():
         error = "Invalid key. Please try again."
         log_security("SUPERADMIN_KEY_FAIL", f"admin_owner_id={session.get('admin_owner_id')}")
     return render_template("superadmin/verify_key.html", error=error), (200 if not error else 401)
+
+
+@app.route("/superadmin/audit")
+@login_required
+@superadmin_required
+def superadmin_audit():
+    """Browse the in-memory security audit ring buffer."""
+    q = (request.args.get("q", "") or "").strip().lower()
+    event_filter = (request.args.get("event", "") or "").strip()
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except ValueError:
+        page = 1
+    per_page = 100
+
+    events = list(SECURITY_EVENT_BUFFER)
+    events.reverse()  # newest first
+
+    if event_filter:
+        events = [e for e in events if e.get("event", "").startswith(event_filter)]
+    if q:
+        events = [
+            e for e in events
+            if q in (e.get("event", "") + " " + e.get("detail", "") + " " + str(e.get("ip", ""))).lower()
+        ]
+
+    total = len(events)
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = min(page, pages)
+    start = (page - 1) * per_page
+    page_events = events[start:start + per_page]
+
+    event_types = sorted({e.get("event", "") for e in SECURITY_EVENT_BUFFER if e.get("event")})
+    return render_template(
+        "superadmin/audit.html",
+        events=page_events,
+        total=total,
+        page=page,
+        pages=pages,
+        per_page=per_page,
+        q=q,
+        event_filter=event_filter,
+        event_types=event_types,
+        buffer_capacity=SECURITY_EVENT_BUFFER.maxlen,
+        verified_until=(
+            float(session.get("superadmin_key_verified_at", 0) or 0) + SUPERADMIN_VERIFY_TTL
+            if session.get("superadmin_key_verified") else None
+        ),
+    )
 
 
 @app.route("/superadmin/verify-key/clear", methods=["POST"])

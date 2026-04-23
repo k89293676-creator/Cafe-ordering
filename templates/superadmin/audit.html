@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Audit Log — Superadmin</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+  <style>
+    body{background:#f5f6f8;}
+    .topbar{background:#1a1d21;color:#fff;padding:1rem 1.5rem;display:flex;justify-content:space-between;align-items:center;}
+    .topbar a{color:#9ba3af;text-decoration:none;font-size:.85rem;}
+    .topbar a:hover{color:#fff;}
+    .container-x{max-width:1200px;margin:1.5rem auto;padding:0 1rem;}
+    .card-x{background:#fff;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.06);padding:1.25rem 1.5rem;margin-bottom:1rem;}
+    table{font-size:.83rem;}
+    .ev{font-family:ui-monospace,Menlo,monospace;font-size:.75rem;padding:.15rem .45rem;border-radius:.3rem;background:#eef0f3;color:#374151;}
+    .ev.ok{background:#dcfce7;color:#166534;}
+    .ev.bad{background:#fee2e2;color:#991b1b;}
+    .ev.warn{background:#fef3c7;color:#92400e;}
+    .detail{font-family:ui-monospace,Menlo,monospace;font-size:.75rem;color:#4b5563;word-break:break-all;}
+    .ts{font-variant-numeric:tabular-nums;color:#6b7280;font-size:.78rem;}
+    .ip{color:#6366f1;font-family:ui-monospace,Menlo,monospace;font-size:.75rem;}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div>
+      <a href="{{ url_for('superadmin_dashboard') }}"><i class="bi bi-arrow-left"></i> Back to Dashboard</a>
+      <span class="ms-3 fw-bold">Security Audit Log</span>
+    </div>
+    <div class="small">
+      {% if verified_until %}
+        <span class="badge bg-success">Verified</span>
+        <span class="ms-1">expires <span id="ttl" data-until="{{ verified_until }}"></span></span>
+      {% else %}
+        <span class="badge bg-secondary">Real Superadmin</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="container-x">
+    <div class="card-x">
+      <form method="GET" class="row g-2 align-items-end">
+        <div class="col-md-5">
+          <label class="form-label small fw-semibold mb-1">Search</label>
+          <input type="text" class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="event, ip, detail…"/>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small fw-semibold mb-1">Event type</label>
+          <select name="event" class="form-select form-select-sm">
+            <option value="">All events</option>
+            {% for et in event_types %}
+              <option value="{{ et }}" {% if et == event_filter %}selected{% endif %}>{{ et }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3 d-flex gap-2">
+          <button type="submit" class="btn btn-sm btn-primary flex-fill"><i class="bi bi-funnel-fill me-1"></i>Filter</button>
+          <a href="{{ url_for('superadmin_audit') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="card-x">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="small text-muted">
+          Showing <strong>{{ events|length }}</strong> of <strong>{{ total }}</strong> matching events
+          (buffer holds last {{ buffer_capacity }} security events; cleared on app restart).
+        </div>
+        <div class="small text-muted">Page {{ page }} / {{ pages }}</div>
+      </div>
+
+      {% if events %}
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th style="width:170px;">When</th>
+              <th style="width:240px;">Event</th>
+              <th style="width:130px;">IP</th>
+              <th style="width:80px;">Actor</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in events %}
+              {% set evname = e.event or "" %}
+              {% set kls = "ev" %}
+              {% if evname.endswith("_OK") or "_OK" in evname %}{% set kls = "ev ok" %}
+              {% elif evname.endswith("_FAIL") or "_DENIED" in evname or "_FAIL" in evname %}{% set kls = "ev bad" %}
+              {% elif "_NO_KEY" in evname or "_REVOKED" in evname %}{% set kls = "ev warn" %}
+              {% endif %}
+              <tr>
+                <td class="ts" data-ts="{{ e.ts }}"></td>
+                <td><span class="{{ kls }}">{{ evname }}</span></td>
+                <td><span class="ip">{{ e.ip }}</span></td>
+                <td class="small text-muted">{{ e.actor or "-" }}</td>
+                <td class="detail">{{ e.detail }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if pages > 1 %}
+      <nav class="mt-2">
+        <ul class="pagination pagination-sm justify-content-center mb-0">
+          {% set qs = "&q=" ~ q ~ "&event=" ~ event_filter %}
+          <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+            <a class="page-link" href="?page={{ page - 1 }}{{ qs }}">Prev</a>
+          </li>
+          <li class="page-item disabled"><span class="page-link">{{ page }} / {{ pages }}</span></li>
+          <li class="page-item {% if page >= pages %}disabled{% endif %}">
+            <a class="page-link" href="?page={{ page + 1 }}{{ qs }}">Next</a>
+          </li>
+        </ul>
+      </nav>
+      {% endif %}
+
+      {% else %}
+        <div class="text-center text-muted py-5">
+          <i class="bi bi-inbox" style="font-size:2rem;"></i>
+          <div class="mt-2">No security events recorded yet.</div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll("td.ts[data-ts]").forEach(function(el){
+      var t = parseFloat(el.dataset.ts) * 1000;
+      if (!isNaN(t)) el.textContent = new Date(t).toLocaleString();
+    });
+    var ttl = document.getElementById("ttl");
+    if (ttl) {
+      var until = parseFloat(ttl.dataset.until) * 1000;
+      function tick(){
+        var s = Math.max(0, Math.round((until - Date.now()) / 1000));
+        var m = Math.floor(s/60), r = s%60;
+        ttl.textContent = "in " + m + "m " + (r<10?"0":"") + r + "s";
+      }
+      tick(); setInterval(tick, 1000);
+    }
+  </script>
+</body>
+</html>
