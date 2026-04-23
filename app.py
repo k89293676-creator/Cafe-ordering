@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import csv
 import io
+import hashlib
 import json
 import logging
 import mimetypes
@@ -222,6 +223,7 @@ from lib_billing import (  # noqa: E402
     summarise_payment_breakdown,
 )
 from lib_payments import (  # noqa: E402
+    PROVIDER_GUIDES,
     PROVIDER_LABELS,
     SUPPORTED_PROVIDERS,
     PaymentProviderError,
@@ -536,11 +538,36 @@ class PaymentProviderCredential(db.Model):
     last_tested_at = db.Column(db.DateTime(timezone=True))
     last_test_status = db.Column(db.Text, default="")
     last_test_message = db.Column(db.Text, default="")
+    verified_at = db.Column(db.DateTime(timezone=True))  # last successful test
+    verified_fingerprint = db.Column(db.Text, default="")  # SHA-256 of verified secret
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(),
                            onupdate=db.func.now())
     __table_args__ = (
         db.UniqueConstraint("owner_id", "provider", name="uq_payment_owner_provider"),
+    )
+
+
+class WebhookEventLog(db.Model):
+    """Idempotency table for inbound provider webhooks.
+
+    Providers retry until they get a 2xx — for some events (Stripe in
+    particular) they will deliver the same event multiple times even
+    after a successful response. We MUST refuse to settle a bill twice,
+    so every event id is recorded once and re-deliveries become no-ops.
+    Indexed on (provider, event_id) so the lookup at the top of the
+    webhook handler is O(1)."""
+
+    __tablename__ = "webhook_events"
+    id = db.Column(db.Integer, primary_key=True)
+    provider = db.Column(db.Text, nullable=False)
+    event_id = db.Column(db.Text, nullable=False)  # provider's event id (or hash)
+    intent_id = db.Column(db.Text, default="", index=True)
+    event_type = db.Column(db.Text, default="")
+    received_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    processed = db.Column(db.Boolean, default=False, server_default="false")
+    __table_args__ = (
+        db.UniqueConstraint("provider", "event_id", name="uq_webhook_provider_event"),
     )
 
 
@@ -686,6 +713,7 @@ def _init_db() -> None:
             "CREATE INDEX IF NOT EXISTS ix_payment_credentials_owner ON payment_credentials(owner_id)",
             "CREATE INDEX IF NOT EXISTS ix_online_payments_owner_order ON online_payments(owner_id, order_id)",
             "CREATE INDEX IF NOT EXISTS ix_online_payments_intent ON online_payments(intent_id)",
+            "CREATE INDEX IF NOT EXISTS ix_webhook_events_provider_event ON webhook_events(provider, event_id)",
         ):
             try:
                 db.session.execute(text(idx_sql))
@@ -3771,7 +3799,23 @@ def _default_payment_credential(owner_id: int) -> "PaymentProviderCredential | N
             or q.order_by(PaymentProviderCredential.updated_at.desc()).first())
 
 
+def _secret_fingerprint(secret: str) -> str:
+    """A short, non-reversible tag for a secret. Used to detect whether the
+    currently-stored secret is the same one that was last verified — so we
+    can require a fresh test after rotation before allowing live mode."""
+    if not secret:
+        return ""
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()[:16]
+
+
 def _credential_view(cred: "PaymentProviderCredential") -> dict:
+    try:
+        secret_plain = decrypt_secret(cred.secret_key_enc) if cred.secret_key_enc else ""
+    except Exception:  # noqa: BLE001 — encryption-key rotation case
+        secret_plain = ""
+    current_fp = _secret_fingerprint(secret_plain)
+    is_verified = bool(cred.verified_at and cred.verified_fingerprint == current_fp and current_fp)
+    guide = PROVIDER_GUIDES.get(cred.provider, {})
     return {
         "id": cred.id,
         "provider": cred.provider,
@@ -3783,11 +3827,22 @@ def _credential_view(cred: "PaymentProviderCredential") -> dict:
         "mode": cred.mode,
         "is_active": bool(cred.is_active),
         "is_default": bool(cred.is_default),
+        "is_verified": is_verified,
+        "verified_at": cred.verified_at,
         "last_tested_at": cred.last_tested_at,
         "last_test_status": cred.last_test_status,
         "last_test_message": cred.last_test_message,
         "webhook_url": url_for("billing_webhook", provider=cred.provider, _external=True),
+        "guide": guide,
     }
+
+
+def _enforce_https_for_webhooks() -> bool:
+    """Production deployments MUST receive webhooks over HTTPS — providers
+    refuse to send them otherwise, but we also assert here so misconfigs
+    surface as a 400 instead of a silent 'no payments arriving'."""
+    return os.environ.get("FLASK_ENV", "").lower() == "production" or \
+        bool(os.environ.get("RAILWAY_ENVIRONMENT"))
 
 
 @app.route("/owner/billing/payment-methods")
@@ -3798,18 +3853,26 @@ def owner_billing_payment_methods():
              .filter_by(owner_id=owner_id)
              .order_by(PaymentProviderCredential.created_at.desc()).all())
     configured_providers = {c.provider for c in creds}
-    available = [p for p in SUPPORTED_PROVIDERS if p not in configured_providers]
+    available = [
+        {"slug": p, "label": PROVIDER_LABELS.get(p, p.title()),
+         "guide": PROVIDER_GUIDES.get(p, {})}
+        for p in SUPPORTED_PROVIDERS if p not in configured_providers
+    ]
+    sample_webhook_url = url_for("billing_webhook", provider="<provider>", _external=True)
     return _no_store(app.make_response(render_template(
         "owner_billing/payment_methods.html",
         credentials=[_credential_view(c) for c in creds],
-        available_providers=[(p, PROVIDER_LABELS.get(p, p.title())) for p in available],
+        available_providers=available,
         provider_labels=PROVIDER_LABELS,
+        provider_guides=PROVIDER_GUIDES,
+        sample_webhook_url=sample_webhook_url,
         owner_username=logged_in_owner(),
     )))
 
 
 @app.route("/owner/billing/payment-methods/save", methods=["POST"])
 @login_required
+@limiter.limit("20 per hour; 5 per minute")
 def owner_billing_payment_methods_save():
     owner_id = logged_in_owner_id()
     provider = (request.form.get("provider") or "").strip().lower()
@@ -3819,69 +3882,145 @@ def owner_billing_payment_methods_save():
 
     cred = (PaymentProviderCredential.query
             .filter_by(owner_id=owner_id, provider=provider).first())
-    if cred is None:
+    is_new = cred is None
+    if is_new:
         cred = PaymentProviderCredential(owner_id=owner_id, provider=provider)
         db.session.add(cred)
 
     cred.display_name = (request.form.get("display_name") or "").strip()[:80]
-    cred.public_key = (request.form.get("public_key") or "").strip()[:200]
+    # Only overwrite the public key if a non-empty, non-masked value was
+    # submitted. Masked placeholder values like "rzp_••••wxyz" must never
+    # be persisted — that was the v1 bug. We detect masking by the bullet
+    # character, which never appears in a real provider key.
+    submitted_public = (request.form.get("public_key") or "").strip()[:200]
+    if submitted_public and "•" not in submitted_public:
+        cred.public_key = submitted_public
     secret_key = (request.form.get("secret_key") or "").strip()
     webhook_secret = (request.form.get("webhook_secret") or "").strip()
-    # Owners can edit display info without re-typing the secret. Only
-    # overwrite when they actually pasted a new value.
+    secret_changed = False
     if secret_key:
         cred.secret_key_enc = encrypt_secret(secret_key)
+        secret_changed = True
     if webhook_secret:
         cred.webhook_secret_enc = encrypt_secret(webhook_secret)
     requested_mode = (request.form.get("mode") or "").strip().lower()
+    desired_mode = cred.mode or "test"
     if requested_mode in ("test", "live"):
-        cred.mode = requested_mode
+        desired_mode = requested_mode
     elif secret_key or cred.public_key:
-        detected = detect_mode_from_key(provider, cred.public_key, secret_key or decrypt_secret(cred.secret_key_enc))
+        detected = detect_mode_from_key(
+            provider, cred.public_key,
+            secret_key or (decrypt_secret(cred.secret_key_enc) if cred.secret_key_enc else "")
+        )
         if detected != "unknown":
-            cred.mode = detected
-    cred.is_active = bool(request.form.get("is_active"))
-    if request.form.get("is_default"):
-        # Only one default per owner — clear others atomically.
+            desired_mode = detected
+
+    if not cred.public_key or not cred.secret_key_enc:
+        flash(f"{PROVIDER_LABELS[provider]} requires both a key id and a secret.",
+              "billing_error")
+        db.session.rollback()
+        return redirect(url_for("owner_billing_payment_methods"))
+
+    desired_active = bool(request.form.get("is_active"))
+    desired_default = bool(request.form.get("is_default"))
+
+    # Production guard: never let an owner activate live mode against
+    # un-verified credentials. Forcing a successful test_connection
+    # against the saved keys before going live prevents the most common
+    # support ticket — "I copied my live keys and now no payments work."
+    if secret_changed:
+        cred.verified_at = None
+        cred.verified_fingerprint = ""
+    if desired_mode == "live" and desired_active:
+        try:
+            current_secret = decrypt_secret(cred.secret_key_enc)
+        except Exception:  # noqa: BLE001
+            current_secret = ""
+        current_fp = _secret_fingerprint(current_secret)
+        already_verified = bool(
+            cred.verified_at and cred.verified_fingerprint == current_fp and current_fp
+        )
+        if not already_verified:
+            # Auto-test now and only activate if it passes.
+            try:
+                provider_obj = build_provider(
+                    provider, public_key=cred.public_key,
+                    secret_key=current_secret,
+                    webhook_secret=(decrypt_secret(cred.webhook_secret_enc)
+                                    if cred.webhook_secret_enc else ""),
+                    mode=desired_mode,
+                )
+                msg = provider_obj.test_connection()
+                cred.last_test_status = "ok"
+                cred.last_test_message = msg[:500]
+                cred.last_tested_at = datetime.now(timezone.utc)
+                cred.verified_at = cred.last_tested_at
+                cred.verified_fingerprint = current_fp
+            except PaymentProviderError as exc:
+                cred.last_test_status = "error"
+                cred.last_test_message = str(exc)[:500]
+                cred.last_tested_at = datetime.now(timezone.utc)
+                desired_active = False  # refuse to activate
+                flash(
+                    f"Refusing to activate live mode — {provider.title()} rejected the keys: {exc}",
+                    "billing_error",
+                )
+
+    cred.mode = desired_mode
+    cred.is_active = desired_active
+
+    if desired_default and desired_active:
         PaymentProviderCredential.query.filter(
             PaymentProviderCredential.owner_id == owner_id,
             PaymentProviderCredential.id != (cred.id or -1),
         ).update({"is_default": False})
         cred.is_default = True
-    elif cred.is_default and not PaymentProviderCredential.query.filter(
-        PaymentProviderCredential.owner_id == owner_id,
-        PaymentProviderCredential.is_default.is_(True),
-        PaymentProviderCredential.id != (cred.id or -1),
-    ).first():
-        # Keep at least one default if this was the one.
-        cred.is_default = True
-
-    if not cred.public_key or not cred.secret_key_enc:
-        flash(f"{PROVIDER_LABELS[provider]} requires both a key id and a secret.", "billing_error")
-        db.session.rollback()
-        return redirect(url_for("owner_billing_payment_methods"))
+    elif not desired_default:
+        cred.is_default = False
 
     db.session.commit()
-    _billing_log(owner_id=owner_id, order_id=None, action=f"payment_methods.{provider}.saved",
-                 amount=0, payment_method=provider, reason="credential updated",
-                 payload={"provider": provider, "mode": cred.mode,
-                          "public_key_masked": mask_secret(cred.public_key)})
-    flash(f"{PROVIDER_LABELS[provider]} credentials saved ({cred.mode} mode).", "billing_ok")
+    _billing_log(
+        owner_id=owner_id, order_id=None,
+        action=f"payment_methods.{provider}.saved",
+        amount=0, payment_method=provider,
+        reason=f"credential {'created' if is_new else 'updated'}; mode={cred.mode}; active={cred.is_active}",
+        payload={"provider": provider, "mode": cred.mode,
+                 "is_active": cred.is_active, "is_default": cred.is_default,
+                 "public_key_masked": mask_secret(cred.public_key),
+                 "secret_rotated": secret_changed,
+                 "webhook_rotated": bool(webhook_secret)},
+    )
+    flash(
+        f"{PROVIDER_LABELS[provider]} saved ({cred.mode} mode, "
+        f"{'active' if cred.is_active else 'disabled'}).",
+        "billing_ok",
+    )
     return redirect(url_for("owner_billing_payment_methods"))
 
 
 @app.route("/owner/billing/payment-methods/<int:cred_id>/test", methods=["POST"])
 @login_required
+@limiter.limit("30 per hour; 5 per minute")
 def owner_billing_payment_methods_test(cred_id: int):
     owner_id = logged_in_owner_id()
     cred = PaymentProviderCredential.query.filter_by(id=cred_id, owner_id=owner_id).first_or_404()
     try:
-        provider = _provider_for_credential(cred)
-        msg = provider.test_connection()
+        provider_obj = _provider_for_credential(cred)
+        msg = provider_obj.test_connection()
         cred.last_test_status = "ok"
         cred.last_test_message = msg[:500]
         cred.last_tested_at = datetime.now(timezone.utc)
+        try:
+            cred.verified_fingerprint = _secret_fingerprint(decrypt_secret(cred.secret_key_enc))
+            cred.verified_at = cred.last_tested_at
+        except Exception:  # noqa: BLE001
+            pass
         db.session.commit()
+        _billing_log(owner_id=owner_id, order_id=None,
+                     action=f"payment_methods.{cred.provider}.tested",
+                     amount=0, payment_method=cred.provider,
+                     reason="connection test ok",
+                     payload={"provider": cred.provider, "mode": cred.mode})
         flash(msg, "billing_ok")
     except PaymentProviderError as exc:
         cred.last_test_status = "error"
@@ -4006,6 +4145,7 @@ def billing_pay_page(order_id: int):
 
 @csrf.exempt
 @app.route("/billing/webhook/<provider>", methods=["POST"])
+@limiter.limit("600 per minute")  # generous; providers retry hard
 def billing_webhook(provider: str):
     """Provider-side notification — verifies signature, updates order.
 
@@ -4016,6 +4156,17 @@ def billing_webhook(provider: str):
     provider = (provider or "").lower()
     if provider not in SUPPORTED_PROVIDERS:
         return ("unsupported provider", 404)
+
+    # Block plaintext callbacks in production — every supported provider
+    # requires HTTPS for live webhooks, and accepting them over HTTP would
+    # let an on-path attacker forge a "succeeded" event for any open order.
+    if _enforce_https_for_webhooks():
+        forwarded_proto = (request.headers.get("X-Forwarded-Proto") or "").lower()
+        scheme = forwarded_proto or request.scheme
+        if scheme != "https":
+            app.logger.warning("Rejected %s webhook over %s (production)",
+                               provider, scheme)
+            return ("https required", 400)
 
     body = request.get_data(cache=True) or b""
     sig_header = (request.headers.get("Stripe-Signature")
@@ -4048,6 +4199,35 @@ def billing_webhook(provider: str):
         app.logger.warning("Webhook signature failed for all %d %s credentials: %s",
                            len(candidates), provider, last_error)
         return ("signature invalid", 400)
+
+    # Idempotency: providers retry until they get a 2xx, and Stripe in
+    # particular delivers each event at-least-once. Without this guard
+    # we would settle the same order twice and double-emit invoice
+    # numbers. We use the provider's event_id when available, otherwise
+    # a SHA-256 of the raw body — both are stable across redeliveries.
+    raw_event_id = ""
+    if isinstance(event.raw, dict):
+        raw_event_id = str(event.raw.get("id") or
+                           event.raw.get("event_id") or
+                           event.raw.get("data", {}).get("id") or "")
+    if not raw_event_id:
+        raw_event_id = hashlib.sha256(body).hexdigest()
+    try:
+        seen = WebhookEventLog.query.filter_by(
+            provider=provider, event_id=raw_event_id).first()
+        if seen is not None:
+            # Already processed — return 200 so the provider stops retrying.
+            return ("ok (duplicate)", 200)
+        db.session.add(WebhookEventLog(
+            provider=provider, event_id=raw_event_id,
+            intent_id=event.intent_id or "", event_type=event.event_type or "",
+            processed=False,
+        ))
+        db.session.flush()
+    except IntegrityError:
+        # Concurrent delivery hit the unique constraint first — also a dupe.
+        db.session.rollback()
+        return ("ok (duplicate)", 200)
 
     op = (OnlinePayment.query
           .filter_by(provider=provider, intent_id=event.intent_id).first())
@@ -4096,6 +4276,11 @@ def billing_webhook(provider: str):
                                   "provider": provider,
                                   "credential_id": matched_cred.id if matched_cred else None})
             _invalidate_billing_cache(order.owner_id)
+    # Mark the dedup row as fully processed so an ops dashboard can
+    # distinguish "received but never finished" from "fully settled".
+    WebhookEventLog.query.filter_by(
+        provider=provider, event_id=raw_event_id
+    ).update({"processed": True})
     db.session.commit()
     return ("ok", 200)
 

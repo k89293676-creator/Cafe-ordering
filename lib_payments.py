@@ -34,8 +34,59 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-SUPPORTED_PROVIDERS = ("stripe", "razorpay")
-PROVIDER_LABELS = {"stripe": "Stripe", "razorpay": "Razorpay"}
+SUPPORTED_PROVIDERS = ("stripe", "razorpay", "cashfree")
+PROVIDER_LABELS = {"stripe": "Stripe", "razorpay": "Razorpay", "cashfree": "Cashfree"}
+
+# UI-facing setup guidance per provider — keeps the template free of
+# vendor-specific copy and lets ops update instructions without touching
+# Jinja. Steps render as an ordered list on /owner/billing/payment-methods.
+PROVIDER_GUIDES: dict[str, dict] = {
+    "stripe": {
+        "summary": "Cards, Apple Pay, Google Pay. Best for international.",
+        "dashboard_url": "https://dashboard.stripe.com/apikeys",
+        "webhook_url": "https://dashboard.stripe.com/webhooks",
+        "key_id_label": "Publishable Key (pk_…)",
+        "secret_label": "Secret Key (sk_…)",
+        "events": ["payment_intent.succeeded", "payment_intent.payment_failed", "charge.refunded"],
+        "steps": [
+            "Open the Stripe API keys page and copy your Publishable and Secret keys.",
+            "Paste them below, choose Test or Live mode, and click Verify & Save.",
+            "Once verified, copy the Webhook URL shown for this provider.",
+            "In Stripe → Developers → Webhooks, add an endpoint with that URL and subscribe to the listed events.",
+            "Copy the resulting signing secret (whsec_…) back into the Webhook Secret field and save again.",
+        ],
+    },
+    "razorpay": {
+        "summary": "UPI, cards, netbanking, wallets. Default for India.",
+        "dashboard_url": "https://dashboard.razorpay.com/app/website-app-settings/api-keys",
+        "webhook_url": "https://dashboard.razorpay.com/app/webhooks",
+        "key_id_label": "Key ID (rzp_…)",
+        "secret_label": "Key Secret",
+        "events": ["payment.captured", "payment.failed", "refund.processed", "order.paid"],
+        "steps": [
+            "In Razorpay → Settings → API Keys, generate a new key pair and copy both values.",
+            "Paste them below, pick Test (rzp_test_) or Live (rzp_live_) mode, and click Verify & Save.",
+            "After verification, copy the Webhook URL shown for this provider.",
+            "Open Settings → Webhooks → Add new webhook, paste the URL, enter your own secret, and tick the listed events.",
+            "Paste that same secret back into the Webhook Secret field here and save again.",
+        ],
+    },
+    "cashfree": {
+        "summary": "UPI, cards, netbanking. Lower fees in India for high volume.",
+        "dashboard_url": "https://merchant.cashfree.com/merchants/pg/developers/keys",
+        "webhook_url": "https://merchant.cashfree.com/merchants/pg/developers/webhooks",
+        "key_id_label": "App ID",
+        "secret_label": "Secret Key",
+        "events": ["PAYMENT_SUCCESS_WEBHOOK", "PAYMENT_FAILED_WEBHOOK", "REFUND_STATUS_WEBHOOK"],
+        "steps": [
+            "In Cashfree Dashboard → Developers → API Keys, copy your App ID and Secret.",
+            "Choose Sandbox (TEST) or Production (LIVE) and click Verify & Save below.",
+            "After verification, copy the Webhook URL shown for this provider.",
+            "Add it under Developers → Webhooks; Cashfree will display the signing secret only once.",
+            "Paste that secret into the Webhook Secret field here and save again.",
+        ],
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -339,9 +390,133 @@ class RazorpayProvider(PaymentProvider):
 # Factory
 # ---------------------------------------------------------------------------
 
+class CashfreeProvider(PaymentProvider):
+    """Cashfree Payment Gateway (PG v3 REST API).
+
+    No SDK dependency — Cashfree's REST surface is small enough that
+    using ``requests`` keeps the dependency footprint smaller and avoids
+    pulling in their full PG SDK on the server."""
+
+    name = "cashfree"
+    public_key_label = "App ID"
+    secret_key_label = "Secret Key"
+    webhook_secret_label = "Webhook Secret"
+
+    def _base_url(self) -> str:
+        return ("https://api.cashfree.com/pg" if self.mode == "live"
+                else "https://sandbox.cashfree.com/pg")
+
+    def _headers(self) -> dict:
+        if not self.public_key or not self.secret_key:
+            raise PaymentProviderError("Cashfree App ID and Secret Key are required.")
+        return {
+            "x-api-version": "2023-08-01",
+            "x-client-id": self.public_key,
+            "x-client-secret": self.secret_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+    def test_connection(self) -> str:
+        import requests  # local import — requests is already in the stack
+        try:
+            # Cheapest authenticated probe: fetch a clearly-bogus order id;
+            # auth failure returns 401, missing-resource returns 404 — both
+            # mean the credentials parsed correctly.
+            r = requests.get(f"{self._base_url()}/orders/__healthcheck__",
+                             headers=self._headers(), timeout=10)
+        except Exception as exc:  # noqa: BLE001
+            raise PaymentProviderError(f"Could not reach Cashfree: {exc}") from exc
+        if r.status_code == 401:
+            raise PaymentProviderError("Cashfree rejected the App ID / Secret pair.")
+        if r.status_code in (200, 404):
+            return f"Connected to Cashfree ({self.mode} mode)."
+        raise PaymentProviderError(
+            f"Cashfree returned HTTP {r.status_code}: {r.text[:200]}"
+        )
+
+    def create_payment_intent(self, *, amount_minor, currency, order_id, description,
+                              customer_email="", customer_phone="", return_url=""):
+        import requests
+        # Cashfree expects amounts in major units, not paise.
+        amount_major = round(int(amount_minor) / 100.0, 2)
+        payload = {
+            "order_id": f"order_{order_id}_{int(amount_minor)}",
+            "order_amount": amount_major,
+            "order_currency": (currency or "INR").upper(),
+            "order_note": description[:200],
+            "customer_details": {
+                "customer_id": f"cust_{order_id}",
+                "customer_phone": (customer_phone or "9999999999")[:15],
+                "customer_email": customer_email[:128] or "guest@example.com",
+            },
+            "order_meta": {
+                "return_url": return_url,
+                "notify_url": "",
+            },
+        }
+        try:
+            r = requests.post(f"{self._base_url()}/orders",
+                              json=payload, headers=self._headers(), timeout=15)
+        except Exception as exc:  # noqa: BLE001
+            raise PaymentProviderError(f"Cashfree request failed: {exc}") from exc
+        if r.status_code >= 400:
+            raise PaymentProviderError(
+                f"Cashfree could not create the order ({r.status_code}): {r.text[:300]}"
+            )
+        data = r.json()
+        return PaymentIntent(
+            intent_id=data.get("order_id", payload["order_id"]),
+            client_secret=data.get("payment_session_id", ""),
+            checkout_url=data.get("payment_link", ""),
+            amount_minor=int(amount_minor),
+            currency=currency,
+            raw=data,
+        )
+
+    def parse_webhook(self, payload_bytes, signature_header):
+        if not self.webhook_secret:
+            raise PaymentProviderError("Webhook secret not configured for Cashfree.")
+        # Cashfree v3: signature = base64(HMAC-SHA256(secret, timestamp + raw_body))
+        timestamp = (signature_header.split(",", 1)[0]
+                     if signature_header and "," in signature_header else "")
+        sig = signature_header.split(",", 1)[1] if "," in (signature_header or "") else (signature_header or "")
+        signed = (timestamp + payload_bytes.decode("utf-8", errors="replace")).encode("utf-8")
+        expected = base64.b64encode(
+            hmac.new(self.webhook_secret.encode("utf-8"), signed, hashlib.sha256).digest()
+        ).decode("ascii")
+        if not hmac.compare_digest(expected, sig.strip()):
+            raise PaymentProviderError("Cashfree webhook signature invalid.")
+        try:
+            event = json.loads(payload_bytes.decode("utf-8"))
+        except Exception as exc:
+            raise PaymentProviderError(f"Cashfree webhook payload not JSON: {exc}") from exc
+        etype = event.get("type", "")
+        data = event.get("data", {}) or {}
+        order = data.get("order", {}) or {}
+        payment = data.get("payment", {}) or {}
+        status_map = {
+            "PAYMENT_SUCCESS_WEBHOOK": "succeeded",
+            "PAYMENT_FAILED_WEBHOOK": "failed",
+            "PAYMENT_USER_DROPPED_WEBHOOK": "cancelled",
+            "REFUND_STATUS_WEBHOOK": "refunded",
+        }
+        status = status_map.get(etype, "pending")
+        amount_major = float(payment.get("payment_amount") or order.get("order_amount") or 0)
+        return WebhookEvent(
+            event_type=etype,
+            intent_id=order.get("order_id", "") or payment.get("cf_payment_id", ""),
+            status=status,
+            amount_minor=int(round(amount_major * 100)),
+            currency=(order.get("order_currency") or "INR").upper(),
+            raw=event,
+        )
+
+
 _PROVIDERS = {
     "stripe": StripeProvider,
     "razorpay": RazorpayProvider,
+    "cashfree": CashfreeProvider,
 }
 
 
@@ -374,4 +549,10 @@ def detect_mode_from_key(provider_name: str, public_key: str, secret_key: str) -
             return "live"
         if pk.startswith("rzp_test_"):
             return "test"
+    if provider_name == "cashfree":
+        # Cashfree app IDs frequently end with "TEST" or contain it.
+        if "test" in pk or "sandbox" in pk:
+            return "test"
+        if pk and "test" not in pk:
+            return "live"
     return "unknown"

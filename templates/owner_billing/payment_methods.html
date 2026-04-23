@@ -1,169 +1,306 @@
 {% extends "owner_billing/_base.html" %}
-{% block title %}Payment Methods{% endblock %}
-{% block content %}
-<h1>Payment Methods</h1>
-<p class="muted" style="margin-top:-.75rem;max-width:760px;">
-  Connect your own Stripe or Razorpay account to accept online payments.
-  Secrets are encrypted at rest — only the last 4 characters of each key
-  are ever shown back to you.
+{% block billing_title %}Payment Methods{% endblock %}
+{% block billing_body %}
+<style>
+  .pm-grid{display:grid;gap:18px;}
+  .pm-card{border:1px solid #e3e8ef;border-radius:14px;padding:18px;background:#fff;
+           box-shadow:0 1px 2px rgba(15,23,42,.04);}
+  .pm-card h3{margin:0 0 4px;font-size:18px;display:flex;align-items:center;gap:10px;}
+  .pm-card .summary{color:#475569;font-size:13px;margin:0 0 14px;}
+  .pm-row{display:grid;grid-template-columns:200px 1fr;gap:10px;align-items:center;
+          padding:6px 0;border-top:1px solid #f1f5f9;}
+  .pm-row:first-of-type{border-top:0;}
+  .pm-row label{font-size:13px;color:#334155;font-weight:600;}
+  .pm-row input[type=text],.pm-row input[type=password],.pm-row select{
+    width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;}
+  .pm-row .hint{font-size:11.5px;color:#64748b;margin-top:2px;}
+  .pm-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
+  .pm-btn{padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;
+          border:1px solid transparent;cursor:pointer;text-decoration:none;display:inline-block;}
+  .pm-btn-primary{background:#2563eb;color:#fff;}
+  .pm-btn-secondary{background:#f1f5f9;color:#0f172a;border-color:#cbd5e1;}
+  .pm-btn-ghost{background:transparent;color:#2563eb;}
+  .pm-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;
+            font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .pm-badge-test{background:#fef3c7;color:#92400e;}
+  .pm-badge-live{background:#dcfce7;color:#166534;}
+  .pm-badge-off{background:#e2e8f0;color:#475569;}
+  .pm-badge-default{background:#dbeafe;color:#1d4ed8;}
+  .pm-badge-verified{background:#d1fae5;color:#065f46;}
+  .pm-badge-unverified{background:#fee2e2;color:#991b1b;}
+  .pm-webhook{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:10px;
+              font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;
+              display:flex;align-items:center;gap:10px;word-break:break-all;}
+  .pm-webhook button{background:#1e293b;color:#fff;border:1px solid #334155;border-radius:6px;
+                     padding:4px 10px;font-size:11.5px;cursor:pointer;flex-shrink:0;}
+  .pm-guide{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;
+            padding:12px 14px;margin-top:12px;font-size:13px;color:#334155;}
+  .pm-guide ol{margin:6px 0 0 18px;padding:0;}
+  .pm-guide li{margin:4px 0;}
+  .pm-guide a{color:#2563eb;text-decoration:none;}
+  .pm-guide a:hover{text-decoration:underline;}
+  .pm-events{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;
+             background:#eef2ff;color:#3730a3;padding:1px 6px;border-radius:4px;margin:0 2px;}
+  details.pm-details{margin-top:8px;}
+  details.pm-details summary{cursor:pointer;color:#2563eb;font-weight:600;font-size:13px;list-style:none;}
+  details.pm-details summary::-webkit-details-marker{display:none;}
+  details.pm-details summary::before{content:"▸ ";}
+  details.pm-details[open] summary::before{content:"▾ ";}
+  .pm-test-result{margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12.5px;}
+  .pm-test-ok{background:#dcfce7;color:#14532d;}
+  .pm-test-err{background:#fee2e2;color:#7f1d1d;}
+  .pm-warn{background:#fffbeb;border:1px solid #fde68a;color:#92400e;
+           padding:8px 12px;border-radius:8px;font-size:12.5px;margin-bottom:12px;}
+</style>
+
+<p class="pm-warn">
+  Keys are encrypted at rest and never returned to the browser after saving.
+  Live mode is only allowed once a successful Verify against the gateway has been recorded.
 </p>
 
-<div class="grid" style="grid-template-columns:1fr; gap:1rem; max-width:900px;">
+<div class="pm-grid">
+  {# ---------- Configured providers ---------- #}
   {% for cred in credentials %}
-    <div class="panel">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
+  <div class="pm-card">
+    <h3>
+      {{ cred.provider_label }}
+      {% if cred.is_default %}<span class="pm-badge pm-badge-default">Default</span>{% endif %}
+      {% if cred.mode == 'live' %}
+        <span class="pm-badge pm-badge-live">Live</span>
+      {% else %}
+        <span class="pm-badge pm-badge-test">Test</span>
+      {% endif %}
+      {% if not cred.is_active %}<span class="pm-badge pm-badge-off">Disabled</span>{% endif %}
+      {% if cred.is_verified %}
+        <span class="pm-badge pm-badge-verified">Verified</span>
+      {% else %}
+        <span class="pm-badge pm-badge-unverified">Not verified</span>
+      {% endif %}
+    </h3>
+    {% if cred.guide.summary %}<p class="summary">{{ cred.guide.summary }}</p>{% endif %}
+
+    <div class="pm-webhook">
+      <span style="opacity:.7;flex-shrink:0;">Webhook URL:</span>
+      <span id="wh-{{ cred.id }}">{{ cred.webhook_url }}</span>
+      <button type="button" onclick="copyWebhook('wh-{{ cred.id }}', this)">Copy</button>
+    </div>
+    {% if cred.guide.events %}
+    <p class="hint" style="margin-top:6px;">
+      Subscribe these events:
+      {% for ev in cred.guide.events %}<code class="pm-events">{{ ev }}</code>{% endfor %}
+    </p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('owner_billing_payment_methods_save') }}"
+          autocomplete="off" style="margin-top:14px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="provider" value="{{ cred.provider }}">
+
+      <div class="pm-row">
+        <label>Display name</label>
         <div>
-          <h2 style="margin:0 0 .25rem;">
-            {{ cred.display_name }}
-            <span class="muted" style="font-weight:400;font-size:.85rem;">
-              · {{ cred.provider_label }}
-            </span>
-          </h2>
-          <div class="muted" style="font-size:.85rem;">
-            Key <span class="mono">{{ cred.public_key_masked or '—' }}</span>
-            · Mode
-            <strong style="color: {{ '#fbbf24' if cred.mode == 'live' else '#9a9a9a' }};">
-              {{ cred.mode.upper() }}
-            </strong>
-            {% if cred.is_default %}· <strong style="color:var(--ok);">DEFAULT</strong>{% endif %}
-            {% if not cred.is_active %}· <span style="color:var(--danger);">DISABLED</span>{% endif %}
-          </div>
-          {% if cred.last_tested_at %}
-            <div class="muted" style="font-size:.8rem;margin-top:.35rem;">
-              Last tested: {{ cred.last_tested_at.strftime('%Y-%m-%d %H:%M UTC') }} —
-              <span style="color: {{ 'var(--ok)' if cred.last_test_status == 'ok' else 'var(--danger)' }};">
-                {{ cred.last_test_message or cred.last_test_status }}
-              </span>
-            </div>
-          {% endif %}
-        </div>
-        <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-          <form method="POST"
-                action="{{ url_for('owner_billing_payment_methods_test', cred_id=cred.id) }}"
-                style="display:inline;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-            <button class="btn" type="submit">Test Connection</button>
-          </form>
-          <form method="POST"
-                action="{{ url_for('owner_billing_payment_methods_delete', cred_id=cred.id) }}"
-                style="display:inline;"
-                onsubmit="return confirm('Remove these credentials? Online charges using this provider will stop working.');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-            <button class="btn btn-danger" type="submit">Remove</button>
-          </form>
+          <input type="text" name="display_name" value="{{ cred.display_name }}"
+                 maxlength="80" placeholder="Shown to staff">
         </div>
       </div>
 
-      <details style="margin-top:1rem;">
-        <summary class="muted" style="cursor:pointer;">Edit / rotate keys</summary>
-        <form method="POST"
-              action="{{ url_for('owner_billing_payment_methods_save') }}"
-              style="margin-top:.75rem;">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-          <input type="hidden" name="provider" value="{{ cred.provider }}" />
-          <div class="row">
-            <div class="field"><label>Display Name</label>
-              <input type="text" name="display_name" maxlength="80"
-                     value="{{ cred.display_name }}" /></div>
-            <div class="field"><label>Mode</label>
-              <select name="mode">
-                <option value="test" {% if cred.mode == 'test' %}selected{% endif %}>Test</option>
-                <option value="live" {% if cred.mode == 'live' %}selected{% endif %}>Live</option>
-              </select>
-            </div>
-          </div>
-          <div class="field"><label>Key ID / Publishable Key</label>
-            <input type="text" name="public_key" value="{{ cred.public_key_masked }}"
-                   placeholder="Paste a new key id to replace, or leave masked value to keep" /></div>
-          <div class="field"><label>Secret Key (leave blank to keep current)</label>
-            <input type="password" name="secret_key" autocomplete="new-password"
-                   placeholder="{% if cred.has_secret %}•••••••• stored{% else %}Paste secret key{% endif %}" /></div>
-          <div class="field"><label>Webhook Signing Secret (leave blank to keep current)</label>
-            <input type="password" name="webhook_secret" autocomplete="new-password"
-                   placeholder="{% if cred.has_webhook %}•••••••• stored{% else %}Paste webhook secret{% endif %}" /></div>
-          <div class="field"><label style="display:flex;gap:.5rem;align-items:center;">
-            <input type="checkbox" name="is_active" {% if cred.is_active %}checked{% endif %} />
-            Accept payments through this provider</label></div>
-          <div class="field"><label style="display:flex;gap:.5rem;align-items:center;">
-            <input type="checkbox" name="is_default" {% if cred.is_default %}checked{% endif %} />
-            Use as the default provider for new charges</label></div>
-          <div class="field"><label>Webhook URL (paste this into your provider dashboard)</label>
-            <input type="text" readonly value="{{ cred.webhook_url }}" /></div>
-          <button class="btn btn-primary" type="submit">Save Changes</button>
-        </form>
-      </details>
-    </div>
-  {% else %}
-    <div class="panel empty">
-      No payment providers configured yet. Add one below to start accepting
-      online payments.
-    </div>
-  {% endfor %}
-</div>
-
-{% if available_providers %}
-  <h2 style="margin-top:2rem;">Add a New Provider</h2>
-  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(360px,1fr));max-width:900px;">
-    {% for slug, label in available_providers %}
-      <div class="panel">
-        <h3 style="margin:0 0 .5rem;">{{ label }}</h3>
-        <p class="muted" style="font-size:.85rem;margin-top:0;">
-          {% if slug == 'stripe' %}
-            Cards, Apple Pay, Google Pay. Get your keys from
-            <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noopener">dashboard.stripe.com/apikeys</a>.
-          {% elif slug == 'razorpay' %}
-            UPI, cards, netbanking, wallets. Get your keys from
-            <a href="https://dashboard.razorpay.com/app/website-app-settings/api-keys" target="_blank" rel="noopener">Razorpay Dashboard → Settings → API Keys</a>.
-          {% endif %}
-        </p>
-        <form method="POST" action="{{ url_for('owner_billing_payment_methods_save') }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-          <input type="hidden" name="provider" value="{{ slug }}" />
-          <div class="field"><label>Display Name (optional)</label>
-            <input type="text" name="display_name" maxlength="80" placeholder="{{ label }} – Live" /></div>
-          <div class="field"><label>
-            {% if slug == 'stripe' %}Publishable Key (pk_…){% else %}Key ID (rzp_…){% endif %}
-          </label>
-            <input type="text" name="public_key" required maxlength="200" /></div>
-          <div class="field"><label>
-            {% if slug == 'stripe' %}Secret Key (sk_…){% else %}Key Secret{% endif %}
-          </label>
-            <input type="password" name="secret_key" required autocomplete="new-password" /></div>
-          <div class="field"><label>Webhook Signing Secret (optional now, required for auto-settle)</label>
-            <input type="password" name="webhook_secret" autocomplete="new-password" /></div>
-          <div class="field"><label>Mode</label>
-            <select name="mode">
-              <option value="test" selected>Test</option>
-              <option value="live">Live</option>
-            </select></div>
-          <div class="field"><label style="display:flex;gap:.5rem;align-items:center;">
-            <input type="checkbox" name="is_active" checked /> Accept payments
-          </label></div>
-          <div class="field"><label style="display:flex;gap:.5rem;align-items:center;">
-            <input type="checkbox" name="is_default" /> Make default
-          </label></div>
-          <button class="btn btn-primary" type="submit">Connect {{ label }}</button>
-        </form>
+      <div class="pm-row">
+        <label>{{ cred.guide.key_id_label or 'Key ID' }}</label>
+        <div>
+          {# Show the masked value as a placeholder, NOT as the input value.
+             Submitting an empty value preserves the stored key — preventing
+             the masked-write-back bug from v1. #}
+          <input type="text" name="public_key" value=""
+                 placeholder="{{ cred.public_key_masked or 'Paste new key id to replace' }}"
+                 maxlength="200">
+          <div class="hint">Leave blank to keep the existing key. Paste a new value to rotate.</div>
+        </div>
       </div>
-    {% endfor %}
+
+      <div class="pm-row">
+        <label>{{ cred.guide.secret_label or 'Secret' }}</label>
+        <div>
+          <input type="password" name="secret_key" value="" autocomplete="new-password"
+                 placeholder="{% if cred.has_secret %}•••••••• (saved){% else %}Paste secret{% endif %}">
+          <div class="hint">Stored encrypted with Fernet. Leave blank to keep the existing secret.</div>
+        </div>
+      </div>
+
+      <div class="pm-row">
+        <label>Webhook signing secret</label>
+        <div>
+          <input type="password" name="webhook_secret" value="" autocomplete="new-password"
+                 placeholder="{% if cred.has_webhook %}•••••••• (saved){% else %}From provider's webhook page{% endif %}">
+        </div>
+      </div>
+
+      <div class="pm-row">
+        <label>Mode</label>
+        <div>
+          <select name="mode">
+            <option value="test" {% if cred.mode == 'test' %}selected{% endif %}>Test / Sandbox</option>
+            <option value="live" {% if cred.mode == 'live' %}selected{% endif %}>Live / Production</option>
+          </select>
+          <div class="hint">Going Live requires a successful Verify first — we'll auto-test on save.</div>
+        </div>
+      </div>
+
+      <div class="pm-row">
+        <label>Status</label>
+        <div>
+          <label style="font-weight:400;">
+            <input type="checkbox" name="is_active" {% if cred.is_active %}checked{% endif %}>
+            Active (accept new payments)
+          </label>
+          &nbsp;&nbsp;
+          <label style="font-weight:400;">
+            <input type="checkbox" name="is_default" {% if cred.is_default %}checked{% endif %}>
+            Default for new orders
+          </label>
+        </div>
+      </div>
+
+      {% if cred.last_test_status %}
+      <div class="pm-test-result {{ 'pm-test-ok' if cred.last_test_status == 'ok' else 'pm-test-err' }}">
+        Last test ({{ cred.last_tested_at.strftime('%Y-%m-%d %H:%M UTC') if cred.last_tested_at else '—' }}):
+        <strong>{{ cred.last_test_status|upper }}</strong> — {{ cred.last_test_message }}
+      </div>
+      {% endif %}
+
+      <div class="pm-actions">
+        <button type="submit" class="pm-btn pm-btn-primary">Save changes</button>
+      </div>
+    </form>
+
+    <form method="post"
+          action="{{ url_for('owner_billing_payment_methods_test', cred_id=cred.id) }}"
+          style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="pm-btn pm-btn-secondary" style="margin-top:8px;">
+        Verify connection now
+      </button>
+    </form>
+
+    {% if cred.guide.steps %}
+    <details class="pm-details">
+      <summary>Setup checklist</summary>
+      <div class="pm-guide">
+        <ol>
+          {% for step in cred.guide.steps %}<li>{{ step }}</li>{% endfor %}
+        </ol>
+        {% if cred.guide.dashboard_url %}
+          <div style="margin-top:6px;">
+            <a href="{{ cred.guide.dashboard_url }}" target="_blank" rel="noopener">Open API keys dashboard ↗</a>
+            &nbsp;·&nbsp;
+            <a href="{{ cred.guide.webhook_url }}" target="_blank" rel="noopener">Open webhooks dashboard ↗</a>
+          </div>
+        {% endif %}
+      </div>
+    </details>
+    {% endif %}
   </div>
-{% endif %}
+  {% endfor %}
 
-<div class="panel" style="margin-top:2rem;max-width:900px;">
-  <h2 style="margin-top:0;">Webhook Setup</h2>
-  <p class="muted" style="margin-top:0;">
-    To auto-settle bills the moment a customer pays, register the URL shown
-    above in your provider's dashboard:
-  </p>
-  <ul class="muted" style="margin-top:.25rem;">
-    <li><strong>Stripe:</strong> Developers → Webhooks → Add endpoint. Subscribe to
-      <span class="mono">payment_intent.succeeded</span>,
-      <span class="mono">payment_intent.payment_failed</span>,
-      <span class="mono">charge.refunded</span>. Paste the signing secret back into the form above.</li>
-    <li><strong>Razorpay:</strong> Settings → Webhooks → Add. Subscribe to
-      <span class="mono">payment.captured</span>,
-      <span class="mono">payment.failed</span>,
-      <span class="mono">refund.processed</span>. Set the same secret you paste above.</li>
-  </ul>
+  {# ---------- Available (not yet configured) providers ---------- #}
+  {% for av in available_providers %}
+  <div class="pm-card">
+    <h3>
+      {{ av.label }}
+      <span class="pm-badge pm-badge-off">Not connected</span>
+    </h3>
+    {% if av.guide.summary %}<p class="summary">{{ av.guide.summary }}</p>{% endif %}
+
+    <form method="post" action="{{ url_for('owner_billing_payment_methods_save') }}"
+          autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="provider" value="{{ av.slug }}">
+
+      <div class="pm-row">
+        <label>Display name</label>
+        <div>
+          <input type="text" name="display_name" value="{{ av.label }}" maxlength="80">
+        </div>
+      </div>
+      <div class="pm-row">
+        <label>{{ av.guide.key_id_label or 'Key ID' }}</label>
+        <div><input type="text" name="public_key" required maxlength="200"
+                    placeholder="Paste from your provider dashboard"></div>
+      </div>
+      <div class="pm-row">
+        <label>{{ av.guide.secret_label or 'Secret' }}</label>
+        <div><input type="password" name="secret_key" required autocomplete="new-password"></div>
+      </div>
+      <div class="pm-row">
+        <label>Webhook secret</label>
+        <div><input type="password" name="webhook_secret" autocomplete="new-password"
+                    placeholder="Add later after configuring the webhook"></div>
+      </div>
+      <div class="pm-row">
+        <label>Mode</label>
+        <div>
+          <select name="mode">
+            <option value="test" selected>Test / Sandbox</option>
+            <option value="live">Live / Production</option>
+          </select>
+        </div>
+      </div>
+      <div class="pm-row">
+        <label>&nbsp;</label>
+        <div>
+          <label style="font-weight:400;">
+            <input type="checkbox" name="is_active" checked> Active
+          </label>
+        </div>
+      </div>
+
+      <div class="pm-actions">
+        <button type="submit" class="pm-btn pm-btn-primary">Verify &amp; Save</button>
+      </div>
+    </form>
+
+    {% if av.guide.steps %}
+    <details class="pm-details" open>
+      <summary>How to connect {{ av.label }}</summary>
+      <div class="pm-guide">
+        <ol>
+          {% for step in av.guide.steps %}<li>{{ step }}</li>{% endfor %}
+        </ol>
+        {% if av.guide.dashboard_url %}
+          <div style="margin-top:6px;">
+            <a href="{{ av.guide.dashboard_url }}" target="_blank" rel="noopener">Open API keys dashboard ↗</a>
+            &nbsp;·&nbsp;
+            <a href="{{ av.guide.webhook_url }}" target="_blank" rel="noopener">Open webhooks dashboard ↗</a>
+          </div>
+        {% endif %}
+      </div>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if not credentials and not available_providers %}
+  <div class="pm-card">All supported providers are configured.</div>
+  {% endif %}
 </div>
+
+<script>
+  function copyWebhook(spanId, btn) {
+    const text = document.getElementById(spanId).textContent.trim();
+    const done = () => {
+      const old = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(() => { btn.textContent = old; }, 1400);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done).catch(() => fallback(text, done));
+    } else { fallback(text, done); }
+  }
+  function fallback(text, done) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); done(); } catch(_) {}
+    document.body.removeChild(ta);
+  }
+</script>
 {% endblock %}
