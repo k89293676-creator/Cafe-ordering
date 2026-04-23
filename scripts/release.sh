@@ -5,13 +5,18 @@
 # schema changes apply atomically and the first request never races a
 # half-migrated DB. Idempotent: safe to re-run.
 #
-# Behaviour:
+# Pipeline:
 #   1. Skip cleanly if DATABASE_URL is unset (e.g. preview env without DB).
 #   2. If the DB already has app tables but no alembic_version (legacy DBs that
 #      were bootstrapped via db.create_all() before Flask-Migrate landed),
 #      stamp them at HEAD instead of replaying every CREATE TABLE on top of
 #      an already-current schema.
-#   3. Otherwise run `flask db upgrade` to apply pending migrations.
+#   3. flask db upgrade — apply tracked alembic migrations.
+#   4. flask sync-schema — idempotent CREATE TABLE IF NOT EXISTS + ADD COLUMN
+#      IF NOT EXISTS pass that catches anything added to models since the
+#      last migration. Without this step a brand-new column would only land
+#      on the first request after deploy (worker-local, racey under load).
+#   5. flask db current — log the active revision so deploys are auditable.
 #
 # Failure here aborts the deploy — Railway will keep the previous revision
 # serving traffic, which is exactly what we want for schema safety.
@@ -50,10 +55,19 @@ PY
 if [[ "${LEGACY_DB}" == "yes" ]]; then
   echo "[release] Legacy DB detected (no alembic_version table) — stamping at head."
   flask db stamp head
-  echo "[release] Stamp complete; future deploys will run incremental upgrades."
-  exit 0
+  echo "[release] Stamp complete."
+else
+  echo "[release] Running flask db upgrade…"
+  flask db upgrade
+  echo "[release] Migrations applied."
 fi
 
-echo "[release] Running flask db upgrade…"
-flask db upgrade
-echo "[release] Migrations applied."
+# Catch any model additions that don't yet have a migration. Idempotent.
+echo "[release] Running flask sync-schema (idempotent CREATE/ADD COLUMN safety net)…"
+flask sync-schema
+echo "[release] Schema sync complete."
+
+# Log the active revision for audit trails.
+CURRENT_REV="$(flask db current 2>/dev/null | tail -n 1 || true)"
+echo "[release] DB now at revision: ${CURRENT_REV}"
+echo "[release] Done."

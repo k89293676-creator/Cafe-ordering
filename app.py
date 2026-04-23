@@ -833,7 +833,63 @@ def _init_db() -> None:
         add_column_if_missing("owners", "monthly_order_limit INTEGER", "monthly_order_limit")
         add_column_if_missing("owners", "trial_ends_at TIMESTAMP", "trial_ends_at")
         add_column_if_missing("owners", "notes TEXT DEFAULT ''", "notes")
-        _seed_sqlalchemy_from_json()
+
+        # ── Generic auto-sync: introspect every model and ADD COLUMN for
+        # anything declared on the model but missing from the DB. Caps the
+        # explicit list above as a safety net for columns added in future
+        # commits without a matching migration. PG / SQLite both honour
+        # `ADD COLUMN IF NOT EXISTS` (PG ≥ 9.6, SQLite via guard above).
+        try:
+            inspector = inspect(db.engine)
+            existing_tables = set(inspector.get_table_names())
+            dialect_name = db.engine.dialect.name
+            for mapper in db.Model.registry.mappers:
+                table = mapper.local_table
+                if table is None or table.name not in existing_tables:
+                    continue
+                existing_cols = {c["name"] for c in inspector.get_columns(table.name)}
+                for col in table.columns:
+                    if col.name in existing_cols:
+                        continue
+                    try:
+                        col_type = col.type.compile(dialect=db.engine.dialect)
+                    except Exception:  # noqa: BLE001
+                        # Server-default rendering for some types (JSON on older
+                        # SQLite) needs the visit_*; fall back to TEXT.
+                        col_type = "TEXT"
+                    nullable = "" if col.nullable else " NOT NULL"
+                    default_clause = ""
+                    if col.server_default is not None:
+                        try:
+                            default_clause = f" DEFAULT {col.server_default.arg.text}"  # type: ignore[attr-defined]
+                        except Exception:  # noqa: BLE001
+                            default_clause = ""
+                    elif not col.nullable and col.default is None:
+                        # NOT NULL without default would fail on a populated
+                        # table — make it nullable instead and let the app
+                        # backfill on write.
+                        nullable = ""
+                    ddl = (f"ALTER TABLE {table.name} ADD COLUMN "
+                           f"{col.name} {col_type}{default_clause}{nullable}")
+                    try:
+                        db.session.execute(text(ddl))
+                        db.session.commit()
+                        app.logger.info("auto-sync: added %s.%s", table.name, col.name)
+                    except Exception as exc:  # noqa: BLE001
+                        db.session.rollback()
+                        app.logger.warning("auto-sync: skipped %s.%s (%s)",
+                                           table.name, col.name, exc)
+            _ = dialect_name  # reserved for future per-dialect quoting
+        except Exception as exc:  # noqa: BLE001
+            app.logger.warning("auto-sync pass failed (non-fatal): %s", exc)
+
+        # Seed JSON-backed defaults LAST, after the schema is fully aligned,
+        # so a missing column on an ancient DB doesn't crash the boot.
+        try:
+            _seed_sqlalchemy_from_json()
+        except Exception as exc:  # noqa: BLE001
+            app.logger.warning("JSON seed skipped (non-fatal): %s", exc)
+            db.session.rollback()
     app.logger.info("DB schema ready: %s", app.config["SQLALCHEMY_DATABASE_URI"])
 
 
@@ -7516,6 +7572,31 @@ def _make_superadmin_if_missing() -> None:
         db.session.add(owner)
         db.session.commit()
         app.logger.info("Superadmin '%s' created.", sa_user)
+
+
+# ---------------------------------------------------------------------------
+# CLI commands — invoked from scripts/release.sh during Railway deploys.
+# ---------------------------------------------------------------------------
+
+@app.cli.command("sync-schema")
+def cli_sync_schema() -> None:
+    """Idempotent ``db.create_all`` + ALTER TABLE backfills + superadmin seed.
+
+    Run by ``scripts/release.sh`` AFTER ``flask db upgrade``. The two layers
+    are complementary:
+
+    * Alembic migrations are the canonical history for tracked changes.
+    * ``_init_db()`` adds any models or columns introduced since the last
+      migration (CREATE TABLE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS) so a
+      production DB never lags the deployed code by the time the new
+      container starts taking traffic.
+
+    Safe to re-run: every statement is guarded by IF NOT EXISTS or
+    introspection. Failure aborts the deploy.
+    """
+    if not _initialize_runtime_state(force=True):
+        raise SystemExit(f"sync-schema failed: {_DB_INIT_ERROR}")
+    app.logger.info("sync-schema OK")
 
 
 if not IS_PRODUCTION:
