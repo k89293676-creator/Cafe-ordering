@@ -118,8 +118,12 @@
       <div class="meta" id="meta-line">{{ table_count }} table{% if table_count != 1 %}s{% endif %} · @{{ owner_username }}</div>
     </div>
     <div class="actions">
+      <span id="live-dot" title="Live updates" style="display:inline-flex;align-items:center;gap:.35rem;font-size:.78rem;color:var(--muted);">
+        <span id="live-pip" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#9ca3af;transition:background .2s;"></span>
+        <span id="live-label">Connecting…</span>
+      </span>
       <label style="font-size:.8rem; color: var(--muted);">
-        <input type="checkbox" id="auto-refresh" checked /> Auto-refresh
+        <input type="checkbox" id="auto-refresh" checked /> Poll fallback
       </label>
       <button class="btn" id="refresh-btn">Refresh</button>
       <a class="btn" href="{{ url_for('owner_dashboard') }}">← Dashboard</a>
@@ -348,17 +352,91 @@
   document.getElementById('refresh-btn').addEventListener('click', load);
   function schedule() {
     if (timer) clearInterval(timer);
-    if (auto.checked) timer = setInterval(load, 8000);
+    // SSE handles real-time updates; poll fallback runs less often (30s)
+    // to catch anything missed if the connection silently dies.
+    if (auto.checked) timer = setInterval(load, 30000);
   }
   auto.addEventListener('change', schedule);
 
+  // ----- Real-time updates via SSE (owner stream) ----------------------
+  // The server already broadcasts new_order, order_updated, table_call,
+  // and table_call_update on /api/orders/stream. We listen for any of
+  // those and trigger a single debounced reload — a burst of events in
+  // the same tick coalesces into one round-trip.
+  const livePip = document.getElementById('live-pip');
+  const liveLabel = document.getElementById('live-label');
+  let es = null;
+  let reloadDebounce = null;
+  let reconnectAttempts = 0;
+
+  function setLiveState(state) {
+    // state: 'live' | 'connecting' | 'offline'
+    const colors = { live: '#16a34a', connecting: '#9ca3af', offline: '#dc2626' };
+    const labels = { live: 'Live',     connecting: 'Connecting…', offline: 'Reconnecting…' };
+    livePip.style.background = colors[state] || colors.connecting;
+    liveLabel.textContent = labels[state] || labels.connecting;
+  }
+
+  function scheduleReload() {
+    if (reloadDebounce) return;
+    // 350ms gives the server time to commit + flush any chained events
+    // (e.g. new_order immediately followed by order_updated) so we do
+    // one fetch instead of two.
+    reloadDebounce = setTimeout(() => { reloadDebounce = null; load(); }, 350);
+  }
+
+  function connectStream() {
+    if (es) { try { es.close(); } catch (_) {} }
+    setLiveState('connecting');
+    try {
+      es = new EventSource('/api/orders/stream', { withCredentials: true });
+    } catch (e) {
+      setLiveState('offline'); scheduleReconnect(); return;
+    }
+    es.onopen = () => { reconnectAttempts = 0; setLiveState('live'); };
+    es.onerror = () => {
+      setLiveState('offline');
+      try { es.close(); } catch (_) {}
+      es = null;
+      scheduleReconnect();
+    };
+    // Generic message handler — server may send named events or default.
+    const handle = (ev) => {
+      let payload = null;
+      try { payload = ev.data ? JSON.parse(ev.data) : null; } catch (_) {}
+      const t = (payload && payload.type) || ev.type;
+      if (!t || t === 'ping' || t === 'heartbeat') return;
+      // Anything order- or call-related can change a card.
+      if (t === 'new_order' || t === 'order_updated'
+          || t === 'table_call' || t === 'table_call_update') {
+        scheduleReload();
+      }
+    };
+    es.onmessage = handle;
+    ['new_order', 'order_updated', 'table_call', 'table_call_update'].forEach(name => {
+      es.addEventListener(name, handle);
+    });
+  }
+
+  function scheduleReconnect() {
+    if (document.visibilityState !== 'visible') return; // wait for focus
+    reconnectAttempts++;
+    const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(reconnectAttempts, 5)));
+    setTimeout(() => { if (document.visibilityState === 'visible') connectStream(); }, delay);
+  }
+
   // Re-poll on tab focus, save battery while hidden.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { load(); schedule(); }
-    else if (timer) { clearInterval(timer); timer = null; }
+    if (document.visibilityState === 'visible') {
+      load(); schedule();
+      if (!es) connectStream();
+    } else {
+      if (timer) { clearInterval(timer); timer = null; }
+      if (es) { try { es.close(); } catch (_) {} es = null; setLiveState('connecting'); }
+    }
   });
 
-  load(); schedule();
+  load(); schedule(); connectStream();
 })();
 </script>
 </body>
