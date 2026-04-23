@@ -296,7 +296,13 @@
                 {% endif %}
               </div>
             </div>
-            <div style="display:flex;gap:.4rem;">
+            <div style="display:flex;gap:.4rem;align-items:center;">
+              {% if integration_health.configured > 0 %}
+              <form method="post" action="{{ url_for('owner_integrations_test_all') }}" style="margin:0;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <button type="submit" class="btn btn-sm btn-primary" style="font-size:.75rem;">Test all</button>
+              </form>
+              {% endif %}
               <a class="btn btn-sm btn-secondary" href="{{ url_for('owner_billing_payment_methods') }}">Payments</a>
               <a class="btn btn-sm btn-secondary" href="{{ url_for('owner_aggregators') }}">Food Delivery</a>
             </div>
@@ -334,6 +340,7 @@
                     {% endif %}
                     <div style="display:flex;gap:.35rem;">
                       <form method="post" action="{{ it.test_url }}" style="margin:0;flex:1;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                         <button type="submit" class="btn btn-sm btn-secondary" style="width:100%;font-size:.75rem;padding:.3rem;">Test connection</button>
                       </form>
                       <a class="btn btn-sm btn-secondary" href="{{ it.manage_url }}" style="font-size:.75rem;padding:.3rem .55rem;">Manage</a>

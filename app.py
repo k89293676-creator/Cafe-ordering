@@ -133,6 +133,13 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=IS_PRODUCTION,
+    # Flask-Login's "remember me" cookie defaults are unsafe in production —
+    # explicitly mirror the session-cookie hardening so a stolen remember
+    # token can't be replayed over plaintext or read by JS.
+    REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SAMESITE="Lax",
+    REMEMBER_COOKIE_SECURE=IS_PRODUCTION,
+    REMEMBER_COOKIE_DURATION=timedelta(days=30),
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
     WTF_CSRF_TIME_LIMIT=3600,
@@ -4722,6 +4729,83 @@ def owner_aggregators_test(cred_id: int):
         app.logger.exception("aggregator test crashed")
         flash(f"Unexpected error: {exc}", "billing_error")
     return redirect(url_for("owner_aggregators"))
+
+
+@app.route("/owner/integrations/test-all", methods=["POST"])
+@login_required
+@limiter.limit("10 per hour; 2 per minute")
+def owner_integrations_test_all():
+    """Re-run the connection test for every active payment provider and
+    aggregator credential the owner has saved. Each test failure is captured
+    on the credential row (via last_test_status / last_test_message) so the
+    dashboard health badges refresh on the redirect — we never abort the
+    batch on a single failure."""
+    owner_id = logged_in_owner_id()
+    now = datetime.now(timezone.utc)
+    ok_count, fail_count = 0, 0
+    payment_creds = (PaymentProviderCredential.query
+                     .filter_by(owner_id=owner_id, is_active=True).all())
+    for cred in payment_creds:
+        try:
+            provider_obj = _provider_for_credential(cred)
+            msg = provider_obj.test_connection()
+            cred.last_test_status = "ok"
+            cred.last_test_message = msg[:500]
+            cred.last_tested_at = now
+            try:
+                cred.verified_fingerprint = _secret_fingerprint(
+                    decrypt_secret(cred.secret_key_enc))
+                cred.verified_at = now
+            except Exception:  # noqa: BLE001
+                pass
+            ok_count += 1
+        except PaymentProviderError as exc:
+            cred.last_test_status = "error"
+            cred.last_test_message = str(exc)[:500]
+            cred.last_tested_at = now
+            fail_count += 1
+        except Exception as exc:  # noqa: BLE001 — defensive only
+            app.logger.exception("test-all payment crashed for cred %s", cred.id)
+            cred.last_test_status = "error"
+            cred.last_test_message = f"unexpected: {exc}"[:500]
+            cred.last_tested_at = now
+            fail_count += 1
+    aggregator_creds = (AggregatorPlatformCredential.query
+                        .filter_by(owner_id=owner_id, is_active=True).all())
+    for cred in aggregator_creds:
+        try:
+            ag = _aggregator_for_credential(cred)
+            msg = ag.test_connection()
+            cred.last_test_status = "ok"
+            cred.last_test_message = msg[:500]
+            cred.last_tested_at = now
+            try:
+                cred.verified_fingerprint = _secret_fingerprint(
+                    decrypt_secret(cred.secret_enc))
+                cred.verified_at = now
+            except Exception:  # noqa: BLE001
+                pass
+            ok_count += 1
+        except AggregatorError as exc:
+            cred.last_test_status = "error"
+            cred.last_test_message = str(exc)[:500]
+            cred.last_tested_at = now
+            fail_count += 1
+        except Exception as exc:  # noqa: BLE001 — defensive only
+            app.logger.exception("test-all aggregator crashed for cred %s", cred.id)
+            cred.last_test_status = "error"
+            cred.last_test_message = f"unexpected: {exc}"[:500]
+            cred.last_tested_at = now
+            fail_count += 1
+    db.session.commit()
+    if ok_count == 0 and fail_count == 0:
+        flash("No active integrations to test.", "billing_info")
+    elif fail_count == 0:
+        flash(f"All {ok_count} integration(s) passed.", "billing_ok")
+    else:
+        flash(f"{ok_count} passed, {fail_count} failed. See badges below for details.",
+              "billing_error")
+    return redirect(url_for("owner_dashboard"))
 
 
 @app.route("/owner/aggregators/<int:cred_id>/delete", methods=["POST"])
