@@ -31,6 +31,7 @@ from flask import (
     abort,
     flash,
     jsonify,
+    make_response,
     redirect,
     render_template,
     request,
@@ -211,6 +212,14 @@ from lib_runtime import (  # noqa: E402  (import after configure_logging on purp
     IdempotencyCache,
     ResponseCache,
     feature_enabled,
+)
+from lib_billing import (  # noqa: E402
+    VALID_PAYMENT_METHODS,
+    compute_bill_totals,
+    compute_settlement,
+    next_invoice_number,
+    normalise_payments,
+    summarise_payment_breakdown,
 )
 
 bg_tasks = BackgroundTaskQueue(name="cafe-bg")
@@ -453,7 +462,44 @@ class Settings(db.Model):
     owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"), primary_key=True)
     logo_url = db.Column(db.Text, default="")
     brand_color = db.Column(db.Text, default="#4f46e5")
+    # Billing config (per-owner). All optional — defaults make billing
+    # work as a simple pay-what's-shown system, no tax or service charge.
+    tax_rate_percent = db.Column(db.Numeric(5, 2), default=0, server_default="0")
+    tax_label = db.Column(db.Text, default="GST", server_default="GST")
+    gstin = db.Column(db.Text, default="", server_default="")
+    service_charge_percent = db.Column(db.Numeric(5, 2), default=0, server_default="0")
+    invoice_prefix = db.Column(db.Text, default="INV", server_default="INV")
+    invoice_seq = db.Column(db.Integer, default=0, server_default="0")
+    billing_address = db.Column(db.Text, default="", server_default="")
+    billing_phone = db.Column(db.Text, default="", server_default="")
     updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+
+class BillingLog(db.Model):
+    """Append-only audit log for every billing action (settle / void /
+    refund / discount adjustment / tax change).
+
+    Read by /owner/billing/logs to give the owner a tamper-evident trail
+    of who did what — essential for end-of-day cash reconciliation and
+    for resolving disputes ('the customer says they paid but the system
+    says unpaid'). Indexed on (owner_id, created_at desc) for fast
+    paginated reads even after months of activity."""
+
+    __tablename__ = "billing_logs"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id"), nullable=False, index=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=True, index=True)
+    invoice_number = db.Column(db.Text, default="")
+    action = db.Column(db.Text, nullable=False)  # settled, voided, refunded, adjusted
+    actor_owner_id = db.Column(db.Integer, db.ForeignKey("owners.id"), nullable=True)
+    actor_username = db.Column(db.Text, default="")
+    amount = db.Column(db.Numeric(10, 2), default=0)
+    payment_method = db.Column(db.Text, default="")
+    reason = db.Column(db.Text, default="")
+    payload = db.Column(db.JSON, default=dict)  # full snapshot for forensics
+    ip = db.Column(db.Text, default="")
+    request_id = db.Column(db.Text, default="")
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), index=True)
 
 
 class OwnerLead(db.Model):
@@ -536,6 +582,42 @@ def _init_db() -> None:
         add_column_if_missing("orders", "notes TEXT DEFAULT ''", "notes")
         add_column_if_missing("orders", "cafe_id INTEGER", "cafe_id")
         add_column_if_missing("orders", "updated_at TIMESTAMP", "updated_at")
+        # Billing extensions on orders. Defaults preserve existing behaviour
+        # (every legacy row appears 'unpaid' until the owner settles it).
+        add_column_if_missing("orders", "payment_status TEXT DEFAULT 'unpaid'", "payment_status")
+        add_column_if_missing("orders", "payment_method TEXT DEFAULT ''", "payment_method")
+        add_column_if_missing("orders", "discount NUMERIC(10,2) DEFAULT 0", "discount")
+        add_column_if_missing("orders", "tax NUMERIC(10,2) DEFAULT 0", "tax")
+        add_column_if_missing("orders", "service_charge NUMERIC(10,2) DEFAULT 0", "service_charge")
+        add_column_if_missing("orders", "invoice_number TEXT DEFAULT ''", "invoice_number")
+        add_column_if_missing("orders", "paid_at TIMESTAMP", "paid_at")
+        add_column_if_missing("orders", "settled_by INTEGER", "settled_by")
+        add_column_if_missing("orders", "payments_breakdown JSON", "payments_breakdown")
+        add_column_if_missing("orders", "void_reason TEXT DEFAULT ''", "void_reason")
+        add_column_if_missing("orders", "refund_amount NUMERIC(10,2) DEFAULT 0", "refund_amount")
+        add_column_if_missing("orders", "refund_reason TEXT DEFAULT ''", "refund_reason")
+        # Settings billing fields (for legacy rows that pre-date the new cols)
+        add_column_if_missing("settings", "tax_rate_percent NUMERIC(5,2) DEFAULT 0", "tax_rate_percent")
+        add_column_if_missing("settings", "tax_label TEXT DEFAULT 'GST'", "tax_label")
+        add_column_if_missing("settings", "gstin TEXT DEFAULT ''", "gstin")
+        add_column_if_missing("settings", "service_charge_percent NUMERIC(5,2) DEFAULT 0", "service_charge_percent")
+        add_column_if_missing("settings", "invoice_prefix TEXT DEFAULT 'INV'", "invoice_prefix")
+        add_column_if_missing("settings", "invoice_seq INTEGER DEFAULT 0", "invoice_seq")
+        add_column_if_missing("settings", "billing_address TEXT DEFAULT ''", "billing_address")
+        add_column_if_missing("settings", "billing_phone TEXT DEFAULT ''", "billing_phone")
+        # Indexes that make the high-traffic billing screens stay fast
+        # under load (open-tabs query, EOD report, audit log).
+        for idx_sql in (
+            "CREATE INDEX IF NOT EXISTS ix_orders_owner_paystatus ON orders(owner_id, payment_status)",
+            "CREATE INDEX IF NOT EXISTS ix_orders_owner_paid_at ON orders(owner_id, paid_at)",
+            "CREATE INDEX IF NOT EXISTS ix_orders_invoice_number ON orders(invoice_number)",
+            "CREATE INDEX IF NOT EXISTS ix_billing_logs_owner_created ON billing_logs(owner_id, created_at DESC)",
+        ):
+            try:
+                db.session.execute(text(idx_sql))
+            except Exception as _exc:
+                app.logger.warning("Index create skipped (%s): %s", idx_sql, _exc)
+        db.session.commit()
         add_column_if_missing("owners", "is_superadmin BOOLEAN DEFAULT false", "is_superadmin")
         add_column_if_missing("owners", "totp_secret TEXT", "totp_secret")
         add_column_if_missing("owners", "totp_enabled BOOLEAN DEFAULT false", "totp_enabled")
@@ -3031,6 +3113,554 @@ def kitchen_view():
     return render_template("kitchen.html",
                            orders=orders_dicts,
                            owner_username=logged_in_owner())
+
+
+# ---------------------------------------------------------------------------
+# Owner Billing — overview, open tabs, settle, void, refund, EOD report,
+# audit log, invoice. Designed to be safe under concurrent settles during
+# rush hour: every state mutation goes through a SELECT FOR UPDATE +
+# re-check pattern, every action is logged to billing_logs, and the
+# overview is cached for 5s so repeated polling doesn't pound the DB.
+# ---------------------------------------------------------------------------
+
+def _settings_for(owner_id: int) -> Settings:
+    s = db.session.get(Settings, owner_id)
+    if not s:
+        s = Settings(owner_id=owner_id)
+        db.session.add(s)
+        db.session.commit()
+    return s
+
+
+def _billing_log(*, owner_id: int, order_id: int | None, action: str,
+                 amount: float = 0, payment_method: str = "",
+                 reason: str = "", payload: dict | None = None,
+                 invoice_number: str = "") -> None:
+    """Append-only audit row. Intentionally swallows DB errors with a log
+    line so a logging hiccup never blocks a customer-facing settle."""
+    try:
+        log_row = BillingLog(
+            owner_id=owner_id,
+            order_id=order_id,
+            invoice_number=invoice_number or "",
+            action=action,
+            actor_owner_id=session.get("owner_id"),
+            actor_username=session.get("owner_username") or "",
+            amount=amount,
+            payment_method=payment_method or "",
+            reason=(reason or "")[:500],
+            payload=payload or {},
+            ip=_client_ip()[:64],
+            request_id=request.environ.get("request_id", ""),
+        )
+        db.session.add(log_row)
+        db.session.commit()
+    except Exception as exc:  # pragma: no cover
+        db.session.rollback()
+        app.logger.warning("billing_log write failed: %s", exc)
+
+
+def _bill_dict(order: Order) -> dict:
+    """Order dict augmented with billing-specific fields used by templates."""
+    base = _order_dict(order)
+    base.update({
+        "paymentStatus": order.payment_status or "unpaid",
+        "paymentMethod": order.payment_method or "",
+        "discount": float(order.discount or 0),
+        "tax": float(order.tax or 0),
+        "serviceCharge": float(order.service_charge or 0),
+        "invoiceNumber": order.invoice_number or "",
+        "paidAt": _iso(order.paid_at) if order.paid_at else None,
+        "paymentsBreakdown": order.payments_breakdown if isinstance(order.payments_breakdown, list) else [],
+        "voidReason": order.void_reason or "",
+        "refundAmount": float(order.refund_amount or 0),
+        "refundReason": order.refund_reason or "",
+    })
+    return base
+
+
+def _today_window() -> tuple[datetime, datetime]:
+    """Return [start_of_today_utc, now_utc) — used for the daily EOD
+    report and the dashboard overview. Owners running across timezones
+    can override with TZ env var; we keep it simple for v1."""
+    now = datetime.now(timezone.utc)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, now
+
+
+def _billing_overview(owner_id: int) -> dict:
+    """Cheap aggregate for the billing dashboard tile-row. Cached 5s so
+    a frantically-refreshing owner during a rush doesn't hammer the DB."""
+    def _compute() -> dict:
+        start, _now = _today_window()
+        paid_today = (Order.query
+                      .filter(Order.owner_id == owner_id,
+                              Order.payment_status == "paid",
+                              Order.paid_at >= start)
+                      .all())
+        revenue = sum(float(o.total or 0) - float(o.refund_amount or 0) for o in paid_today)
+        tax_collected = sum(float(o.tax or 0) for o in paid_today)
+        service_charge = sum(float(o.service_charge or 0) for o in paid_today)
+        tips = sum(float(o.tip or 0) for o in paid_today)
+        refunds = sum(float(o.refund_amount or 0) for o in paid_today)
+        # Aggregate payment-mode totals across the day
+        per_mode: dict[str, float] = {}
+        for o in paid_today:
+            for p in (o.payments_breakdown or []):
+                if not isinstance(p, dict):
+                    continue
+                m = p.get("method", "other")
+                per_mode[m] = round(per_mode.get(m, 0.0) + float(p.get("amount") or 0), 2)
+        open_tabs = (Order.query
+                     .filter(Order.owner_id == owner_id,
+                             Order.payment_status == "unpaid",
+                             Order.status != "cancelled")
+                     .count())
+        voided_today = (Order.query
+                        .filter(Order.owner_id == owner_id,
+                                Order.payment_status == "voided",
+                                Order.updated_at >= start)
+                        .count())
+        return {
+            "revenue": round(revenue, 2),
+            "orders_paid": len(paid_today),
+            "tax_collected": round(tax_collected, 2),
+            "service_charge": round(service_charge, 2),
+            "tips": round(tips, 2),
+            "refunds": round(refunds, 2),
+            "open_tabs": open_tabs,
+            "voided_today": voided_today,
+            "per_mode": per_mode,
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+    return response_cache.get_or_set(f"billing_overview::{owner_id}", 5, _compute)
+
+
+def _invalidate_billing_cache(owner_id: int) -> None:
+    response_cache.invalidate_prefix(f"billing_overview::{owner_id}")
+
+
+@app.route("/owner/billing")
+@login_required
+def owner_billing_overview():
+    owner_id = logged_in_owner_id()
+    settings = _settings_for(owner_id)
+    overview = _billing_overview(owner_id)
+    recent_paid = (Order.query
+                   .filter(Order.owner_id == owner_id,
+                           Order.payment_status == "paid")
+                   .order_by(Order.paid_at.desc().nullslast())
+                   .limit(10).all())
+    return _no_store(app.make_response(render_template(
+        "owner_billing/overview.html",
+        overview=overview,
+        recent_paid=[_bill_dict(o) for o in recent_paid],
+        settings=settings,
+        owner_username=logged_in_owner(),
+    )))
+
+
+@app.route("/owner/billing/open")
+@login_required
+def owner_billing_open():
+    owner_id = logged_in_owner_id()
+    table_filter = (request.args.get("table") or "").strip()[:64]
+    page = max(1, int(request.args.get("page", "1") or "1"))
+    per_page = 50
+    q = (Order.query
+         .filter(Order.owner_id == owner_id,
+                 Order.payment_status == "unpaid",
+                 Order.status != "cancelled"))
+    if table_filter:
+        q = q.filter(Order.table_id == table_filter)
+    total = q.count()
+    rows = (q.order_by(Order.created_at.desc())
+              .offset((page - 1) * per_page).limit(per_page).all())
+    return _no_store(app.make_response(render_template(
+        "owner_billing/open.html",
+        orders=[_bill_dict(o) for o in rows],
+        page=page, per_page=per_page, total=total,
+        table_filter=table_filter,
+        owner_username=logged_in_owner(),
+    )))
+
+
+def _load_owner_order(order_id: int, owner_id: int, *, lock: bool = False) -> Order:
+    """Fetch + tenant-check + optional row lock. Always use lock=True for
+    state-mutating endpoints so two cashiers can't double-settle the same
+    bill during a rush. PostgreSQL only — falls back to plain query on
+    SQLite (dev) where row locking is unsupported."""
+    q = Order.query.filter_by(id=order_id, owner_id=owner_id)
+    if lock and db.engine.dialect.name == "postgresql":
+        q = q.with_for_update()
+    order = q.one_or_none()
+    if not order:
+        abort(404)
+    return order
+
+
+@app.route("/owner/billing/orders/<int:order_id>")
+@login_required
+def owner_billing_order_detail(order_id: int):
+    owner_id = logged_in_owner_id()
+    order = _load_owner_order(order_id, owner_id)
+    settings = _settings_for(owner_id)
+    totals = compute_bill_totals(
+        subtotal=float(order.subtotal or 0),
+        discount=float(order.discount or 0),
+        service_charge_pct=0,
+        service_charge_flat=float(order.service_charge or 0),
+        tax_pct=0,
+        tax_flat=float(order.tax or 0),
+        tip=float(order.tip or 0),
+    )
+    return _no_store(app.make_response(render_template(
+        "owner_billing/order_detail.html",
+        order=_bill_dict(order),
+        totals=totals,
+        settings=settings,
+        valid_methods=VALID_PAYMENT_METHODS,
+        owner_username=logged_in_owner(),
+    )))
+
+
+@app.route("/owner/billing/orders/<int:order_id>/adjust", methods=["POST"])
+@login_required
+def owner_billing_adjust(order_id: int):
+    owner_id = logged_in_owner_id()
+    order = _load_owner_order(order_id, owner_id, lock=True)
+    if order.payment_status != "unpaid":
+        flash("Cannot adjust an already-settled bill. Issue a refund instead.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    settings = _settings_for(owner_id)
+    try:
+        discount = max(0.0, min(float(request.form.get("discount", 0) or 0), float(order.subtotal or 0)))
+        service_charge_pct = float(request.form.get("service_charge_pct", settings.service_charge_percent or 0) or 0)
+        tax_pct = float(request.form.get("tax_pct", settings.tax_rate_percent or 0) or 0)
+        tip = max(0.0, float(request.form.get("tip", order.tip or 0) or 0))
+    except ValueError:
+        flash("Invalid number in adjustment form.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    totals = compute_bill_totals(
+        subtotal=float(order.subtotal or 0),
+        discount=discount,
+        service_charge_pct=service_charge_pct,
+        tax_pct=tax_pct,
+        tip=tip,
+    )
+    order.discount = totals.discount
+    order.service_charge = totals.service_charge
+    order.tax = totals.tax
+    order.tip = totals.tip
+    order.total = totals.total
+    order.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    _billing_log(owner_id=owner_id, order_id=order.id, action="adjusted",
+                 amount=totals.total,
+                 payload={"discount": totals.discount, "service_charge": totals.service_charge,
+                          "tax": totals.tax, "tip": totals.tip, "total": totals.total})
+    _invalidate_billing_cache(owner_id)
+    flash(f"Bill updated. New total ₹{totals.total:.2f}.", "billing_ok")
+    return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+
+@app.route("/owner/billing/orders/<int:order_id>/settle", methods=["POST"])
+@login_required
+def owner_billing_settle(order_id: int):
+    owner_id = logged_in_owner_id()
+    order = _load_owner_order(order_id, owner_id, lock=True)
+    if order.payment_status == "paid":
+        flash("This bill is already settled.", "billing_info")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+    if order.payment_status == "voided":
+        flash("This bill is voided and cannot be settled.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    # Parse split-payment rows: form fields are payment_method[] and payment_amount[].
+    methods = request.form.getlist("payment_method")
+    amounts = request.form.getlist("payment_amount")
+    refs = request.form.getlist("payment_reference") or [""] * len(methods)
+    raw_payments = []
+    for i, m in enumerate(methods):
+        try:
+            amt = float(amounts[i] or 0)
+        except (ValueError, IndexError):
+            amt = 0.0
+        ref = refs[i] if i < len(refs) else ""
+        raw_payments.append({"method": m, "amount": amt, "reference": ref})
+    payments = normalise_payments(raw_payments)
+
+    totals = compute_bill_totals(
+        subtotal=float(order.subtotal or 0),
+        discount=float(order.discount or 0),
+        service_charge_pct=0, service_charge_flat=float(order.service_charge or 0),
+        tax_pct=0, tax_flat=float(order.tax or 0),
+        tip=float(order.tip or 0),
+    )
+    paid_amount, change_due, err = compute_settlement(totals, payments)
+    if err:
+        flash(err, "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    # Allocate invoice number (atomic update on settings row)
+    settings = _settings_for(owner_id)
+    invoice_no, new_seq = next_invoice_number(settings.invoice_prefix or "INV",
+                                              int(settings.invoice_seq or 0))
+    settings.invoice_seq = new_seq
+
+    # Persist
+    primary_method = max(payments, key=lambda p: p["amount"])["method"] if payments else ""
+    order.payment_status = "paid"
+    order.payment_method = primary_method
+    order.payments_breakdown = payments
+    order.invoice_number = invoice_no
+    order.paid_at = datetime.now(timezone.utc)
+    order.settled_by = owner_id
+    order.updated_at = order.paid_at
+    if order.status in ("pending", "preparing", "ready"):
+        order.status = "served"
+    db.session.commit()
+
+    _billing_log(owner_id=owner_id, order_id=order.id, action="settled",
+                 invoice_number=invoice_no, amount=totals.total,
+                 payment_method=primary_method,
+                 payload={"payments": payments, "change_due": change_due,
+                          "paid_amount": paid_amount, "total": totals.total})
+    _invalidate_billing_cache(owner_id)
+    msg = f"Settled. Invoice {invoice_no}."
+    if change_due > 0:
+        msg += f" Change due: ₹{change_due:.2f}."
+    flash(msg, "billing_ok")
+    return redirect(url_for("owner_billing_invoice", order_id=order_id))
+
+
+@app.route("/owner/billing/orders/<int:order_id>/void", methods=["POST"])
+@login_required
+def owner_billing_void(order_id: int):
+    owner_id = logged_in_owner_id()
+    order = _load_owner_order(order_id, owner_id, lock=True)
+    if order.payment_status != "unpaid":
+        flash("Only unpaid bills can be voided. Use refund for settled bills.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+    reason = (request.form.get("reason") or "").strip()[:500]
+    if not reason:
+        flash("Voiding requires a reason for the audit log.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+    order.payment_status = "voided"
+    order.void_reason = reason
+    order.status = "cancelled"
+    order.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    _billing_log(owner_id=owner_id, order_id=order.id, action="voided",
+                 amount=float(order.total or 0), reason=reason)
+    _invalidate_billing_cache(owner_id)
+    flash(f"Bill #{order_id} voided.", "billing_ok")
+    return redirect(url_for("owner_billing_open"))
+
+
+@app.route("/owner/billing/orders/<int:order_id>/refund", methods=["POST"])
+@login_required
+def owner_billing_refund(order_id: int):
+    owner_id = logged_in_owner_id()
+    order = _load_owner_order(order_id, owner_id, lock=True)
+    if order.payment_status not in ("paid", "refunded"):
+        flash("Only paid bills can be refunded.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+    try:
+        amount = float(request.form.get("amount", 0) or 0)
+    except ValueError:
+        flash("Invalid refund amount.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+    reason = (request.form.get("reason") or "").strip()[:500]
+    if amount <= 0:
+        flash("Refund amount must be positive.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+    already = float(order.refund_amount or 0)
+    max_refundable = float(order.total or 0) - already
+    if amount > max_refundable + 0.01:
+        flash(f"Cannot refund ₹{amount:.2f} — only ₹{max_refundable:.2f} remains refundable.",
+              "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+    if not reason:
+        flash("Refunds require a reason for the audit log.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    order.refund_amount = round(already + amount, 2)
+    order.refund_reason = reason
+    if abs(float(order.refund_amount) - float(order.total or 0)) < 0.01:
+        order.payment_status = "refunded"
+    order.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    _billing_log(owner_id=owner_id, order_id=order.id, action="refunded",
+                 amount=amount, reason=reason,
+                 invoice_number=order.invoice_number or "",
+                 payload={"refund_amount_total": float(order.refund_amount),
+                          "remaining": max(0.0, float(order.total or 0) - float(order.refund_amount))})
+    _invalidate_billing_cache(owner_id)
+    flash(f"Refunded ₹{amount:.2f}. Total refunded so far: ₹{float(order.refund_amount):.2f}.",
+          "billing_ok")
+    return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+
+@app.route("/owner/billing/invoice/<int:order_id>")
+@login_required
+def owner_billing_invoice(order_id: int):
+    owner_id = logged_in_owner_id()
+    order = _load_owner_order(order_id, owner_id)
+    settings = _settings_for(owner_id)
+    owner = db.session.get(Owner, owner_id)
+    return render_template("owner_billing/invoice.html",
+                           order=_bill_dict(order),
+                           settings=settings,
+                           owner=owner)
+
+
+@app.route("/owner/billing/eod")
+@login_required
+def owner_billing_eod():
+    owner_id = logged_in_owner_id()
+    # Date filter — defaults to today (UTC). Owners can pick a past date.
+    date_str = (request.args.get("date") or "").strip()
+    try:
+        if date_str:
+            day = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        else:
+            day, _ = _today_window()
+    except ValueError:
+        day, _ = _today_window()
+    end = day + timedelta(days=1)
+
+    paid = (Order.query
+            .filter(Order.owner_id == owner_id,
+                    Order.payment_status.in_(("paid", "refunded")),
+                    Order.paid_at >= day, Order.paid_at < end)
+            .order_by(Order.paid_at.asc()).all())
+
+    voided = (Order.query
+              .filter(Order.owner_id == owner_id,
+                      Order.payment_status == "voided",
+                      Order.updated_at >= day, Order.updated_at < end)
+              .all())
+
+    flat_payments: list[dict] = []
+    for o in paid:
+        for p in (o.payments_breakdown or []):
+            if isinstance(p, dict):
+                flat_payments.append(p)
+    by_mode = summarise_payment_breakdown(flat_payments)
+
+    summary = {
+        "date": day.strftime("%Y-%m-%d"),
+        "orders": len(paid),
+        "gross_revenue": round(sum(float(o.total or 0) for o in paid), 2),
+        "discounts": round(sum(float(o.discount or 0) for o in paid), 2),
+        "service_charge": round(sum(float(o.service_charge or 0) for o in paid), 2),
+        "tax": round(sum(float(o.tax or 0) for o in paid), 2),
+        "tips": round(sum(float(o.tip or 0) for o in paid), 2),
+        "refunds": round(sum(float(o.refund_amount or 0) for o in paid), 2),
+        "voided_count": len(voided),
+        "voided_value": round(sum(float(o.total or 0) for o in voided), 2),
+        "by_mode": by_mode,
+    }
+    summary["net_revenue"] = round(summary["gross_revenue"] - summary["refunds"], 2)
+
+    return _no_store(app.make_response(render_template(
+        "owner_billing/eod.html",
+        summary=summary,
+        paid=[_bill_dict(o) for o in paid],
+        voided=[_bill_dict(o) for o in voided],
+        owner_username=logged_in_owner(),
+    )))
+
+
+@app.route("/owner/billing/eod.csv")
+@login_required
+def owner_billing_eod_csv():
+    owner_id = logged_in_owner_id()
+    date_str = (request.args.get("date") or "").strip()
+    try:
+        if date_str:
+            day = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        else:
+            day, _ = _today_window()
+    except ValueError:
+        day, _ = _today_window()
+    end = day + timedelta(days=1)
+    rows = (Order.query
+            .filter(Order.owner_id == owner_id,
+                    Order.payment_status.in_(("paid", "refunded")),
+                    Order.paid_at >= day, Order.paid_at < end)
+            .order_by(Order.paid_at.asc()).all())
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["invoice_number", "order_id", "paid_at_utc", "table", "customer",
+                "subtotal", "discount", "service_charge", "tax", "tip",
+                "total", "refund_amount", "primary_method", "status"])
+    for o in rows:
+        w.writerow([
+            o.invoice_number or "", o.id,
+            o.paid_at.isoformat() if o.paid_at else "",
+            o.table_name or "", o.customer_name or "",
+            float(o.subtotal or 0), float(o.discount or 0),
+            float(o.service_charge or 0), float(o.tax or 0),
+            float(o.tip or 0), float(o.total or 0),
+            float(o.refund_amount or 0),
+            o.payment_method or "", o.payment_status or "",
+        ])
+    out = make_response(buf.getvalue())
+    out.headers["Content-Type"] = "text/csv; charset=utf-8"
+    out.headers["Content-Disposition"] = f'attachment; filename="eod-{day:%Y-%m-%d}.csv"'
+    return out
+
+
+@app.route("/owner/billing/logs")
+@login_required
+def owner_billing_logs():
+    owner_id = logged_in_owner_id()
+    page = max(1, int(request.args.get("page", "1") or "1"))
+    per_page = 100
+    action = (request.args.get("action") or "").strip().lower()
+    q = BillingLog.query.filter_by(owner_id=owner_id)
+    if action in ("settled", "voided", "refunded", "adjusted"):
+        q = q.filter(BillingLog.action == action)
+    total = q.count()
+    logs = (q.order_by(BillingLog.created_at.desc())
+              .offset((page - 1) * per_page).limit(per_page).all())
+    return _no_store(app.make_response(render_template(
+        "owner_billing/logs.html",
+        logs=logs, page=page, per_page=per_page, total=total,
+        action=action,
+        owner_username=logged_in_owner(),
+    )))
+
+
+@app.route("/owner/billing/settings", methods=["GET", "POST"])
+@login_required
+def owner_billing_settings():
+    owner_id = logged_in_owner_id()
+    settings = _settings_for(owner_id)
+    if request.method == "POST":
+        try:
+            settings.tax_rate_percent = max(0.0, min(float(request.form.get("tax_rate_percent", 0) or 0), 100.0))
+            settings.service_charge_percent = max(0.0, min(float(request.form.get("service_charge_percent", 0) or 0), 100.0))
+        except ValueError:
+            flash("Tax / service charge percent must be a number 0-100.", "billing_error")
+            return redirect(url_for("owner_billing_settings"))
+        settings.tax_label = (request.form.get("tax_label") or "GST").strip()[:32] or "GST"
+        settings.gstin = (request.form.get("gstin") or "").strip()[:32]
+        settings.invoice_prefix = re.sub(r"[^A-Za-z0-9_\-/]", "", (request.form.get("invoice_prefix") or "INV"))[:16] or "INV"
+        settings.billing_address = (request.form.get("billing_address") or "").strip()[:500]
+        settings.billing_phone = (request.form.get("billing_phone") or "").strip()[:30]
+        db.session.commit()
+        flash("Billing settings saved.", "billing_ok")
+        return redirect(url_for("owner_billing_settings"))
+    return _no_store(app.make_response(render_template(
+        "owner_billing/settings.html",
+        settings=settings,
+        owner_username=logged_in_owner(),
+    )))
 
 
 # ---------------------------------------------------------------------------

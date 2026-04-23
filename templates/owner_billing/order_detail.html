@@ -1,0 +1,158 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Bill #{{ order.id }}{% endblock %}
+{% block content %}
+<h1>Bill #{{ order.id }}
+  {% if order.paymentStatus == 'unpaid' %}<span class="pill pill-unpaid">Unpaid</span>
+  {% elif order.paymentStatus == 'paid' %}<span class="pill pill-paid">Paid</span>
+  {% elif order.paymentStatus == 'refunded' %}<span class="pill pill-refunded">Refunded</span>
+  {% elif order.paymentStatus == 'voided' %}<span class="pill pill-voided">Voided</span>
+  {% endif %}
+</h1>
+<p class="muted" style="margin-top:-.75rem;">
+  Table <strong>{{ order.tableName or '—' }}</strong> ·
+  Customer <strong>{{ order.customerName }}</strong>
+  {% if order.customerPhone %} · {{ order.customerPhone }}{% endif %}
+  {% if order.invoiceNumber %} · Invoice <span class="mono">{{ order.invoiceNumber }}</span>{% endif %}
+</p>
+
+<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:1.25rem;">
+  <!-- LEFT: items + adjustments -->
+  <div>
+    <div class="panel" style="margin-bottom:1rem;">
+      <h2 style="margin-top:0;">Items</h2>
+      <table>
+        <thead><tr><th>Item</th><th class="right">Qty</th><th class="right">Price</th><th class="right">Line Total</th></tr></thead>
+        <tbody>
+          {% for item in order.items %}
+            <tr>
+              <td>{{ item.name }}{% if item.notes %} <span class="muted">— {{ item.notes }}</span>{% endif %}</td>
+              <td class="right mono">{{ item.quantity or 1 }}</td>
+              <td class="right mono">₹{{ '%.2f'|format(item.price or 0) }}</td>
+              <td class="right mono">₹{{ '%.2f'|format(item.lineTotal or (item.price or 0) * (item.quantity or 1)) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if order.notes %}<p class="muted" style="margin-top:.75rem;"><strong>Customer notes:</strong> {{ order.notes }}</p>{% endif %}
+    </div>
+
+    {% if order.paymentStatus == 'unpaid' %}
+    <div class="panel">
+      <h2 style="margin-top:0;">Adjust Bill</h2>
+      <form method="POST" action="{{ url_for('owner_billing_adjust', order_id=order.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="row">
+          <div class="field">
+            <label>Discount (₹)</label>
+            <input type="number" name="discount" step="0.01" min="0" max="{{ order.subtotal }}" value="{{ '%.2f'|format(order.discount) }}" />
+          </div>
+          <div class="field">
+            <label>Tip (₹)</label>
+            <input type="number" name="tip" step="0.01" min="0" value="{{ '%.2f'|format(order.tip) }}" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Service Charge %</label>
+            <input type="number" name="service_charge_pct" step="0.01" min="0" max="100" value="{{ settings.service_charge_percent or 0 }}" />
+          </div>
+          <div class="field">
+            <label>{{ settings.tax_label or 'Tax' }} %</label>
+            <input type="number" name="tax_pct" step="0.01" min="0" max="100" value="{{ settings.tax_rate_percent or 0 }}" />
+          </div>
+        </div>
+        <button class="btn btn-ghost" type="submit">Recalculate</button>
+        <p class="muted" style="font-size:.82rem;margin-top:.75rem;">Discounts apply before service charge and tax. All changes are logged.</p>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- RIGHT: totals + actions -->
+  <div>
+    <div class="panel" style="margin-bottom:1rem;">
+      <h2 style="margin-top:0;">Bill Total</h2>
+      <table>
+        <tr><td>Subtotal</td><td class="right mono">₹{{ '%.2f'|format(totals.subtotal) }}</td></tr>
+        {% if totals.discount %}<tr><td>Discount</td><td class="right mono" style="color:var(--ok);">−₹{{ '%.2f'|format(totals.discount) }}</td></tr>{% endif %}
+        {% if totals.service_charge %}<tr><td>Service Charge</td><td class="right mono">₹{{ '%.2f'|format(totals.service_charge) }}</td></tr>{% endif %}
+        {% if totals.tax %}<tr><td>{{ settings.tax_label or 'Tax' }}</td><td class="right mono">₹{{ '%.2f'|format(totals.tax) }}</td></tr>{% endif %}
+        {% if totals.tip %}<tr><td>Tip</td><td class="right mono">₹{{ '%.2f'|format(totals.tip) }}</td></tr>{% endif %}
+        <tr style="border-top:2px solid var(--line);"><td><strong>Grand Total</strong></td><td class="right mono"><strong style="font-size:1.2rem;color:var(--primary);">₹{{ '%.2f'|format(totals.total) }}</strong></td></tr>
+        {% if order.refundAmount %}<tr><td>Refunded</td><td class="right mono" style="color:var(--danger);">−₹{{ '%.2f'|format(order.refundAmount) }}</td></tr>{% endif %}
+      </table>
+    </div>
+
+    {% if order.paymentStatus == 'unpaid' %}
+    <div class="panel" style="margin-bottom:1rem;">
+      <h2 style="margin-top:0;">Settle Payment</h2>
+      <form method="POST" action="{{ url_for('owner_billing_settle', order_id=order.id) }}" id="settleForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div id="paymentRows">
+          <div class="row payment-row">
+            <div class="field">
+              <label>Method</label>
+              <select name="payment_method">
+                {% for m in valid_methods %}<option value="{{ m }}">{{ m|title }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label>Amount (₹)</label>
+              <input type="number" name="payment_amount" step="0.01" min="0" value="{{ '%.2f'|format(totals.total) }}" />
+            </div>
+          </div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addPaymentRow()">+ Split payment</button>
+        <button class="btn btn-success" type="submit" style="float:right;">Settle ₹{{ '%.2f'|format(totals.total) }}</button>
+      </form>
+    </div>
+    <div class="panel">
+      <h2 style="margin-top:0;color:var(--danger);">Void Bill</h2>
+      <form method="POST" action="{{ url_for('owner_billing_void', order_id=order.id) }}" onsubmit="return confirm('Void this entire bill? This is logged and cannot be undone.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="field"><label>Reason (required)</label><input type="text" name="reason" maxlength="500" required placeholder="Customer left, duplicate order, …" /></div>
+        <button class="btn btn-danger btn-sm" type="submit">Void Bill</button>
+      </form>
+    </div>
+    {% elif order.paymentStatus in ('paid', 'refunded') %}
+    <div class="panel" style="margin-bottom:1rem;">
+      <h2 style="margin-top:0;">Payment Received</h2>
+      <p>Settled at <span class="mono">{{ order.paidAt[:19] if order.paidAt else '—' }}</span> UTC</p>
+      <table>
+        {% for p in order.paymentsBreakdown %}
+          <tr><td>{{ p.method|title }}{% if p.reference %} <span class="muted">({{ p.reference }})</span>{% endif %}</td><td class="right mono">₹{{ '%.2f'|format(p.amount) }}</td></tr>
+        {% endfor %}
+      </table>
+      <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_invoice', order_id=order.id) }}" target="_blank" style="margin-top:.75rem;">Print Invoice</a>
+    </div>
+    <div class="panel">
+      <h2 style="margin-top:0;color:var(--danger);">Issue Refund</h2>
+      <form method="POST" action="{{ url_for('owner_billing_refund', order_id=order.id) }}" onsubmit="return confirm('Issue this refund? It will be logged.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="field"><label>Amount (₹) — max ₹{{ '%.2f'|format(order.total - order.refundAmount) }}</label>
+          <input type="number" name="amount" step="0.01" min="0.01" max="{{ order.total - order.refundAmount }}" required /></div>
+        <div class="field"><label>Reason (required)</label><input type="text" name="reason" maxlength="500" required placeholder="Item not as described, customer complaint, …" /></div>
+        <button class="btn btn-danger btn-sm" type="submit">Process Refund</button>
+      </form>
+    </div>
+    {% elif order.paymentStatus == 'voided' %}
+    <div class="alert alert-error">This bill was voided. Reason: <em>{{ order.voidReason }}</em></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+{% block extrabody %}
+<script>
+  function addPaymentRow() {
+    const wrap = document.getElementById('paymentRows');
+    const methods = {{ valid_methods|tojson }};
+    const opts = methods.map(m => `<option value="${m}">${m[0].toUpperCase() + m.slice(1)}</option>`).join('');
+    const div = document.createElement('div');
+    div.className = 'row payment-row';
+    div.innerHTML = `
+      <div class="field"><label>Method</label><select name="payment_method">${opts}</select></div>
+      <div class="field"><label>Amount (₹)</label><input type="number" name="payment_amount" step="0.01" min="0" value="0.00"/></div>`;
+    wrap.appendChild(div);
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Open Tabs{% endblock %}
+{% block content %}
+<h1>Open Tabs <span class="muted" style="font-size:1rem;font-weight:400;">({{ total }} unsettled)</span></h1>
+
+<form method="GET" style="display:flex;gap:.5rem;margin-bottom:1.25rem;align-items:center;flex-wrap:wrap;">
+  <input type="text" name="table" placeholder="Filter by table id…" value="{{ table_filter }}"
+         style="flex:0 0 240px;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:.55rem .75rem;border-radius:7px;" />
+  <button class="btn btn-primary btn-sm" type="submit">Filter</button>
+  {% if table_filter %}<a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_open') }}">Clear</a>{% endif %}
+</form>
+
+{% if not orders %}
+  <div class="empty">No open tabs right now. Time for a coffee. ☕</div>
+{% else %}
+  <div class="panel" style="padding:0;overflow-x:auto;">
+    <table>
+      <thead><tr><th>#</th><th>Table</th><th>Customer</th><th>Items</th><th class="right">Subtotal</th><th class="right">Total</th><th>Created</th><th></th></tr></thead>
+      <tbody>
+        {% for o in orders %}
+          <tr>
+            <td class="mono">#{{ o.id }}</td>
+            <td><strong>{{ o.tableName or '—' }}</strong></td>
+            <td>{{ o.customerName }}</td>
+            <td class="muted">{{ o.items|length }} item{{ '' if o.items|length == 1 else 's' }}</td>
+            <td class="right mono">₹{{ '%.2f'|format(o.subtotal) }}</td>
+            <td class="right mono"><strong>₹{{ '%.2f'|format(o.total) }}</strong></td>
+            <td class="muted mono">{{ o.createdAt[:19] if o.createdAt else '—' }}</td>
+            <td><a class="btn btn-primary btn-sm" href="{{ url_for('owner_billing_order_detail', order_id=o.id) }}">Settle →</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if total > per_page %}
+    <div style="margin-top:1rem;display:flex;justify-content:space-between;align-items:center;">
+      <span class="muted">Page {{ page }} of {{ ((total - 1) // per_page) + 1 }}</span>
+      <span>
+        {% if page > 1 %}<a class="btn btn-ghost btn-sm" href="?page={{ page - 1 }}{% if table_filter %}&table={{ table_filter }}{% endif %}">← Prev</a>{% endif %}
+        {% if page * per_page < total %}<a class="btn btn-ghost btn-sm" href="?page={{ page + 1 }}{% if table_filter %}&table={{ table_filter }}{% endif %}">Next →</a>{% endif %}
+      </span>
+    </div>
+  {% endif %}
+{% endif %}
+{% endblock %}

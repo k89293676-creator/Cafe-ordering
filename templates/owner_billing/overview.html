@@ -1,0 +1,87 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<h1>Today's Billing</h1>
+<p class="muted" style="margin-top:-.75rem;">Live snapshot — refreshes every 5 seconds. <span class="mono">As of {{ overview.as_of[:19] }} UTC</span></p>
+
+<div class="grid grid-stats" style="margin-bottom:1.5rem;">
+  <div class="stat ok">
+    <div class="label">Net Revenue</div>
+    <div class="value">₹{{ '%.2f'|format(overview.revenue) }}</div>
+    <div class="sub">{{ overview.orders_paid }} paid orders</div>
+  </div>
+  <div class="stat warn">
+    <div class="label">Open Tabs</div>
+    <div class="value">{{ overview.open_tabs }}</div>
+    <div class="sub"><a href="{{ url_for('owner_billing_open') }}">Settle now →</a></div>
+  </div>
+  <div class="stat">
+    <div class="label">{{ settings.tax_label or 'Tax' }} Collected</div>
+    <div class="value">₹{{ '%.2f'|format(overview.tax_collected) }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Service Charge</div>
+    <div class="value">₹{{ '%.2f'|format(overview.service_charge) }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Tips</div>
+    <div class="value">₹{{ '%.2f'|format(overview.tips) }}</div>
+  </div>
+  <div class="stat danger">
+    <div class="label">Refunds</div>
+    <div class="value">₹{{ '%.2f'|format(overview.refunds) }}</div>
+    <div class="sub">{{ overview.voided_today }} voided</div>
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:1.5rem;">
+  <h2 style="margin-top:0;">Today's Revenue by Payment Mode</h2>
+  {% if not overview.per_mode %}
+    <p class="muted">No paid orders yet today.</p>
+  {% else %}
+    <table>
+      <thead><tr><th>Method</th><th class="right">Amount</th><th class="right">% of Revenue</th></tr></thead>
+      <tbody>
+        {% set total = overview.per_mode.values()|sum %}
+        {% for mode, amt in overview.per_mode.items() %}
+          <tr>
+            <td><strong>{{ mode|title }}</strong></td>
+            <td class="right mono">₹{{ '%.2f'|format(amt) }}</td>
+            <td class="right muted">{{ '%.1f'|format((amt / total * 100) if total else 0) }}%</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0;">Recent Settlements</h2>
+  {% if not recent_paid %}
+    <p class="muted">No bills settled yet today.</p>
+  {% else %}
+    <table>
+      <thead><tr><th>Invoice</th><th>Table</th><th>Customer</th><th>Method</th><th class="right">Total</th><th>Paid At</th><th></th></tr></thead>
+      <tbody>
+        {% for o in recent_paid %}
+          <tr>
+            <td class="mono">{{ o.invoiceNumber or '—' }}</td>
+            <td>{{ o.tableName or '—' }}</td>
+            <td>{{ o.customerName }}</td>
+            <td><span class="pill pill-paid">{{ o.paymentMethod or 'paid' }}</span></td>
+            <td class="right mono">₹{{ '%.2f'|format(o.total) }}{% if o.refundAmount %} <span class="muted">−₹{{ '%.2f'|format(o.refundAmount) }}</span>{% endif %}</td>
+            <td class="muted mono">{{ o.paidAt[:19] if o.paidAt else '—' }}</td>
+            <td><a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_invoice', order_id=o.id) }}">Invoice</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</div>
+{% endblock %}
+{% block extrabody %}
+<script>
+  // Auto-refresh the overview every 10s during a busy service
+  setTimeout(() => location.reload(), 10000);
+</script>
+{% endblock %}

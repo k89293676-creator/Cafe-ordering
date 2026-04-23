@@ -1,0 +1,51 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Audit Log{% endblock %}
+{% block content %}
+<h1>Billing Audit Log</h1>
+<p class="muted" style="margin-top:-.75rem;">Every settle, void, refund, and adjustment — append-only, IP &amp; request-ID stamped.</p>
+
+<div style="display:flex;gap:.5rem;margin-bottom:1.25rem;flex-wrap:wrap;">
+  <a class="btn btn-ghost btn-sm {{ 'btn-primary' if not action }}" href="{{ url_for('owner_billing_logs') }}">All</a>
+  <a class="btn btn-ghost btn-sm {{ 'btn-primary' if action == 'settled' }}" href="?action=settled">Settled</a>
+  <a class="btn btn-ghost btn-sm {{ 'btn-primary' if action == 'voided' }}" href="?action=voided">Voided</a>
+  <a class="btn btn-ghost btn-sm {{ 'btn-primary' if action == 'refunded' }}" href="?action=refunded">Refunded</a>
+  <a class="btn btn-ghost btn-sm {{ 'btn-primary' if action == 'adjusted' }}" href="?action=adjusted">Adjusted</a>
+</div>
+
+{% if not logs %}
+  <div class="empty">No log entries match this filter.</div>
+{% else %}
+  <div class="panel" style="padding:0;overflow-x:auto;">
+    <table>
+      <thead><tr><th>When (UTC)</th><th>Action</th><th>Order</th><th>Invoice</th><th class="right">Amount</th><th>By</th><th>Details</th></tr></thead>
+      <tbody>
+        {% for log in logs %}
+          <tr>
+            <td class="muted mono">{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') if log.created_at else '—' }}</td>
+            <td>
+              <span class="pill {% if log.action == 'settled' %}pill-paid{% elif log.action == 'voided' %}pill-voided{% elif log.action == 'refunded' %}pill-refunded{% else %}pill-unpaid{% endif %}">{{ log.action }}</span>
+            </td>
+            <td>{% if log.order_id %}<a href="{{ url_for('owner_billing_order_detail', order_id=log.order_id) }}">#{{ log.order_id }}</a>{% else %}—{% endif %}</td>
+            <td class="mono">{{ log.invoice_number or '—' }}</td>
+            <td class="right mono">₹{{ '%.2f'|format(log.amount or 0) }}{% if log.payment_method %} <span class="muted">({{ log.payment_method }})</span>{% endif %}</td>
+            <td>{{ log.actor_username or '—' }}<br/><span class="muted mono" style="font-size:.7rem;">{{ log.ip }}</span></td>
+            <td style="max-width:340px;">
+              {% if log.reason %}<div style="font-size:.85rem;">{{ log.reason }}</div>{% endif %}
+              {% if log.payload %}<details><summary class="muted" style="font-size:.78rem;cursor:pointer;">payload</summary><pre class="mono" style="background:var(--panel-2);padding:.5rem;border-radius:6px;overflow:auto;font-size:.72rem;margin-top:.3rem;">{{ log.payload|tojson(indent=2) }}</pre></details>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if total > per_page %}
+    <div style="margin-top:1rem;display:flex;justify-content:space-between;">
+      <span class="muted">Page {{ page }} · {{ total }} total</span>
+      <span>
+        {% if page > 1 %}<a class="btn btn-ghost btn-sm" href="?page={{ page - 1 }}{% if action %}&action={{ action }}{% endif %}">← Prev</a>{% endif %}
+        {% if page * per_page < total %}<a class="btn btn-ghost btn-sm" href="?page={{ page + 1 }}{% if action %}&action={{ action }}{% endif %}">Next →</a>{% endif %}
+      </span>
+    </div>
+  {% endif %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <title>{% block title %}Billing{% endblock %} — Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <style>
+    :root { --bg:#0a0a0a; --panel:#141414; --panel-2:#1c1c1c; --line:#2a2a2a; --text:#f5f5f5; --muted:#9a9a9a; --primary:#f59e0b; --accent:#4f46e5; --ok:#22c55e; --warn:#fbbf24; --danger:#ef4444; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; line-height:1.55; font-size:15px; }
+    a { color:var(--primary); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    .topbar { background:var(--panel); border-bottom:1px solid var(--line); padding:.85rem 1.5rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; }
+    .topbar .brand { font-family:'Playfair Display',serif; font-weight:700; font-size:1.15rem; }
+    .topbar .who { color:var(--muted); font-size:.88rem; }
+    .topbar a.back { color:var(--muted); margin-right:1rem; }
+    .billnav { background:var(--panel-2); border-bottom:1px solid var(--line); padding:0 1.5rem; display:flex; gap:.25rem; overflow-x:auto; }
+    .billnav a { padding:.85rem 1rem; color:var(--muted); border-bottom:2px solid transparent; white-space:nowrap; font-size:.92rem; }
+    .billnav a:hover { color:var(--text); text-decoration:none; }
+    .billnav a.active { color:var(--primary); border-bottom-color:var(--primary); }
+    .wrap { max-width:1200px; margin:0 auto; padding:1.75rem 1.5rem; }
+    h1 { font-family:'Playfair Display',serif; margin:0 0 1.25rem; font-size:1.7rem; }
+    h2 { font-size:1.15rem; margin:1.5rem 0 .75rem; }
+    .grid { display:grid; gap:1rem; }
+    .grid-stats { grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+    .stat { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1rem 1.15rem; }
+    .stat .label { color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; }
+    .stat .value { font-size:1.6rem; font-weight:700; margin-top:.25rem; }
+    .stat .sub { color:var(--muted); font-size:.85rem; margin-top:.15rem; }
+    .stat.ok .value { color:var(--ok); }
+    .stat.warn .value { color:var(--warn); }
+    .stat.danger .value { color:var(--danger); }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:1.25rem 1.5rem; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:.7rem .85rem; text-align:left; border-bottom:1px solid var(--line); font-size:.92rem; }
+    th { background:var(--panel-2); font-weight:600; color:var(--muted); text-transform:uppercase; font-size:.74rem; letter-spacing:.05em; }
+    tbody tr:hover { background:rgba(255,255,255,.02); }
+    .pill { display:inline-block; padding:.18rem .55rem; border-radius:99px; font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+    .pill-unpaid { background:rgba(245,158,11,.18); color:#fcd34d; }
+    .pill-paid { background:rgba(34,197,94,.18); color:#86efac; }
+    .pill-refunded { background:rgba(79,70,229,.2); color:#c7d2fe; }
+    .pill-voided { background:rgba(239,68,68,.18); color:#fca5a5; }
+    .btn { display:inline-block; padding:.55rem 1rem; border-radius:8px; font-weight:600; font-size:.9rem; border:none; cursor:pointer; transition:opacity .15s; text-decoration:none; }
+    .btn:hover { opacity:.9; text-decoration:none; }
+    .btn-primary { background:var(--primary); color:#0a0a0a; }
+    .btn-success { background:var(--ok); color:#0a0a0a; }
+    .btn-danger { background:var(--danger); color:#fff; }
+    .btn-ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+    .btn-sm { padding:.35rem .7rem; font-size:.82rem; }
+    .alert { padding:.85rem 1rem; border-radius:8px; margin-bottom:1rem; font-size:.92rem; }
+    .alert-error { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.3); color:#fca5a5; }
+    .alert-ok { background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.3); color:#86efac; }
+    .alert-info { background:rgba(79,70,229,.12); border:1px solid rgba(79,70,229,.3); color:#c7d2fe; }
+    .field { display:flex; flex-direction:column; gap:.35rem; margin-bottom:.85rem; }
+    .field label { font-size:.82rem; color:var(--muted); }
+    .field input, .field select, .field textarea { background:var(--panel-2); border:1px solid var(--line); color:var(--text); padding:.55rem .75rem; border-radius:7px; font:inherit; }
+    .field input:focus, .field select:focus, .field textarea:focus { outline:none; border-color:var(--primary); }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:.85rem; }
+    @media (max-width:600px) { .row { grid-template-columns:1fr; } }
+    .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85rem; }
+    .muted { color:var(--muted); }
+    .right { text-align:right; }
+    .empty { text-align:center; padding:3rem 1rem; color:var(--muted); }
+  </style>
+  {% block extrahead %}{% endblock %}
+</head>
+<body>
+  <div class="topbar">
+    <div>
+      <a class="back" href="/owner/dashboard">← Dashboard</a>
+      <span class="brand">☕ Billing</span>
+    </div>
+    <div class="who">Signed in as <strong>{{ owner_username }}</strong></div>
+  </div>
+  <nav class="billnav">
+    <a href="{{ url_for('owner_billing_overview') }}" class="{{ 'active' if request.endpoint == 'owner_billing_overview' }}">Overview</a>
+    <a href="{{ url_for('owner_billing_open') }}" class="{{ 'active' if request.endpoint == 'owner_billing_open' }}">Open Tabs</a>
+    <a href="{{ url_for('owner_billing_eod') }}" class="{{ 'active' if request.endpoint == 'owner_billing_eod' }}">End of Day</a>
+    <a href="{{ url_for('owner_billing_logs') }}" class="{{ 'active' if request.endpoint == 'owner_billing_logs' }}">Audit Log</a>
+    <a href="{{ url_for('owner_billing_settings') }}" class="{{ 'active' if request.endpoint == 'owner_billing_settings' }}">Settings</a>
+  </nav>
+  <div class="wrap">
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in msgs %}
+        {% if cat == "billing_error" %}<div class="alert alert-error">{{ msg }}</div>
+        {% elif cat == "billing_ok" %}<div class="alert alert-ok">{{ msg }}</div>
+        {% elif cat == "billing_info" %}<div class="alert alert-info">{{ msg }}</div>
+        {% endif %}
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </div>
+  {% block extrabody %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,84 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}End of Day{% endblock %}
+{% block content %}
+<h1>End of Day Report — <span class="mono" style="font-weight:400;">{{ summary.date }}</span></h1>
+
+<form method="GET" style="display:flex;gap:.5rem;margin-bottom:1.25rem;align-items:end;">
+  <div class="field" style="margin:0;">
+    <label>Pick a date</label>
+    <input type="date" name="date" value="{{ summary.date }}" />
+  </div>
+  <button class="btn btn-primary btn-sm" type="submit">Load</button>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod_csv') }}?date={{ summary.date }}">Export CSV</a>
+  <a class="btn btn-ghost btn-sm" href="javascript:window.print()">Print</a>
+</form>
+
+<div class="grid grid-stats" style="margin-bottom:1.5rem;">
+  <div class="stat ok"><div class="label">Net Revenue</div><div class="value">₹{{ '%.2f'|format(summary.net_revenue) }}</div><div class="sub">{{ summary.orders }} orders</div></div>
+  <div class="stat"><div class="label">Gross Revenue</div><div class="value">₹{{ '%.2f'|format(summary.gross_revenue) }}</div></div>
+  <div class="stat danger"><div class="label">Refunds</div><div class="value">₹{{ '%.2f'|format(summary.refunds) }}</div></div>
+  <div class="stat warn"><div class="label">Voided Bills</div><div class="value">{{ summary.voided_count }}</div><div class="sub">₹{{ '%.2f'|format(summary.voided_value) }}</div></div>
+  <div class="stat"><div class="label">Tax Collected</div><div class="value">₹{{ '%.2f'|format(summary.tax) }}</div></div>
+  <div class="stat"><div class="label">Service Charge</div><div class="value">₹{{ '%.2f'|format(summary.service_charge) }}</div></div>
+  <div class="stat"><div class="label">Tips</div><div class="value">₹{{ '%.2f'|format(summary.tips) }}</div></div>
+  <div class="stat"><div class="label">Discounts Given</div><div class="value">₹{{ '%.2f'|format(summary.discounts) }}</div></div>
+</div>
+
+<div class="panel" style="margin-bottom:1.5rem;">
+  <h2 style="margin-top:0;">Cash Drawer Reconciliation</h2>
+  {% if not summary.by_mode or summary.by_mode|length == 1 %}
+    <p class="muted">No payments collected on this day.</p>
+  {% else %}
+    <table>
+      <thead><tr><th>Method</th><th class="right">Expected</th></tr></thead>
+      <tbody>
+        {% for mode, amt in summary.by_mode.items() %}
+          {% if mode != '_total' %}
+            <tr><td><strong>{{ mode|title }}</strong></td><td class="right mono">₹{{ '%.2f'|format(amt) }}</td></tr>
+          {% endif %}
+        {% endfor %}
+        <tr style="border-top:2px solid var(--line);"><td><strong>Total</strong></td><td class="right mono"><strong>₹{{ '%.2f'|format(summary.by_mode.get('_total', 0)) }}</strong></td></tr>
+      </tbody>
+    </table>
+    <p class="muted" style="font-size:.82rem;margin-top:.75rem;">Count your cash drawer and any UPI/card terminal totals. Discrepancies should match the audit log of voids and refunds.</p>
+  {% endif %}
+</div>
+
+<div class="panel" style="margin-bottom:1.5rem;">
+  <h2 style="margin-top:0;">Settled Bills ({{ paid|length }})</h2>
+  {% if not paid %}
+    <p class="muted">No bills settled on this day.</p>
+  {% else %}
+    <table>
+      <thead><tr><th>Time</th><th>Invoice</th><th>Table</th><th>Customer</th><th>Method</th><th class="right">Total</th><th class="right">Refund</th></tr></thead>
+      <tbody>
+        {% for o in paid %}
+          <tr>
+            <td class="mono muted">{{ o.paidAt[11:19] if o.paidAt else '—' }}</td>
+            <td class="mono"><a href="{{ url_for('owner_billing_invoice', order_id=o.id) }}">{{ o.invoiceNumber }}</a></td>
+            <td>{{ o.tableName or '—' }}</td>
+            <td>{{ o.customerName }}</td>
+            <td><span class="pill {{ 'pill-refunded' if o.paymentStatus == 'refunded' else 'pill-paid' }}">{{ o.paymentMethod }}</span></td>
+            <td class="right mono">₹{{ '%.2f'|format(o.total) }}</td>
+            <td class="right mono">{{ ('₹%.2f'|format(o.refundAmount)) if o.refundAmount else '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</div>
+
+{% if voided %}
+<div class="panel">
+  <h2 style="margin-top:0;color:var(--danger);">Voided Bills ({{ voided|length }})</h2>
+  <table>
+    <thead><tr><th>#</th><th>Table</th><th class="right">Value</th><th>Reason</th></tr></thead>
+    <tbody>
+      {% for o in voided %}
+        <tr><td class="mono">#{{ o.id }}</td><td>{{ o.tableName or '—' }}</td><td class="right mono">₹{{ '%.2f'|format(o.total) }}</td><td>{{ o.voidReason }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

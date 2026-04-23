@@ -76,6 +76,10 @@
         Inventory
         {% if low_stock_alerts %}<span class="link-badge" style="background:var(--danger,#ef4444);">{{ low_stock_alerts|length }}</span>{% endif %}
       </a>
+      <a class="sidebar-link" href="{{ url_for('owner_billing_overview') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="14" x2="10" y2="14"/></svg>
+        Billing
+      </a>
       <a class="sidebar-link" href="{{ url_for('reorder_view') }}">
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
         Reorder
