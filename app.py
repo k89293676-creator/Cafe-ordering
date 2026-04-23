@@ -2642,21 +2642,39 @@ def owner_dashboard() -> Response:
 # Kitchen view
 # ---------------------------------------------------------------------------
 
+KITCHEN_ACTIVE_STATUSES = ("pending", "confirmed", "preparing", "ready")
+KITCHEN_DEFAULT_LIMIT = 200
+KITCHEN_MAX_LIMIT = 500
+
+
+def _owner_table_names(owner_id: int) -> dict:
+    """Return {table_id: name} for a single owner — SQL-side filter so we don't
+    drag every other tenant's tables across the network on each kitchen poll."""
+    rows = (CafeTable.query
+            .filter(CafeTable.owner_id == owner_id)
+            .with_entities(CafeTable.id, CafeTable.name)
+            .all())
+    return {tid: name for tid, name in rows}
+
+
 @app.route("/kitchen")
 @login_required
 def kitchen_view():
     owner_id = logged_in_owner_id()
-    all_tables = load_tables()
-    tables = {t["id"]: t["name"] for t in all_tables if t.get("ownerId") == owner_id}
-    active_statuses = {"pending", "confirmed", "preparing", "ready"}
-    orders = Order.query.filter(
-        Order.owner_id == owner_id,
-        Order.status.in_(active_statuses)
-    ).order_by(Order.created_at.asc()).all()
+    table_names = _owner_table_names(owner_id)
+    # Cap the initial render so a swamped kitchen doesn't try to paint
+    # thousands of cards at once. The JSON feed below handles incremental
+    # updates and a "load more" path can fetch deeper history if needed.
+    orders = (Order.query
+              .filter(Order.owner_id == owner_id,
+                      Order.status.in_(KITCHEN_ACTIVE_STATUSES))
+              .order_by(Order.created_at.asc())
+              .limit(KITCHEN_DEFAULT_LIMIT)
+              .all())
     orders_dicts = []
     for o in orders:
         od = _order_dict(o)
-        od["tableName"] = tables.get(o.table_id, o.table_name or o.table_id or "—")
+        od["tableName"] = table_names.get(o.table_id, o.table_name or o.table_id or "—")
         orders_dicts.append(od)
     return render_template("kitchen.html",
                            orders=orders_dicts,
@@ -2850,16 +2868,63 @@ def export_inventory_csv():
 @app.route("/api/kitchen/orders")
 @api_login_required
 def kitchen_orders_json():
+    """Active-orders feed for the kitchen display.
+
+    Query params:
+      - ``limit`` (int, default 200, max 500): cap on rows returned.
+      - ``since`` (ISO-8601 UTC timestamp, optional): when provided, return
+        only orders whose ``updated_at`` is strictly newer. The client should
+        pass back the previous response's ``fetchedAt`` for cheap delta polls.
+      - ``include_completed`` (truthy, optional): when ``since`` is set, also
+        include orders that just transitioned to ``completed`` / ``cancelled``
+        so the kitchen UI can remove their cards. Without ``since`` we always
+        return only active statuses.
+
+    The query is served by ``ix_orders_owner_status_created`` (added in
+    migration 003) so this stays cheap even with hundreds of thousands of
+    historical orders.
+    """
     owner_id = logged_in_owner_id()
-    all_tables = load_tables()
-    table_names = {t["id"]: t["name"] for t in all_tables if t.get("ownerId") == owner_id}
-    active = {"pending", "confirmed", "preparing", "ready"}
-    orders = (Order.query
-              .filter(Order.owner_id == owner_id, Order.status.in_(active))
-              .order_by(Order.created_at.asc())
-              .all())
-    payload = []
+    table_names = _owner_table_names(owner_id)
+
+    # --- parse + clamp inputs --------------------------------------------
+    try:
+        limit = int(request.args.get("limit", KITCHEN_DEFAULT_LIMIT))
+    except (TypeError, ValueError):
+        limit = KITCHEN_DEFAULT_LIMIT
+    limit = max(1, min(limit, KITCHEN_MAX_LIMIT))
+
+    since_raw = (request.args.get("since") or "").strip()
+    since_dt = None
+    if since_raw:
+        try:
+            # Accept both "...Z" and "+00:00" suffixes.
+            since_dt = datetime.fromisoformat(since_raw.replace("Z", "+00:00"))
+            if since_dt.tzinfo is None:
+                since_dt = since_dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            since_dt = None
+
+    include_completed = str(request.args.get("include_completed", "")).strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+    # --- build query -----------------------------------------------------
+    q = Order.query.filter(Order.owner_id == owner_id)
+    if since_dt is not None and include_completed:
+        # Delta poll: return anything that changed, including just-finished
+        # orders so the client can remove them from the board.
+        q = q.filter(Order.updated_at > since_dt)
+    else:
+        q = q.filter(Order.status.in_(KITCHEN_ACTIVE_STATUSES))
+        if since_dt is not None:
+            q = q.filter(Order.updated_at > since_dt)
+
+    orders = q.order_by(Order.created_at.asc()).limit(limit).all()
+
+    # --- shape payload ---------------------------------------------------
     now_ts = datetime.now(timezone.utc)
+    payload = []
     for o in orders:
         d = _order_dict(o)
         d["tableName"] = table_names.get(o.table_id, o.table_name or "—")
@@ -2869,7 +2934,16 @@ def kitchen_orders_json():
             age_seconds = 0
         d["ageSeconds"] = max(0, age_seconds)
         payload.append(d)
-    return jsonify(orders=payload, fetchedAt=_iso(now_ts))
+
+    truncated = len(payload) >= limit
+    return jsonify(
+        orders=payload,
+        fetchedAt=_iso(now_ts),
+        count=len(payload),
+        limit=limit,
+        truncated=truncated,
+        since=since_raw or None,
+    )
 
 
 @app.route("/api/kitchen/orders/<int:order_id>/status", methods=["POST"])
