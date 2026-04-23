@@ -98,11 +98,37 @@ def _has_any_admin_key() -> bool:
         return False
 
 
+def _logged_in_superadmin():
+    """Return the currently logged-in superadmin Owner, or None.
+
+    This unifies the legacy admin-key auth with the modern owner login so a
+    superadmin user automatically has access to the /admin/* DevOps panel
+    without needing to enter a separate admin key.
+    """
+    try:
+        store = _store()
+        owner = store.logged_in_owner_obj()
+        if owner and getattr(owner, "is_superadmin", False) and getattr(owner, "is_active", True):
+            return owner
+    except Exception:
+        return None
+    return None
+
+
 def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        # 1) Already authenticated to admin via legacy key flow.
         if session.get("admin_authenticated"):
             return f(*args, **kwargs)
+        # 2) Logged-in superadmin owner — auto-elevate (resolves admin/superadmin conflict).
+        sa_owner = _logged_in_superadmin()
+        if sa_owner is not None:
+            session["admin_authenticated"] = True
+            session["admin_owner_id"] = sa_owner.id
+            session["admin_via_superadmin"] = True
+            return f(*args, **kwargs)
+        # 3) Header-based admin key (machine clients).
         key = request.headers.get("X-Admin-Key", "")
         matched, owner_id = _key_match(key)
         if matched:
@@ -120,13 +146,20 @@ def admin_required(f):
 
 @admin_bp.route("/login", methods=["GET", "POST"])
 def login():
+    # Logged-in superadmin owner gets straight in (no key needed).
+    sa_owner = _logged_in_superadmin()
+    if sa_owner is not None:
+        session["admin_authenticated"] = True
+        session["admin_owner_id"] = sa_owner.id
+        session["admin_via_superadmin"] = True
+        return redirect(url_for("admin.dashboard"))
     if not _has_any_admin_key():
         return render_template(
             "admin/error.html",
             message=(
-                "No admin access key has been configured. Ask a superadmin to "
-                "generate one for you from the Superadmin → Admin Access Keys page, "
-                "or set the ADMIN_SECRET_KEY environment variable."
+                "No admin access key has been configured. Sign in as a superadmin "
+                "owner from the main login page, or set the ADMIN_SECRET_KEY "
+                "environment variable."
             ),
         ), 503
     if session.get("admin_authenticated"):
@@ -158,6 +191,8 @@ def login():
 @admin_bp.route("/logout")
 def logout():
     session.pop("admin_authenticated", None)
+    session.pop("admin_owner_id", None)
+    session.pop("admin_via_superadmin", None)
     return redirect(url_for("admin.login"))
 
 
