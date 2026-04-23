@@ -1,8 +1,6 @@
 """Lightweight employee management + performance reporting."""
 from __future__ import annotations
 
-from collections import defaultdict
-from datetime import datetime, timezone
 
 from flask import Blueprint, abort, jsonify, render_template, request
 

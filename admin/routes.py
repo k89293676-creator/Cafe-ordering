@@ -13,7 +13,6 @@ from functools import wraps
 from flask import (
     Blueprint,
     abort,
-    current_app,
     flash,
     jsonify,
     redirect,
@@ -269,7 +268,7 @@ def toggle_owner(owner_id: int):
 def create_owner():
     import re
     store = _store()
-    from app import Owner, db, create_owner_in_db
+    from app import Owner, create_owner_in_db
     username = str(request.form.get("username", "")).strip()[:64]
     email = str(request.form.get("email", "")).strip()[:254] or None
     cafe_name = str(request.form.get("cafe_name", "")).strip()[:200]
@@ -320,7 +319,7 @@ def _get_cafes(store) -> list:
 def _orders_24h(store) -> int:
     try:
         from datetime import timedelta
-        from app import Order, db
+        from app import Order
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         return Order.query.filter(Order.created_at >= cutoff).count()
     except Exception:

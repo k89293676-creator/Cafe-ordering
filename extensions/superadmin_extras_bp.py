@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, abort, jsonify, render_template
+from flask import Blueprint, jsonify, render_template
 
 from app import (
     Cafe,

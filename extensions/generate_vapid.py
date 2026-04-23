@@ -5,7 +5,6 @@ Run once and paste the output into your .env file:
     python extensions/generate_vapid.py
 """
 import base64
-import json
 import sys
 
 try:

@@ -13,7 +13,7 @@ from collections import defaultdict
 
 from flask import Blueprint, abort, jsonify, render_template, request
 
-from app import Order, db, load_menu, login_required, logged_in_owner_id
+from app import Order, load_menu, login_required, logged_in_owner_id
 from ._helpers import parse_date_range, safe_float
 
 bp = Blueprint("menu_engineering", __name__)

@@ -16,23 +16,18 @@ Helpers exposed for use by ``app.py``:
 """
 from __future__ import annotations
 
-import csv
 import hashlib
-import io
 import json
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from typing import Any
 
 from flask import (
     Blueprint,
     Response,
     abort,
-    current_app,
     flash,
-    g,
     jsonify,
     redirect,
     render_template,
@@ -706,7 +701,7 @@ def global_audit():
 @superadmin_only
 def invitations_list():
     from .mt_models import Invitation
-    from app import Owner, db
+    from app import Owner
     invites = Invitation.query.order_by(Invitation.created_at.desc()).limit(200).all()
     creator_ids = {i.created_by_owner_id for i in invites if i.created_by_owner_id}
     creators = {o.id: o.username for o in Owner.query.filter(Owner.id.in_(creator_ids)).all()} if creator_ids else {}

@@ -5,9 +5,7 @@ import re
 
 from flask import (
     Blueprint,
-    abort,
     flash,
-    jsonify,
     redirect,
     render_template,
     request,

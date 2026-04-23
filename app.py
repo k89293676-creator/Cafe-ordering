@@ -8,10 +8,8 @@ import json
 import logging
 import mimetypes
 import os
-import random
 import re
 import secrets
-import string
 import sys
 import tempfile
 import threading
@@ -212,7 +210,6 @@ from lib_runtime import (  # noqa: E402  (import after configure_logging on purp
     BackgroundTaskQueue,
     IdempotencyCache,
     ResponseCache,
-    feature_enabled,
 )
 from lib_billing import (  # noqa: E402
     VALID_PAYMENT_METHODS,
@@ -5916,7 +5913,7 @@ def _qr_font(size: int, bold: bool = False):
 
 
 def _render_branded_table_qr(table_url: str, cafe_name: str, table_name: str,
-                             brand_color: str, logo_url: str) -> "Image.Image":
+                             brand_color: str, logo_url: str):  # -> PIL.Image.Image
     """Compose a branded, printable QR poster for a single table.
 
     Layout (720x1000):
