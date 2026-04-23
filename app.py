@@ -1305,10 +1305,20 @@ def superadmin_required(view_func):
             and _superadmin_key_configured()
         ):
             return view_func(*args, **kwargs)
-        if session.get("admin_authenticated") and _superadmin_key_configured():
+        if session.get("admin_authenticated"):
+            if not _superadmin_key_configured():
+                log_security("SUPERADMIN_BLOCKED_NO_KEY", f"path={request.path}")
+                return render_template(
+                    "admin/error.html",
+                    message="SUPERADMIN_KEY is not configured on this server. Set it in your hosting environment and redeploy.",
+                ), 503
             session["superadmin_verify_next"] = request.full_path or request.path
             return redirect(url_for("superadmin_verify_key"))
-        abort(403)
+        # No auth at all — send the visitor to a login page they can use.
+        try:
+            return redirect(url_for("admin.login"))
+        except Exception:
+            return redirect(url_for("owner_login"))
     return wrapper
 
 
@@ -3831,7 +3841,6 @@ def superadmin_verify_key():
 
 
 @app.route("/superadmin/audit")
-@login_required
 @superadmin_required
 def superadmin_audit():
     """Browse the in-memory security audit ring buffer."""
@@ -3888,7 +3897,6 @@ def superadmin_verify_key_clear():
 
 @app.route("/superadmin")
 @app.route("/superadmin/dashboard")
-@login_required
 @superadmin_required
 def superadmin_dashboard():
     from extensions.models import TableCall
@@ -3938,7 +3946,6 @@ def superadmin_dashboard():
 
 
 @app.route("/superadmin/cafes/create", methods=["POST"])
-@login_required
 @superadmin_required
 @superadmin_destructive
 def superadmin_create_cafe():
@@ -3955,7 +3962,6 @@ def superadmin_create_cafe():
 
 
 @app.route("/superadmin/cafes/<int:cafe_id>/toggle", methods=["POST"])
-@login_required
 @superadmin_required
 @superadmin_destructive
 def superadmin_toggle_cafe(cafe_id: int):
@@ -3970,7 +3976,6 @@ def superadmin_toggle_cafe(cafe_id: int):
 
 
 @app.route("/superadmin/owners/create", methods=["POST"])
-@login_required
 @superadmin_required
 @superadmin_destructive
 def superadmin_create_owner():
@@ -4000,7 +4005,6 @@ def superadmin_create_owner():
 
 
 @app.route("/superadmin/owners/<int:owner_id>/toggle", methods=["POST"])
-@login_required
 @superadmin_required
 @superadmin_destructive
 def superadmin_toggle_owner(owner_id: int):
@@ -4018,7 +4022,6 @@ def superadmin_toggle_owner(owner_id: int):
 
 
 @app.route("/superadmin/owners/<int:owner_id>/reset", methods=["POST"])
-@login_required
 @superadmin_required
 @superadmin_destructive
 def superadmin_reset_password(owner_id: int):
@@ -4034,7 +4037,6 @@ def superadmin_reset_password(owner_id: int):
 
 
 @app.route("/superadmin/owners/<int:owner_id>/assign-cafe", methods=["POST"])
-@login_required
 @superadmin_required
 @superadmin_destructive
 def superadmin_assign_cafe(owner_id: int):
@@ -4049,7 +4051,6 @@ def superadmin_assign_cafe(owner_id: int):
 
 
 @app.route("/superadmin/cafes/<int:cafe_id>/rename", methods=["POST"])
-@login_required
 @superadmin_required
 @superadmin_destructive
 def superadmin_rename_cafe(cafe_id: int):
@@ -4067,7 +4068,6 @@ def superadmin_rename_cafe(cafe_id: int):
 
 
 @app.route("/superadmin/cafes/<int:cafe_id>/delete", methods=["POST"])
-@login_required
 @superadmin_required
 @superadmin_destructive
 def superadmin_delete_cafe(cafe_id: int):
@@ -4085,7 +4085,6 @@ def superadmin_delete_cafe(cafe_id: int):
 
 
 @app.route("/superadmin/owners/<int:owner_id>/delete", methods=["POST"])
-@login_required
 @superadmin_required
 @superadmin_destructive
 def superadmin_delete_owner(owner_id: int):
@@ -4106,7 +4105,6 @@ def superadmin_delete_owner(owner_id: int):
 
 
 @app.route("/superadmin/admin-keys", methods=["GET"])
-@login_required
 @superadmin_required
 def superadmin_admin_keys():
     keys = load_admin_keys()
@@ -4136,7 +4134,6 @@ def superadmin_admin_keys():
 
 
 @app.route("/superadmin/admin-keys/generate", methods=["POST"])
-@login_required
 @superadmin_required
 @superadmin_destructive
 def superadmin_generate_admin_key():
@@ -4164,7 +4161,6 @@ def superadmin_generate_admin_key():
 
 
 @app.route("/superadmin/admin-keys/revoke", methods=["POST"])
-@login_required
 @superadmin_required
 @superadmin_destructive
 def superadmin_revoke_admin_key():
@@ -4182,7 +4178,6 @@ def superadmin_revoke_admin_key():
 
 
 @app.route("/superadmin/analytics")
-@login_required
 @superadmin_required
 def superadmin_analytics():
     per_cafe: list[dict] = []
