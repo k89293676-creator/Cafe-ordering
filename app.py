@@ -3182,6 +3182,51 @@ def _render_branded_table_qr(table_url: str, cafe_name: str, table_name: str,
     return img
 
 
+@app.route("/owner/tables/qr-posters.zip")
+@login_required
+def download_all_table_qr_posters() -> Response:
+    """Bundle every owner table's branded QR poster into a single zip download.
+
+    Useful when an owner is setting up a new floor and wants to print all
+    posters at once instead of clicking each table individually.
+    """
+    import zipfile
+    owner_id = logged_in_owner_id()
+    tables = [t for t in load_tables() if t.get("ownerId") == owner_id]
+    if not tables:
+        flash("Add at least one table before downloading posters.")
+        return redirect(url_for("owner_dashboard") + "#tables")
+
+    owner = db.session.get(Owner, owner_id) if owner_id else None
+    cafe_name = (owner.cafe_name if owner else None) or "Welcome"
+    branding = load_settings(owner_id) if owner_id else {"logoUrl": "", "brandColor": "#4f46e5"}
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for table in tables:
+            table_url = url_for("table_order", table_id=table["id"], _external=True)
+            poster = _render_branded_table_qr(
+                table_url=table_url,
+                cafe_name=cafe_name,
+                table_name=table.get("name") or table["id"],
+                brand_color=branding.get("brandColor", "#4f46e5"),
+                logo_url=branding.get("logoUrl", ""),
+            )
+            png_buf = io.BytesIO()
+            poster.save(png_buf, format="PNG", optimize=True)
+            # Filenames keep the table id so they're unique even when names clash.
+            safe_name = re.sub(r"[^a-zA-Z0-9_\-]+", "_", str(table.get("name") or table["id"]))[:40] or table["id"]
+            zf.writestr(f"qr-{safe_name}-{table['id']}.png", png_buf.getvalue())
+    buf.seek(0)
+
+    safe_cafe = re.sub(r"[^a-zA-Z0-9_\-]+", "_", cafe_name)[:40] or "cafe"
+    return Response(
+        buf.read(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_cafe}-table-qr-posters.zip"'},
+    )
+
+
 @app.route("/owner/table/<table_id>/qr")
 @login_required
 def table_qr(table_id: str) -> Response:

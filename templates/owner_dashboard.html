@@ -423,6 +423,11 @@
 
           <div>
             {% if tables %}
+            <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+              <a href="{{ url_for('download_all_table_qr_posters') }}"
+                 class="btn btn-secondary btn-sm"
+                 download>Download all posters (.zip)</a>
+            </div>
             <div class="tables-grid">
               {% for table in tables %}
               <div class="table-item">
