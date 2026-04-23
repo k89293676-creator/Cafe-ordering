@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <title>Tables Overview · Cafe 11:11</title>
+  <style>
+    :root {
+      --bg: #faf6ef;
+      --card: #ffffff;
+      --ink: #1f1408;
+      --muted: #7a6a55;
+      --line: #e7dfd1;
+      --brand: #4f46e5;
+      --free: #15803d;
+      --occupied: #b45309;
+      --ready: #1d4ed8;
+      --attention: #dc2626;
+      --shadow: 0 8px 28px -18px rgba(31,20,8,.35);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    a { color: var(--brand); text-decoration: none; }
+    .topbar { display:flex; align-items:center; justify-content:space-between;
+      padding: 14px 22px; background: #fff; border-bottom: 1px solid var(--line); }
+    .topbar h1 { margin: 0; font-size: 1.1rem; letter-spacing: -.01em; }
+    .topbar .meta { font-size: .82rem; color: var(--muted); }
+    .topbar .actions { display:flex; gap:.5rem; align-items:center; }
+    .btn {
+      border: 1px solid var(--line); background: #fff; color: var(--ink);
+      padding: .45rem .8rem; border-radius: 8px; font-size: .85rem; cursor: pointer;
+      transition: background .12s ease, border-color .12s ease;
+    }
+    .btn:hover { background: #f5efe2; }
+    .btn-primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+    .btn-primary:hover { background: #4338ca; }
+    .container { padding: 22px; max-width: 1400px; margin: 0 auto; }
+
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px; margin-bottom: 18px; }
+    .summary-card { background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
+    .summary-card .label { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--muted); }
+    .summary-card .value { font-size: 1.6rem; font-weight: 700; margin-top: .2rem; }
+    .summary-card.free .value      { color: var(--free); }
+    .summary-card.occupied .value  { color: var(--occupied); }
+    .summary-card.ready .value     { color: var(--ready); }
+    .summary-card.attention .value { color: var(--attention); }
+
+    .toolbar { display:flex; align-items:center; gap: 10px; margin-bottom: 14px;
+      flex-wrap: wrap; }
+    .filter-pill { padding: .4rem .85rem; border-radius: 999px; border: 1px solid var(--line);
+      background: #fff; font-size: .82rem; cursor: pointer; }
+    .filter-pill.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+    .search { flex: 1; min-width: 180px; padding: .5rem .8rem; border-radius: 8px;
+      border: 1px solid var(--line); background: #fff; font-size: .9rem; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 14px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+      padding: 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px;
+      position: relative; transition: transform .12s ease, box-shadow .12s ease; }
+    .card:hover { transform: translateY(-1px); box-shadow: 0 14px 38px -20px rgba(31,20,8,.4); }
+    .card .head { display:flex; align-items:flex-start; justify-content: space-between; gap: 8px; }
+    .card .name { font-weight: 700; font-size: 1.05rem; }
+    .card .id   { font-size: .7rem; color: var(--muted); margin-top: 2px; }
+    .badge { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em;
+      padding: .25rem .55rem; border-radius: 999px; font-weight: 700; white-space: nowrap; }
+    .badge.free      { background: #dcfce7; color: var(--free); }
+    .badge.occupied  { background: #fef3c7; color: var(--occupied); }
+    .badge.ready_to_serve { background: #dbeafe; color: var(--ready); animation: pulse 1.6s ease-in-out infinite; }
+    .badge.needs_attention { background: #fee2e2; color: var(--attention); animation: pulse 1.1s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+
+    .row { display:flex; justify-content: space-between; align-items: center;
+      font-size: .85rem; color: var(--ink); }
+    .row .k { color: var(--muted); }
+    .order-line { background: #fdf6e8; border: 1px dashed #e7d4ad; border-radius: 10px;
+      padding: 8px 10px; font-size: .82rem; }
+    .calls-line { background: #fff1f2; border: 1px dashed #fecaca; border-radius: 10px;
+      padding: 8px 10px; font-size: .82rem; color: var(--attention); }
+    .note { font-size: .82rem; color: var(--muted); font-style: italic;
+      border-top: 1px dashed var(--line); padding-top: 8px; }
+    .actions-row { display:flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+    .actions-row .btn { font-size: .78rem; padding: .35rem .6rem; }
+
+    .empty { text-align: center; color: var(--muted); padding: 60px 0; }
+    .stale { opacity: .55; }
+
+    /* Modal */
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45);
+      display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+    .modal-bg.show { display: flex; }
+    .modal { background: #fff; border-radius: 14px; padding: 18px 20px; width: 100%;
+      max-width: 520px; max-height: 86vh; overflow-y: auto; }
+    .modal h2 { margin: 0 0 .5rem; font-size: 1.1rem; }
+    .modal .close { float: right; cursor: pointer; color: var(--muted); }
+    .modal section { margin-top: 12px; }
+    .modal section h3 { font-size: .82rem; text-transform: uppercase; letter-spacing: .05em;
+      color: var(--muted); margin: 0 0 .35rem; }
+    .modal ul { margin: 0; padding-left: 1.1rem; font-size: .88rem; }
+    .modal li { margin: .2rem 0; }
+
+    @media (max-width: 540px) {
+      .container { padding: 14px; }
+      .grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .card { padding: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Tables Overview</h1>
+      <div class="meta" id="meta-line">{{ table_count }} table{% if table_count != 1 %}s{% endif %} · @{{ owner_username }}</div>
+    </div>
+    <div class="actions">
+      <label style="font-size:.8rem; color: var(--muted);">
+        <input type="checkbox" id="auto-refresh" checked /> Auto-refresh
+      </label>
+      <button class="btn" id="refresh-btn">Refresh</button>
+      <a class="btn" href="{{ url_for('owner_dashboard') }}">← Dashboard</a>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="summary" id="summary">
+      <div class="summary-card"><div class="label">Total tables</div><div class="value" id="sum-total">—</div></div>
+      <div class="summary-card free"><div class="label">Free</div><div class="value" id="sum-free">—</div></div>
+      <div class="summary-card occupied"><div class="label">Occupied</div><div class="value" id="sum-occupied">—</div></div>
+      <div class="summary-card ready"><div class="label">Ready to serve</div><div class="value" id="sum-ready">—</div></div>
+      <div class="summary-card attention"><div class="label">Needs attention</div><div class="value" id="sum-attn">—</div></div>
+    </div>
+
+    <div class="toolbar">
+      <button class="filter-pill active" data-filter="all">All</button>
+      <button class="filter-pill" data-filter="needs_attention">Needs attention</button>
+      <button class="filter-pill" data-filter="ready_to_serve">Ready</button>
+      <button class="filter-pill" data-filter="occupied">Occupied</button>
+      <button class="filter-pill" data-filter="free">Free</button>
+      <input type="search" class="search" id="search" placeholder="Search tables…" />
+    </div>
+
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" style="display:none;">No tables match the current filter.</div>
+  </main>
+
+  <div class="modal-bg" id="modal-bg">
+    <div class="modal">
+      <span class="close" id="modal-close">✕</span>
+      <h2 id="modal-title">Table</h2>
+      <section>
+        <h3>Sticky note <span style="font-weight:400;text-transform:none;color:var(--muted)">(clears in 30 min)</span></h3>
+        <textarea id="note-input" rows="2" maxlength="200"
+                  style="width:100%;padding:.5rem;border:1px solid var(--line);border-radius:8px;font-family:inherit;"></textarea>
+        <button class="btn btn-primary" id="note-save" style="margin-top:.4rem;">Save note</button>
+      </section>
+      <section>
+        <h3>Recent orders</h3>
+        <ul id="recent-orders"><li>Loading…</li></ul>
+      </section>
+      <section>
+        <h3>Recent service calls</h3>
+        <ul id="recent-calls"><li>Loading…</li></ul>
+      </section>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const csrf = document.querySelector('meta[name="csrf-token"]').content;
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('empty');
+  const meta = document.getElementById('meta-line');
+  const search = document.getElementById('search');
+  const auto = document.getElementById('auto-refresh');
+  let activeFilter = 'all';
+  let lastData = null;
+  let timer = null;
+  let currentTableId = null;
+
+  function fmtAge(s) {
+    if (!s) return '0s';
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm' + (s % 60 ? ' ' + (s % 60) + 's' : '');
+    const h = Math.floor(m / 60);
+    return h + 'h ' + (m % 60) + 'm';
+  }
+  function money(n) {
+    return Number(n || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+  }
+  function reasonLabel(r) {
+    return ({ service: 'Call server', bill: 'Bill request', water: 'Water', help: 'Needs help' }[r] || r || 'service');
+  }
+
+  function render() {
+    if (!lastData) return;
+    document.getElementById('sum-total').textContent    = lastData.summary.total;
+    document.getElementById('sum-free').textContent     = lastData.summary.free || 0;
+    document.getElementById('sum-occupied').textContent = lastData.summary.occupied || 0;
+    document.getElementById('sum-ready').textContent    = lastData.summary.ready_to_serve || 0;
+    document.getElementById('sum-attn').textContent     = lastData.summary.needs_attention || 0;
+    meta.textContent = `${lastData.summary.total} tables · updated ${new Date(lastData.fetchedAt).toLocaleTimeString()}`;
+
+    const q = (search.value || '').toLowerCase().trim();
+    const filtered = lastData.tables.filter(t => {
+      if (activeFilter !== 'all' && t.status !== activeFilter) return false;
+      if (q && !(t.name || '').toLowerCase().includes(q) && !(t.id || '').toLowerCase().includes(q)) return false;
+      return true;
+    });
+
+    if (!filtered.length) { grid.innerHTML = ''; empty.style.display = 'block'; return; }
+    empty.style.display = 'none';
+
+    grid.innerHTML = filtered.map(t => {
+      const order = t.openOrder;
+      const calls = t.openCalls;
+      const orderHtml = order
+        ? `<div class="order-line"><b>Order #${order.id}</b> · ${order.status}<br>
+           ${order.itemsCount} item${order.itemsCount === 1 ? '' : 's'} · ${money(order.total)} · ${fmtAge(order.ageSeconds)}
+           ${order.customerName ? '<br>👤 ' + order.customerName : ''}</div>`
+        : '';
+      const callsHtml = calls.count
+        ? `<div class="calls-line">🔔 ${calls.count} open call${calls.count === 1 ? '' : 's'}
+           · ${reasonLabel(calls.latestReason)} · ${fmtAge(calls.latestAgeSeconds)}${calls.anyAcknowledged ? ' · ack' : ''}</div>`
+        : '';
+      const noteHtml = t.note ? `<div class="note">📝 ${escapeHtml(t.note)}</div>` : '';
+      const occupiedHtml = t.occupiedSinceSeconds
+        ? `<div class="row"><span class="k">Occupied</span><span>${fmtAge(t.occupiedSinceSeconds)}</span></div>` : '';
+      return `
+        <div class="card" data-id="${t.id}">
+          <div class="head">
+            <div>
+              <div class="name">${escapeHtml(t.name)}</div>
+              <div class="id">${t.id}</div>
+            </div>
+            <span class="badge ${t.status}">${t.status.replace('_', ' ')}</span>
+          </div>
+          ${orderHtml}
+          ${callsHtml}
+          ${occupiedHtml}
+          <div class="row"><span class="k">Today</span><span>${t.today.orders} orders · ${money(t.today.revenue)}</span></div>
+          ${noteHtml}
+          <div class="actions-row">
+            <button class="btn" data-act="detail">Details</button>
+            ${calls.count ? '<button class="btn btn-primary" data-act="clear">Clear calls</button>' : ''}
+            ${order ? `<a class="btn" href="/owner/order/${order.id}/receipt" target="_blank" rel="noopener">Receipt</a>` : ''}
+            <a class="btn" href="/t/${t.id}" target="_blank" rel="noopener">Menu</a>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  async function load() {
+    try {
+      const r = await fetch('/api/owner/tables/overview', { credentials: 'same-origin', cache: 'no-store' });
+      if (!r.ok) throw new Error('http ' + r.status);
+      lastData = await r.json();
+      grid.classList.remove('stale');
+      render();
+    } catch (e) {
+      grid.classList.add('stale');
+      console.warn('overview load failed', e);
+    }
+  }
+
+  // Filter buttons
+  document.querySelectorAll('.filter-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeFilter = btn.dataset.filter;
+      render();
+    });
+  });
+  search.addEventListener('input', render);
+
+  // Card actions (event delegation)
+  grid.addEventListener('click', async (ev) => {
+    const card = ev.target.closest('.card'); if (!card) return;
+    const id = card.dataset.id;
+    const act = ev.target.dataset.act;
+    if (act === 'clear') {
+      ev.target.disabled = true;
+      try {
+        await fetch(`/api/owner/tables/${encodeURIComponent(id)}/clear`, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/json' }, body: '{}'
+        });
+        await load();
+      } finally { ev.target.disabled = false; }
+    } else if (act === 'detail') {
+      openDetail(id);
+    }
+  });
+
+  // Detail modal
+  const modalBg = document.getElementById('modal-bg');
+  document.getElementById('modal-close').addEventListener('click', () => modalBg.classList.remove('show'));
+  modalBg.addEventListener('click', (e) => { if (e.target === modalBg) modalBg.classList.remove('show'); });
+  document.getElementById('note-save').addEventListener('click', async () => {
+    if (!currentTableId) return;
+    const note = document.getElementById('note-input').value;
+    await fetch(`/api/owner/tables/${encodeURIComponent(currentTableId)}/note`, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note })
+    });
+    modalBg.classList.remove('show');
+    await load();
+  });
+
+  async function openDetail(id) {
+    currentTableId = id;
+    document.getElementById('modal-title').textContent = 'Table ' + id;
+    document.getElementById('recent-orders').innerHTML = '<li>Loading…</li>';
+    document.getElementById('recent-calls').innerHTML = '<li>Loading…</li>';
+    document.getElementById('note-input').value = '';
+    modalBg.classList.add('show');
+    try {
+      const r = await fetch(`/api/owner/tables/${encodeURIComponent(id)}/detail`, { credentials: 'same-origin' });
+      const d = await r.json();
+      document.getElementById('modal-title').textContent = d.table.name;
+      document.getElementById('note-input').value = d.note || '';
+      document.getElementById('recent-orders').innerHTML = (d.recentOrders.length
+        ? d.recentOrders.map(o => `<li>#${o.id} · ${o.status} · ${money(o.total)} · ${fmtAge(o.ageSeconds)} ago${o.customerName ? ' · ' + escapeHtml(o.customerName) : ''}</li>`).join('')
+        : '<li style="color:var(--muted)">No orders yet.</li>');
+      document.getElementById('recent-calls').innerHTML = (d.recentCalls.length
+        ? d.recentCalls.map(c => `<li>${reasonLabel(c.reason)} · ${c.status} · ${fmtAge(c.ageSeconds)} ago</li>`).join('')
+        : '<li style="color:var(--muted)">No service calls yet.</li>');
+    } catch (e) {
+      document.getElementById('recent-orders').innerHTML = '<li>Failed to load.</li>';
+      document.getElementById('recent-calls').innerHTML = '';
+    }
+  }
+
+  // Refresh control
+  document.getElementById('refresh-btn').addEventListener('click', load);
+  function schedule() {
+    if (timer) clearInterval(timer);
+    if (auto.checked) timer = setInterval(load, 8000);
+  }
+  auto.addEventListener('change', schedule);
+
+  // Re-poll on tab focus, save battery while hidden.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { load(); schedule(); }
+    else if (timer) { clearInterval(timer); timer = null; }
+  });
+
+  load(); schedule();
+})();
+</script>
+</body>
+</html>
