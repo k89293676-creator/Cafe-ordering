@@ -352,6 +352,73 @@
           </div>
         </div>
         {% endif %}
+
+        {% if webhook_activity %}
+        <div class="card" style="margin-bottom:1rem;">
+          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;">
+            <div>
+              <h3>Webhook Activity</h3>
+              <div class="card-subtitle" style="font-size:.8rem;">
+                {% if webhook_activity.counts.total_24h == 0 %}
+                  No webhook traffic in the last 24 hours.
+                {% else %}
+                  Last 24h:
+                  <span style="color:#16a34a;font-weight:600;">{{ webhook_activity.counts.delivered_24h }} delivered</span>
+                  {% if webhook_activity.counts.pending_24h %} · <span style="color:#d97706;font-weight:600;">{{ webhook_activity.counts.pending_24h }} pending</span>{% endif %}
+                  {% if webhook_activity.counts.signature_failures_24h %} · <span style="color:#dc2626;font-weight:600;">{{ webhook_activity.counts.signature_failures_24h }} signature failure(s)</span>{% endif %}
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          <div class="card-body">
+            {% if not webhook_activity.items %}
+              <div style="font-size:.85rem;color:#6b7280;">
+                Once payments or food-delivery orders flow in, every inbound webhook will be logged here. Signature failures and unprocessed retries surface in red so you can react before customers notice.
+              </div>
+            {% else %}
+              <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+                  <thead>
+                    <tr style="text-align:left;border-bottom:1px solid #e5e7eb;color:#6b7280;">
+                      <th style="padding:.4rem .5rem;font-weight:600;">When</th>
+                      <th style="padding:.4rem .5rem;font-weight:600;">Provider</th>
+                      <th style="padding:.4rem .5rem;font-weight:600;">Event</th>
+                      <th style="padding:.4rem .5rem;font-weight:600;">Reference</th>
+                      <th style="padding:.4rem .5rem;font-weight:600;">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for ev in webhook_activity.items %}
+                    <tr style="border-bottom:1px solid #f3f4f6;">
+                      <td style="padding:.4rem .5rem;color:#6b7280;white-space:nowrap;">
+                        {{ ev.received_at.strftime('%b %d %H:%M') if ev.received_at else '—' }}
+                      </td>
+                      <td style="padding:.4rem .5rem;">{{ ev.label }}</td>
+                      <td style="padding:.4rem .5rem;">
+                        <code style="font-size:.78rem;background:#f3f4f6;padding:.1rem .35rem;border-radius:3px;">{{ ev.event_type }}</code>
+                      </td>
+                      <td style="padding:.4rem .5rem;color:#6b7280;font-family:ui-monospace,monospace;font-size:.75rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ ev.intent_id }}">
+                        {{ ev.intent_id or '—' }}
+                      </td>
+                      <td style="padding:.4rem .5rem;">
+                        {% if ev.is_signature_failure %}
+                          <span style="background:#fee2e2;color:#991b1b;padding:.15rem .45rem;border-radius:10px;font-size:.7rem;font-weight:600;">SIGNATURE FAILED</span>
+                        {% elif ev.processed %}
+                          <span style="background:#dcfce7;color:#166534;padding:.15rem .45rem;border-radius:10px;font-size:.7rem;font-weight:600;">DELIVERED</span>
+                        {% else %}
+                          <span style="background:#fef3c7;color:#92400e;padding:.15rem .45rem;border-radius:10px;font-size:.7rem;font-weight:600;">PENDING</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+
         <div class="overview-grid">
 
           <!-- Live Orders -->

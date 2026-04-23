@@ -3419,6 +3419,7 @@ def owner_dashboard() -> Response:
     low_stock = [i for i in ingredients if float(i.stock or 0) <= float(i.low_stock_threshold or 5)]
 
     integration_health = _integration_health_summary(owner_id)
+    webhook_activity = _webhook_activity_summary(owner_id)
 
     resp = app.make_response(render_template(
         "owner_dashboard.html",
@@ -3436,6 +3437,7 @@ def owner_dashboard() -> Response:
         total_feedback=len(owner_feedback),
         low_stock_alerts=low_stock,
         integration_health=integration_health,
+        webhook_activity=webhook_activity,
     ))
     return _no_store(resp)
 
@@ -3513,6 +3515,113 @@ def _integration_health_summary(owner_id: int) -> dict:
         "configured": len(items),
         "needs_attention": counts["failing"] + counts["unverified"],
     }
+
+
+def _webhook_activity_summary(owner_id: int, limit: int = 12) -> dict:
+    """Build a recent-activity feed of inbound provider webhooks scoped to
+    the current owner.
+
+    Webhook rows are not owner-scoped at the schema level (providers don't
+    know our internal owner ids), so we attribute them by joining:
+      * payment events (stripe / razorpay) → online_payments.intent_id
+      * aggregator events (agg:swiggy / agg:zomato) → aggregator_orders
+        on (platform, external_order_id)
+      * signature_invalid events for an aggregator are surfaced if the
+        owner has any credential for that platform — these are the rows
+        owners *most* need to see (rotated keys, forged retries, etc.)
+
+    The feed shows: provider, event type, processed flag, age. Counters
+    summarise the last 24h so a glance answers "did anything reach me?"
+    """
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=24)
+    items: list[dict] = []
+
+    # ---- Payment events (stripe / razorpay) for this owner ------------
+    payment_intents = {p.intent_id for p in (
+        OnlinePayment.query.with_entities(OnlinePayment.intent_id)
+        .filter(OnlinePayment.owner_id == owner_id,
+                OnlinePayment.intent_id.isnot(None),
+                OnlinePayment.intent_id != "")
+        .order_by(OnlinePayment.id.desc())
+        .limit(500).all()
+    ) if p.intent_id}
+    if payment_intents:
+        rows = (WebhookEventLog.query
+                .filter(WebhookEventLog.provider.in_(("stripe", "razorpay")),
+                        WebhookEventLog.intent_id.in_(payment_intents))
+                .order_by(WebhookEventLog.received_at.desc())
+                .limit(limit * 2).all())
+        for r in rows:
+            items.append({
+                "provider": r.provider,
+                "label": r.provider.title(),
+                "event_type": r.event_type or "(unknown)",
+                "intent_id": r.intent_id or "",
+                "received_at": r.received_at,
+                "processed": bool(r.processed),
+                "is_signature_failure": False,
+            })
+
+    # ---- Aggregator events (agg:<platform>) for this owner ------------
+    owner_platforms = {c.platform for c in (
+        AggregatorPlatformCredential.query
+        .with_entities(AggregatorPlatformCredential.platform)
+        .filter_by(owner_id=owner_id).all())}
+    if owner_platforms:
+        owner_agg_keys = set()
+        for plat in owner_platforms:
+            for ao in (AggregatorOrder.query
+                       .with_entities(AggregatorOrder.external_order_id)
+                       .filter_by(owner_id=owner_id, platform=plat)
+                       .order_by(AggregatorOrder.id.desc())
+                       .limit(500).all()):
+                if ao.external_order_id:
+                    owner_agg_keys.add((plat, ao.external_order_id))
+
+        agg_providers = tuple(f"agg:{p}" for p in owner_platforms)
+        rows = (WebhookEventLog.query
+                .filter(WebhookEventLog.provider.in_(agg_providers))
+                .order_by(WebhookEventLog.received_at.desc())
+                .limit(limit * 4).all())
+        for r in rows:
+            plat = r.provider.split(":", 1)[1] if ":" in r.provider else ""
+            is_sig = (r.event_type or "") == "signature_invalid"
+            # Always show signature failures; otherwise only show events
+            # that match one of this owner's known external order ids.
+            if not is_sig and (plat, r.intent_id or "") not in owner_agg_keys:
+                continue
+            items.append({
+                "provider": r.provider,
+                "label": (PLATFORM_LABELS.get(plat, plat or r.provider).title()
+                          if plat else r.provider),
+                "event_type": r.event_type or "(unknown)",
+                "intent_id": r.intent_id or "",
+                "received_at": r.received_at,
+                "processed": bool(r.processed),
+                "is_signature_failure": is_sig,
+            })
+
+    items.sort(key=lambda d: d["received_at"] or now, reverse=True)
+    items = items[:limit]
+
+    counts = {
+        "delivered_24h": sum(
+            1 for i in items
+            if i["received_at"] and i["received_at"] >= since
+            and i["processed"] and not i["is_signature_failure"]),
+        "pending_24h": sum(
+            1 for i in items
+            if i["received_at"] and i["received_at"] >= since
+            and not i["processed"] and not i["is_signature_failure"]),
+        "signature_failures_24h": sum(
+            1 for i in items
+            if i["received_at"] and i["received_at"] >= since
+            and i["is_signature_failure"]),
+    }
+    counts["total_24h"] = (counts["delivered_24h"] + counts["pending_24h"]
+                           + counts["signature_failures_24h"])
+    return {"items": items, "counts": counts}
 
 
 def _integration_state(view: dict) -> str:
