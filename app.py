@@ -730,6 +730,27 @@ migrate.init_app(app, db)
 _DB_READY = False
 _DB_INIT_ERROR = "Database has not been initialized yet."
 _DB_INIT_LAST_ATTEMPT = 0.0
+# Snapshot of the most recent auto-sync pass, surfaced via
+# /superadmin/devops/schema for post-deploy verification. Each entry is
+# {"level": "info"|"warn", "msg": str, "at": iso8601}. Bounded ring buffer.
+_AUTO_SYNC_REPORT: list[dict] = []
+_AUTO_SYNC_MAX = 200
+
+
+def _autosync_log(level: str, msg: str) -> None:
+    _AUTO_SYNC_REPORT.append({
+        "level": level,
+        "msg": msg,
+        "at": datetime.now(timezone.utc).isoformat(),
+    })
+    if len(_AUTO_SYNC_REPORT) > _AUTO_SYNC_MAX:
+        del _AUTO_SYNC_REPORT[: len(_AUTO_SYNC_REPORT) - _AUTO_SYNC_MAX]
+    if level == "warn":
+        app.logger.warning("auto-sync: %s", msg)
+    else:
+        app.logger.info("auto-sync: %s", msg)
+
+
 _DB_INIT_LOCK = threading.Lock()
 
 
@@ -834,6 +855,9 @@ def _init_db() -> None:
         add_column_if_missing("owners", "trial_ends_at TIMESTAMP", "trial_ends_at")
         add_column_if_missing("owners", "notes TEXT DEFAULT ''", "notes")
 
+        # Reset the report buffer at the start of every auto-sync pass so
+        # the diagnostics endpoint always reflects the most recent boot.
+        _AUTO_SYNC_REPORT.clear()
         # ── Generic auto-sync: introspect every model and ADD COLUMN for
         # anything declared on the model but missing from the DB. Caps the
         # explicit list above as a safety net for columns added in future
@@ -874,14 +898,14 @@ def _init_db() -> None:
                     try:
                         db.session.execute(text(ddl))
                         db.session.commit()
-                        app.logger.info("auto-sync: added %s.%s", table.name, col.name)
+                        _autosync_log("info", f"added {table.name}.{col.name}")
                     except Exception as exc:  # noqa: BLE001
                         db.session.rollback()
-                        app.logger.warning("auto-sync: skipped %s.%s (%s)",
-                                           table.name, col.name, exc)
+                        _autosync_log("warn",
+                                      f"skipped {table.name}.{col.name} ({exc})")
             _ = dialect_name  # reserved for future per-dialect quoting
         except Exception as exc:  # noqa: BLE001
-            app.logger.warning("auto-sync pass failed (non-fatal): %s", exc)
+            _autosync_log("warn", f"pass failed (non-fatal): {exc}")
 
         # Seed JSON-backed defaults LAST, after the schema is fully aligned,
         # so a missing column on an ancient DB doesn't crash the boot.
@@ -6375,6 +6399,122 @@ def superadmin_verify_key():
         error = "Invalid key. Please try again."
         log_security("SUPERADMIN_KEY_FAIL", f"admin_owner_id={session.get('admin_owner_id')}")
     return render_template("superadmin/verify_key.html", error=error), (200 if not error else 401)
+
+
+def _collect_schema_diagnostics() -> dict:
+    """Build the payload powering the devops/schema endpoints.
+
+    Returns alembic state, the most recent auto-sync report, current
+    SQLAlchemy connection-pool stats, and a live model-vs-DB drift list.
+    Safe to call from any request context; never mutates state.
+    """
+    from alembic.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    from flask_migrate import Config as _MigrateConfig
+
+    payload: dict = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "database_url_kind": db.engine.dialect.name,
+    }
+
+    # Alembic: current revision in DB + heads available in code.
+    try:
+        with db.engine.connect() as conn:
+            ctx = MigrationContext.configure(conn)
+            current = ctx.get_current_revision()
+        cfg_path = os.path.join(str(BASE_DIR), "migrations")
+        cfg = _MigrateConfig(os.path.join(cfg_path, "alembic.ini"))
+        cfg.set_main_option("script_location", cfg_path)
+        script = ScriptDirectory.from_config(cfg)
+        heads = list(script.get_heads())
+        pending: list[str] = []
+        if current not in heads:
+            for rev in script.walk_revisions("heads", current or "base"):
+                if rev.revision == current:
+                    break
+                pending.append(rev.revision)
+        payload["alembic"] = {
+            "current": current,
+            "heads": heads,
+            "pending_revisions": list(reversed(pending)),
+            "is_up_to_date": (current in heads) if heads else True,
+        }
+    except Exception as exc:  # noqa: BLE001
+        payload["alembic"] = {"error": str(exc)}
+
+    # Auto-sync report from the most recent boot.
+    payload["auto_sync"] = {
+        "entries": list(_AUTO_SYNC_REPORT),
+        "warning_count": sum(1 for e in _AUTO_SYNC_REPORT if e["level"] == "warn"),
+        "added_count": sum(1 for e in _AUTO_SYNC_REPORT
+                           if e["level"] == "info" and e["msg"].startswith("added ")),
+    }
+
+    # Live drift detection — what's in the models but not in the DB right now.
+    drift: list[dict] = []
+    try:
+        insp = inspect(db.engine)
+        existing_tables = set(insp.get_table_names())
+        for mapper in db.Model.registry.mappers:
+            t = mapper.local_table
+            if t is None:
+                continue
+            if t.name not in existing_tables:
+                drift.append({"table": t.name, "missing_table": True})
+                continue
+            db_cols = {c["name"] for c in insp.get_columns(t.name)}
+            missing = [c.name for c in t.columns if c.name not in db_cols]
+            if missing:
+                drift.append({"table": t.name, "missing_columns": missing})
+    except Exception as exc:  # noqa: BLE001
+        drift.append({"error": str(exc)})
+    payload["drift"] = drift
+    payload["in_sync"] = (not drift) and payload.get("alembic", {}).get(
+        "is_up_to_date", False)
+
+    # Live connection-pool stats — invaluable for diagnosing 500s under load.
+    try:
+        pool = db.engine.pool
+        payload["pool"] = {
+            "class": type(pool).__name__,
+            "size": getattr(pool, "size", lambda: None)(),
+            "checked_in": getattr(pool, "checkedin", lambda: None)(),
+            "checked_out": getattr(pool, "checkedout", lambda: None)(),
+            "overflow": getattr(pool, "overflow", lambda: None)(),
+        }
+    except Exception as exc:  # noqa: BLE001
+        payload["pool"] = {"error": str(exc)}
+
+    payload["db_ready"] = _DB_READY
+    if not _DB_READY:
+        payload["db_init_error"] = _DB_INIT_ERROR
+
+    return payload
+
+
+@app.route("/superadmin/devops/schema.json")
+@superadmin_required
+def superadmin_devops_schema_json():
+    """Machine-readable schema/migration/pool diagnostics.
+
+    Suitable for monitoring (curl + jq, uptime probes that want to alert
+    when ``in_sync`` goes false). Returns 200 even when out-of-sync — the
+    monitoring system decides what's an alert.
+    """
+    return jsonify(_collect_schema_diagnostics())
+
+
+@app.route("/superadmin/devops/schema")
+@superadmin_required
+def superadmin_devops_schema():
+    """Human-readable schema diagnostics page.
+
+    Shows alembic head/current, pending migrations, auto-sync log from
+    the most recent boot, live drift between models and the DB, and
+    SQLAlchemy connection-pool stats. Pure read; safe to refresh.
+    """
+    diag = _collect_schema_diagnostics()
+    return render_template("superadmin/devops_schema.html", diag=diag)
 
 
 @app.route("/superadmin/audit")
