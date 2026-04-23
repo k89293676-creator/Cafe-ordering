@@ -63,6 +63,8 @@ without editing code:
 | `APP_VERSION` | Build identifier surfaced at `/version`, `/health`, and as the Sentry release tag. | Falls back to the first 12 chars of `RAILWAY_GIT_COMMIT_SHA`. |
 | `SLOW_REQUEST_MS` | Requests slower than this (in milliseconds) are logged at WARNING with their `X-Request-ID`. | Default: `1500`. |
 | `SECURITY_CONTACT` | Email/URL surfaced at `/.well-known/security.txt` for vuln disclosure. | Default: `mailto:security@example.com` — change before going live. |
+| `IDEMPOTENCY_TTL_SECONDS` | TTL of the in-process idempotency cache used by `POST /api/checkout`. | Default: `86400` (24h). Clients pass `Idempotency-Key: <uuid>` in the request header to opt in. |
+| `FEATURE_<NAME>` | Generic feature-flag pattern. Set to `on` / `1` / `true` to enable a flag at runtime; anything else (or unset) disables. | Read in code via `feature_enabled("name")`. Lets you dark-launch risky changes without a redeploy. |
 
 ## Health-check endpoints
 

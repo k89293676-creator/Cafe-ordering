@@ -1,0 +1,40 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      flask-stack:
+        patterns:
+          - "Flask*"
+          - "Werkzeug"
+          - "gunicorn"
+      data-stack:
+        patterns:
+          - "SQLAlchemy"
+          - "psycopg2-binary"
+          - "pandas"
+      observability:
+        patterns:
+          - "sentry-sdk*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci"

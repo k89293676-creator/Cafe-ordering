@@ -204,6 +204,22 @@ def configure_logging() -> None:
 configure_logging()
 
 # ---------------------------------------------------------------------------
+# In-process runtime primitives — no Redis/external services required.
+# ---------------------------------------------------------------------------
+from lib_runtime import (  # noqa: E402  (import after configure_logging on purpose)
+    BackgroundTaskQueue,
+    IdempotencyCache,
+    ResponseCache,
+    feature_enabled,
+)
+
+bg_tasks = BackgroundTaskQueue(name="cafe-bg")
+idem_cache = IdempotencyCache(
+    ttl_seconds=int(os.environ.get("IDEMPOTENCY_TTL_SECONDS", "86400") or "86400")
+)
+response_cache = ResponseCache()
+
+# ---------------------------------------------------------------------------
 # Sentry error tracking (optional). Enabled when SENTRY_DSN is configured.
 # Lazily imported so the dependency stays optional in dev / CI.
 # ---------------------------------------------------------------------------
@@ -227,6 +243,10 @@ if _SENTRY_DSN:
     except Exception as _sentry_err:  # pragma: no cover — Sentry must never crash the app
         app.logger.warning("Sentry init failed: %s", _sentry_err)
 
+app.config.setdefault("COMPRESS_ALGORITHM", ["br", "gzip", "deflate"])
+app.config.setdefault("COMPRESS_BR_LEVEL", 4)
+app.config.setdefault("COMPRESS_LEVEL", 6)
+app.config.setdefault("COMPRESS_MIN_SIZE", 500)
 Compress(app)
 csrf = CSRFProtect(app)
 
@@ -550,6 +570,19 @@ def _assign_request_id() -> None:
         rid = secrets.token_hex(8)
     request.environ["request_id"] = rid
     request.environ["_t_start"] = time.perf_counter()
+    # Session hijack protection: if the session was minted with a UA
+    # fingerprint and the current request's UA hashes differently, the
+    # cookie is being replayed from another browser — clear it. Sessions
+    # without a fingerprint (older logins) pass through and will be
+    # re-stamped on next ``_complete_login``.
+    try:
+        stored_fp = session.get("ua_fp")
+        if stored_fp and stored_fp != _ua_fingerprint():
+            log_security("SESSION_FINGERPRINT_MISMATCH",
+                         f"owner_id={session.get('owner_id')!r} ip={_client_ip()}")
+            session.clear()
+    except Exception:  # pragma: no cover — never let session checks 500 a request
+        pass
 
 
 @app.after_request
@@ -1918,6 +1951,15 @@ def err_server(e):
 # Health check
 # ---------------------------------------------------------------------------
 
+@app.route("/healthz")
+@limiter.exempt
+def health_check_alias():
+    """Kubernetes/GCP-style alias for /health. Same payload, same status code.
+    Kept so probes that hard-code ``/healthz`` (the test suite does) keep
+    working alongside the canonical ``/health``."""
+    return health_check()
+
+
 @app.route("/health")
 @limiter.exempt
 def health_check():
@@ -2147,6 +2189,21 @@ def robots_txt():
         "Allow: /\n"
     )
     return Response(body, mimetype="text/plain; charset=utf-8")
+
+
+@app.route("/admin/runtime")
+@limiter.limit("30 per minute")
+def admin_runtime_stats():
+    """Operational peek at the in-process queue + caches. Restricted to
+    superadmins; safe to expose otherwise but unhelpful to most users.
+    Tiny replacement for a Sidekiq/RQ dashboard since we run in-process."""
+    if not session.get("is_superadmin") and request.headers.get("X-Admin-Key") != os.environ.get("SUPERADMIN_KEY", "__no__"):
+        abort(403)
+    return jsonify(
+        bgTasks=bg_tasks.stats(),
+        version=APP_VERSION,
+        uptimeSeconds=int(time.time() - APP_START_TIME),
+    ), 200
 
 
 @app.route("/.well-known/security.txt")
@@ -2396,10 +2453,25 @@ def owner_login() -> str | Response:
     return _no_store(app.make_response(render_template("owner_login.html")))
 
 
+def _ua_fingerprint() -> str:
+    """Stable, low-entropy hash of the requesting browser. Used to bind a
+    session to the device that created it so a stolen cookie replayed from
+    a different browser is rejected. Truncated SHA-256 keeps the cookie
+    payload small while still giving collision resistance well beyond what
+    a credential stuffer can brute force."""
+    import hashlib
+    ua = (request.headers.get("User-Agent") or "")[:512]
+    return hashlib.sha256(ua.encode("utf-8", "ignore")).hexdigest()[:16]
+
+
 def _complete_login(owner: Owner, remember_me: bool = False) -> None:
     session.clear()
     session["owner_username"] = owner.username
     session["owner_id"] = owner.id
+    # Bind the session to the user-agent that performed the login. Validated
+    # on every subsequent request in ``_assign_request_id`` (below). Old
+    # sessions without ``ua_fp`` are grandfathered through for one rotation.
+    session["ua_fp"] = _ua_fingerprint()
     session.permanent = True
     login_user(owner, remember=False)
 
@@ -4869,6 +4941,16 @@ def order_preview() -> tuple[dict, int]:
 def checkout() -> tuple[dict, int]:
     if not request.is_json:
         abort(400, description="JSON required.")
+    # Idempotency: if the client supplied a key and we've already processed
+    # the exact same request within the TTL, replay the original response
+    # instead of placing a second order. Keys longer than 128 chars are
+    # truncated defensively.
+    _idem_key = (request.headers.get("Idempotency-Key") or "").strip()[:128]
+    if _idem_key:
+        cached = idem_cache.get("checkout", _idem_key)
+        if cached is not None:
+            cached_body, cached_status = cached
+            return cached_body, cached_status
     payload = request.get_json(silent=True) or {}
     customer_name = str(payload.get("customerName", "Guest")).strip()[:100] or "Guest"
     customer_email = str(payload.get("customerEmail", "")).strip()[:254]
@@ -4951,13 +5033,21 @@ def checkout() -> tuple[dict, int]:
         _push_new_order(owner_id, customer_name, order_record.get("total", 0))
 
     log_security("ORDER_PLACED", f"table={table_id!r} total={order_record['total']}")
-    _send_order_confirmation(order_record)
-    return {
+    # Email is now non-blocking — a slow SMTP call no longer holds the
+    # customer's HTTP connection open. Same for the owner's web-push above.
+    bg_tasks.submit(_send_order_confirmation, order_record, _name="send_order_confirmation")
+    response_payload = {
         "message": "Order placed. Pay at counter.",
         "order": order_record,
         "pickupCode": order_record["pickupCode"],
         "paymentMethod": "pay_at_counter",
-    }, 201
+    }
+    # Cache the response under the supplied Idempotency-Key so a retry of the
+    # same request returns the same order instead of creating a duplicate.
+    _idem_key = (request.headers.get("Idempotency-Key") or "").strip()[:128]
+    if _idem_key:
+        idem_cache.set("checkout", _idem_key, (response_payload, 201))
+    return response_payload, 201
 
 
 @app.route("/api/orders", methods=["GET"])
