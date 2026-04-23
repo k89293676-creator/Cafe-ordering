@@ -449,6 +449,23 @@ class Order(db.Model):
     notes = db.Column(db.Text, default="")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    # Billing v2 columns. The physical schema is provisioned at boot via
+    # ``add_column_if_missing`` (so legacy DBs are self-healing), but the
+    # SQLAlchemy ORM still needs the attributes declared on the model — 
+    # otherwise expressions like ``Order.payment_status == 'paid'`` raise
+    # AttributeError and every billing screen 500s on first load.
+    payment_status = db.Column(db.Text, default="unpaid", server_default="unpaid", index=True)
+    payment_method = db.Column(db.Text, default="", server_default="")
+    discount = db.Column(db.Numeric(10, 2), default=0, server_default="0")
+    tax = db.Column(db.Numeric(10, 2), default=0, server_default="0")
+    service_charge = db.Column(db.Numeric(10, 2), default=0, server_default="0")
+    invoice_number = db.Column(db.Text, default="", server_default="", index=True)
+    paid_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    settled_by = db.Column(db.Integer, nullable=True)
+    payments_breakdown = db.Column(db.JSON, default=list)
+    void_reason = db.Column(db.Text, default="", server_default="")
+    refund_amount = db.Column(db.Numeric(10, 2), default=0, server_default="0")
+    refund_reason = db.Column(db.Text, default="", server_default="")
 
 
 class Feedback(db.Model):
