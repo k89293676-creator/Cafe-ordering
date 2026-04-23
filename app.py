@@ -2025,7 +2025,7 @@ def _auto_login_from_token() -> None:
 
 
 @app.route("/owner/login", methods=["GET", "POST"])
-@limiter.limit("15 per minute; 50 per hour", methods=["POST"])
+@limiter.limit("5 per minute; 50 per hour", methods=["POST"])
 def owner_login() -> str | Response:
     if logged_in_owner():
         return redirect(url_for("owner_dashboard"))
@@ -2180,7 +2180,7 @@ def owner_redeem_key() -> str | Response:
 
 
 @app.route("/owner/signup", methods=["GET", "POST"])
-@limiter.limit("10 per hour", methods=["POST"])
+@limiter.limit("5 per hour", methods=["POST"])
 def owner_signup() -> str | Response:
     if logged_in_owner():
         return redirect(url_for("owner_dashboard"))
@@ -4478,7 +4478,7 @@ def order_preview() -> tuple[dict, int]:
 
 
 @app.route("/api/checkout", methods=["POST"])
-@limiter.limit("20 per minute; 100 per hour")
+@limiter.limit("10 per minute; 100 per hour")
 def checkout() -> tuple[dict, int]:
     if not request.is_json:
         abort(400, description="JSON required.")

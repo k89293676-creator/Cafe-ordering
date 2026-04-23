@@ -40,6 +40,7 @@ from flask import (
     session,
     url_for,
 )
+from flask_login import login_user
 
 bp = Blueprint("multi_tenant", __name__, url_prefix="/superadmin/mt")
 
@@ -81,18 +82,28 @@ def hash_invite_token(plaintext: str) -> str:
 # ---------------------------------------------------------------------------
 
 def superadmin_only(view_func):
-    """Local guard so this module never imports the global ``superadmin_required``
-    at import time (avoids circular imports during app startup)."""
+    """Unified superadmin guard.
+
+    Historically this module had a local check that only granted access when
+    the logged-in owner had ``is_superadmin=True``. That excluded admin-elevated
+    sessions which had verified ``SUPERADMIN_KEY`` (the legacy /admin -> /superadmin
+    flow). To unify authorization across the app, this decorator now delegates
+    to ``app.superadmin_required`` (lazy import keeps startup circular-import
+    safe). All ``@superadmin_only`` decorations therefore behave identically to
+    ``@superadmin_required`` elsewhere in the codebase.
+    """
 
     @wraps(view_func)
     def wrapper(*args, **kwargs):
-        from app import logged_in_owner_obj
-        owner = logged_in_owner_obj()
-        if not owner or not getattr(owner, "is_superadmin", False):
-            return abort(403)
-        return view_func(*args, **kwargs)
+        from app import superadmin_required
+        return superadmin_required(view_func)(*args, **kwargs)
 
     return wrapper
+
+
+# Backwards-compatible alias so new code can import the canonical name from
+# this module too.
+superadmin_required = superadmin_only
 
 
 # ---------------------------------------------------------------------------
@@ -468,16 +479,36 @@ def impersonate(owner_id: int):
 
 @bp.route("/stop-impersonating", methods=["POST", "GET"])
 def stop_impersonating():
-    from app import Owner, db, _complete_login
+    """Restore the original superadmin session.
+
+    NOTE: We deliberately avoid calling ``_complete_login`` here because that
+    helper calls ``session.clear()``, which would wipe ``admin_authenticated``
+    and ``superadmin_key_verified`` — the two flags that admin-elevated
+    operators rely on to access ``/superadmin``. Clearing them caused the
+    operator to be bounced back to ``/admin`` after every impersonation.
+
+    Instead we directly re-authenticate the original SA owner and preserve
+    those elevation flags.
+    """
+    from app import Owner, db
     sa_id = end_impersonation()
     if not sa_id:
         return redirect(url_for("owner_login"))
     sa = db.session.get(Owner, sa_id)
     if not sa:
         return redirect(url_for("owner_login"))
+
     audit_log("IMPERSONATION_END", actor_type="superadmin",
               actor_id=sa.id, actor_label=sa.username, ip=_ip())
-    _complete_login(sa, remember_me=False)
+
+    # Re-bind the SA's owner identity without clearing the session.
+    session["owner_username"] = sa.username
+    session["owner_id"] = sa.id
+    session.permanent = True
+    # Do NOT pop admin_authenticated / superadmin_key_verified — keep the
+    # operator's elevation intact.
+    login_user(sa, remember=False)
+
     flash("Impersonation ended.", "success")
     return redirect(url_for("superadmin_dashboard"))
 
