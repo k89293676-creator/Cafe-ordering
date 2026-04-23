@@ -233,6 +233,13 @@ from lib_payments import (  # noqa: E402
     encrypt_secret,
     mask_secret,
 )
+from lib_aggregators import (  # noqa: E402
+    PLATFORM_GUIDES,
+    PLATFORM_LABELS,
+    SUPPORTED_PLATFORMS,
+    AggregatorError,
+    build_aggregator,
+)
 
 bg_tasks = BackgroundTaskQueue(name="cafe-bg")
 idem_cache = IdempotencyCache(
@@ -600,6 +607,79 @@ class OnlinePayment(db.Model):
                            onupdate=db.func.now())
 
 
+class AggregatorPlatformCredential(db.Model):
+    """Per-owner Swiggy/Zomato/Uber Eats partner credentials.
+
+    Stored encrypted at rest (Fernet) — same encryption helpers as
+    PaymentProviderCredential. The ``merchant_id`` (Swiggy Restaurant
+    ID / Zomato res_id / Uber Eats Store UUID) is plaintext because
+    the partner needs us to echo it back in API calls and it isn't
+    secret on its own."""
+    __tablename__ = "aggregator_credentials"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id"), index=True, nullable=False)
+    platform = db.Column(db.Text, nullable=False)  # 'swiggy' | 'zomato' | 'ubereats'
+    display_name = db.Column(db.Text, default="")
+    api_key = db.Column(db.Text, default="")              # plaintext (often public-ish)
+    secret_enc = db.Column(db.Text, default="")           # encrypted
+    webhook_secret_enc = db.Column(db.Text, default="")   # encrypted
+    merchant_id = db.Column(db.Text, default="")
+    mode = db.Column(db.Text, default="test", server_default="test")
+    is_active = db.Column(db.Boolean, default=True, server_default="true")
+    auto_accept = db.Column(db.Boolean, default=False, server_default="false")
+    last_tested_at = db.Column(db.DateTime(timezone=True))
+    last_test_status = db.Column(db.Text, default="")
+    last_test_message = db.Column(db.Text, default="")
+    verified_at = db.Column(db.DateTime(timezone=True))
+    verified_fingerprint = db.Column(db.Text, default="")
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(),
+                           onupdate=db.func.now())
+    __table_args__ = (
+        db.UniqueConstraint("owner_id", "platform", name="uq_aggregator_owner_platform"),
+    )
+
+
+class AggregatorOrder(db.Model):
+    """Mirror of an aggregator-side order, linked to an internal Order row.
+
+    The aggregator pushes a webhook with its own ``external_order_id``;
+    we create a local ``Order`` for the kitchen + an ``AggregatorOrder``
+    bridge row so reconciliation reports can group by platform.
+    Lookup index on (platform, external_order_id) makes the webhook
+    handler O(1)."""
+    __tablename__ = "aggregator_orders"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id"), index=True, nullable=False)
+    platform = db.Column(db.Text, nullable=False)
+    external_order_id = db.Column(db.Text, nullable=False)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=True, index=True)
+    customer_name = db.Column(db.Text, default="")
+    customer_phone = db.Column(db.Text, default="")
+    items_snapshot = db.Column(db.JSON, default=list)
+    subtotal = db.Column(db.Numeric(10, 2), default=0)
+    total = db.Column(db.Numeric(10, 2), default=0)
+    currency = db.Column(db.Text, default="INR")
+    aggregator_status = db.Column(db.Text, default="placed")
+    pickup_eta_minutes = db.Column(db.Integer, default=0)
+    rider_name = db.Column(db.Text, default="")
+    rider_phone = db.Column(db.Text, default="")
+    notes = db.Column(db.Text, default="")
+    raw = db.Column(db.JSON, default=dict)
+    accepted_at = db.Column(db.DateTime(timezone=True))
+    rejected_at = db.Column(db.DateTime(timezone=True))
+    rejected_reason = db.Column(db.Text, default="")
+    food_ready_at = db.Column(db.DateTime(timezone=True))
+    delivered_at = db.Column(db.DateTime(timezone=True))
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(),
+                           onupdate=db.func.now())
+    __table_args__ = (
+        db.UniqueConstraint("platform", "external_order_id",
+                             name="uq_aggregator_platform_external"),
+    )
+
+
 class OwnerLead(db.Model):
     """Pre-account 'request access' submissions from the public landing page.
 
@@ -714,6 +794,9 @@ def _init_db() -> None:
             "CREATE INDEX IF NOT EXISTS ix_online_payments_owner_order ON online_payments(owner_id, order_id)",
             "CREATE INDEX IF NOT EXISTS ix_online_payments_intent ON online_payments(intent_id)",
             "CREATE INDEX IF NOT EXISTS ix_webhook_events_provider_event ON webhook_events(provider, event_id)",
+            "CREATE INDEX IF NOT EXISTS ix_aggregator_credentials_owner ON aggregator_credentials(owner_id)",
+            "CREATE INDEX IF NOT EXISTS ix_aggregator_orders_owner_created ON aggregator_orders(owner_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_aggregator_orders_external ON aggregator_orders(platform, external_order_id)",
         ):
             try:
                 db.session.execute(text(idx_sql))
@@ -4141,6 +4224,487 @@ def billing_pay_page(order_id: int):
         amount_minor=int(round(float(op.amount or 0) * 100)),
         currency=op.currency or "INR",
     )))
+
+
+@app.route("/owner/billing/payment-methods/<int:cred_id>/delete", methods=["POST"])
+@login_required
+@limiter.limit("10 per hour")
+def owner_billing_payment_methods_delete(cred_id: int):
+    """Two-step delete: requires the typed provider name as confirmation,
+    so a stray click in the dashboard cannot wipe live keys."""
+    owner_id = logged_in_owner_id()
+    cred = PaymentProviderCredential.query.filter_by(
+        id=cred_id, owner_id=owner_id).first_or_404()
+    typed = (request.form.get("confirm_provider") or "").strip().lower()
+    if typed != cred.provider:
+        flash(f"Type '{cred.provider}' to confirm deletion.", "billing_error")
+        return redirect(url_for("owner_billing_payment_methods"))
+    provider = cred.provider
+    db.session.delete(cred)
+    db.session.commit()
+    _billing_log(owner_id=owner_id, order_id=None,
+                 action=f"payment_methods.{provider}.deleted",
+                 amount=0, payment_method=provider,
+                 reason="credential removed by owner",
+                 payload={"provider": provider})
+    flash(f"{PROVIDER_LABELS.get(provider, provider)} credentials removed.", "billing_ok")
+    return redirect(url_for("owner_billing_payment_methods"))
+
+
+# ============================================================================
+# Aggregator Platforms (Swiggy / Zomato / Uber Eats)
+# ============================================================================
+
+def _aggregator_for_credential(cred: "AggregatorPlatformCredential"):
+    return build_aggregator(
+        cred.platform,
+        api_key=cred.api_key or "",
+        secret=decrypt_secret(cred.secret_enc) if cred.secret_enc else "",
+        webhook_secret=(decrypt_secret(cred.webhook_secret_enc)
+                        if cred.webhook_secret_enc else ""),
+        merchant_id=cred.merchant_id or "",
+        mode=cred.mode or "test",
+    )
+
+
+def _aggregator_credential_view(cred: "AggregatorPlatformCredential") -> dict:
+    try:
+        secret_plain = decrypt_secret(cred.secret_enc) if cred.secret_enc else ""
+    except Exception:  # noqa: BLE001
+        secret_plain = ""
+    current_fp = _secret_fingerprint(secret_plain)
+    is_verified = bool(cred.verified_at and cred.verified_fingerprint == current_fp and current_fp)
+    return {
+        "id": cred.id,
+        "platform": cred.platform,
+        "platform_label": PLATFORM_LABELS.get(cred.platform, cred.platform.title()),
+        "display_name": cred.display_name or PLATFORM_LABELS.get(cred.platform, cred.platform),
+        "api_key_masked": mask_secret(cred.api_key),
+        "merchant_id": cred.merchant_id or "",
+        "has_secret": bool(cred.secret_enc),
+        "has_webhook": bool(cred.webhook_secret_enc),
+        "mode": cred.mode,
+        "is_active": bool(cred.is_active),
+        "auto_accept": bool(cred.auto_accept),
+        "is_verified": is_verified,
+        "verified_at": cred.verified_at,
+        "last_tested_at": cred.last_tested_at,
+        "last_test_status": cred.last_test_status,
+        "last_test_message": cred.last_test_message,
+        "webhook_url": url_for("aggregator_webhook", platform=cred.platform, _external=True),
+        "guide": PLATFORM_GUIDES.get(cred.platform, {}),
+    }
+
+
+@app.route("/owner/aggregators")
+@login_required
+def owner_aggregators():
+    owner_id = logged_in_owner_id()
+    creds = (AggregatorPlatformCredential.query
+             .filter_by(owner_id=owner_id)
+             .order_by(AggregatorPlatformCredential.created_at.desc()).all())
+    configured = {c.platform for c in creds}
+    available = [
+        {"slug": p, "label": PLATFORM_LABELS.get(p, p.title()),
+         "guide": PLATFORM_GUIDES.get(p, {})}
+        for p in SUPPORTED_PLATFORMS if p not in configured
+    ]
+    recent = (AggregatorOrder.query.filter_by(owner_id=owner_id)
+              .order_by(AggregatorOrder.created_at.desc()).limit(50).all())
+    return _no_store(app.make_response(render_template(
+        "owner_aggregators/index.html",
+        credentials=[_aggregator_credential_view(c) for c in creds],
+        available_platforms=available,
+        platform_labels=PLATFORM_LABELS,
+        recent_orders=recent,
+        owner_username=logged_in_owner(),
+    )))
+
+
+@app.route("/owner/aggregators/save", methods=["POST"])
+@login_required
+@limiter.limit("20 per hour; 5 per minute")
+def owner_aggregators_save():
+    owner_id = logged_in_owner_id()
+    platform = (request.form.get("platform") or "").strip().lower()
+    if platform not in SUPPORTED_PLATFORMS:
+        flash(f"Unsupported platform: {platform!r}.", "billing_error")
+        return redirect(url_for("owner_aggregators"))
+
+    cred = (AggregatorPlatformCredential.query
+            .filter_by(owner_id=owner_id, platform=platform).first())
+    is_new = cred is None
+    if is_new:
+        cred = AggregatorPlatformCredential(owner_id=owner_id, platform=platform)
+        db.session.add(cred)
+
+    cred.display_name = (request.form.get("display_name") or "").strip()[:80]
+    submitted_api = (request.form.get("api_key") or "").strip()[:200]
+    if submitted_api and "•" not in submitted_api:
+        cred.api_key = submitted_api
+    cred.merchant_id = (request.form.get("merchant_id") or "").strip()[:120]
+    secret = (request.form.get("secret") or "").strip()
+    webhook_secret = (request.form.get("webhook_secret") or "").strip()
+    secret_changed = False
+    if secret:
+        cred.secret_enc = encrypt_secret(secret)
+        secret_changed = True
+    if webhook_secret:
+        cred.webhook_secret_enc = encrypt_secret(webhook_secret)
+    requested_mode = (request.form.get("mode") or "").strip().lower()
+    if requested_mode in ("test", "live"):
+        cred.mode = requested_mode
+
+    if not cred.api_key or not cred.secret_enc or not cred.merchant_id:
+        flash(f"{PLATFORM_LABELS[platform]} requires API key, secret and merchant ID.",
+              "billing_error")
+        db.session.rollback()
+        return redirect(url_for("owner_aggregators"))
+
+    if secret_changed:
+        cred.verified_at = None
+        cred.verified_fingerprint = ""
+
+    desired_active = bool(request.form.get("is_active"))
+    cred.auto_accept = bool(request.form.get("auto_accept"))
+
+    # Same live-mode safety net as payments: never activate live without
+    # a fresh successful test against the partner API.
+    if cred.mode == "live" and desired_active:
+        try:
+            current_secret = decrypt_secret(cred.secret_enc)
+        except Exception:  # noqa: BLE001
+            current_secret = ""
+        current_fp = _secret_fingerprint(current_secret)
+        already_verified = bool(
+            cred.verified_at and cred.verified_fingerprint == current_fp and current_fp
+        )
+        if not already_verified:
+            try:
+                ag = build_aggregator(
+                    platform, api_key=cred.api_key, secret=current_secret,
+                    webhook_secret=(decrypt_secret(cred.webhook_secret_enc)
+                                    if cred.webhook_secret_enc else ""),
+                    merchant_id=cred.merchant_id, mode=cred.mode,
+                )
+                msg = ag.test_connection()
+                cred.last_test_status = "ok"
+                cred.last_test_message = msg[:500]
+                cred.last_tested_at = datetime.now(timezone.utc)
+                cred.verified_at = cred.last_tested_at
+                cred.verified_fingerprint = current_fp
+            except AggregatorError as exc:
+                cred.last_test_status = "error"
+                cred.last_test_message = str(exc)[:500]
+                cred.last_tested_at = datetime.now(timezone.utc)
+                desired_active = False
+                flash(
+                    f"Refusing to activate {PLATFORM_LABELS[platform]} live mode — "
+                    f"partner rejected the keys: {exc}",
+                    "billing_error",
+                )
+
+    cred.is_active = desired_active
+    db.session.commit()
+    _billing_log(
+        owner_id=owner_id, order_id=None,
+        action=f"aggregator.{platform}.saved",
+        amount=0, payment_method=f"aggregator:{platform}",
+        reason=f"credential {'created' if is_new else 'updated'}; mode={cred.mode}; active={cred.is_active}",
+        payload={"platform": platform, "mode": cred.mode,
+                 "is_active": cred.is_active, "auto_accept": cred.auto_accept,
+                 "merchant_id": cred.merchant_id,
+                 "api_key_masked": mask_secret(cred.api_key),
+                 "secret_rotated": secret_changed,
+                 "webhook_rotated": bool(webhook_secret)},
+    )
+    flash(f"{PLATFORM_LABELS[platform]} saved ({cred.mode} mode, "
+          f"{'active' if cred.is_active else 'disabled'}).", "billing_ok")
+    return redirect(url_for("owner_aggregators"))
+
+
+@app.route("/owner/aggregators/<int:cred_id>/test", methods=["POST"])
+@login_required
+@limiter.limit("30 per hour; 5 per minute")
+def owner_aggregators_test(cred_id: int):
+    owner_id = logged_in_owner_id()
+    cred = AggregatorPlatformCredential.query.filter_by(
+        id=cred_id, owner_id=owner_id).first_or_404()
+    try:
+        ag = _aggregator_for_credential(cred)
+        msg = ag.test_connection()
+        cred.last_test_status = "ok"
+        cred.last_test_message = msg[:500]
+        cred.last_tested_at = datetime.now(timezone.utc)
+        try:
+            cred.verified_fingerprint = _secret_fingerprint(decrypt_secret(cred.secret_enc))
+            cred.verified_at = cred.last_tested_at
+        except Exception:  # noqa: BLE001
+            pass
+        db.session.commit()
+        flash(msg, "billing_ok")
+    except AggregatorError as exc:
+        cred.last_test_status = "error"
+        cred.last_test_message = str(exc)[:500]
+        cred.last_tested_at = datetime.now(timezone.utc)
+        db.session.commit()
+        flash(f"Test failed: {exc}", "billing_error")
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("aggregator test crashed")
+        flash(f"Unexpected error: {exc}", "billing_error")
+    return redirect(url_for("owner_aggregators"))
+
+
+@app.route("/owner/aggregators/<int:cred_id>/delete", methods=["POST"])
+@login_required
+@limiter.limit("10 per hour")
+def owner_aggregators_delete(cred_id: int):
+    owner_id = logged_in_owner_id()
+    cred = AggregatorPlatformCredential.query.filter_by(
+        id=cred_id, owner_id=owner_id).first_or_404()
+    typed = (request.form.get("confirm_platform") or "").strip().lower()
+    if typed != cred.platform:
+        flash(f"Type '{cred.platform}' to confirm deletion.", "billing_error")
+        return redirect(url_for("owner_aggregators"))
+    platform = cred.platform
+    db.session.delete(cred)
+    db.session.commit()
+    _billing_log(owner_id=owner_id, order_id=None,
+                 action=f"aggregator.{platform}.deleted",
+                 amount=0, payment_method=f"aggregator:{platform}",
+                 reason="credential removed by owner", payload={"platform": platform})
+    flash(f"{PLATFORM_LABELS.get(platform, platform)} disconnected.", "billing_ok")
+    return redirect(url_for("owner_aggregators"))
+
+
+@app.route("/owner/aggregators/orders/<int:agg_id>/<action>", methods=["POST"])
+@login_required
+@limiter.limit("120 per hour")
+def owner_aggregator_order_action(agg_id: int, action: str):
+    """Staff acks an aggregator order — accept/reject/ready. Pushes the
+    state back to the partner and updates both the bridge row and the
+    underlying internal Order so the kitchen ticket stays in sync."""
+    owner_id = logged_in_owner_id()
+    if action not in ("accept", "reject", "ready"):
+        return ("bad action", 400)
+    agg = AggregatorOrder.query.filter_by(id=agg_id, owner_id=owner_id).first_or_404()
+    cred = AggregatorPlatformCredential.query.filter_by(
+        owner_id=owner_id, platform=agg.platform, is_active=True).first()
+    if cred is None:
+        flash(f"{agg.platform} integration is not active.", "billing_error")
+        return redirect(url_for("owner_aggregators"))
+    reason = (request.form.get("reason") or "").strip()[:200]
+    try:
+        ag = _aggregator_for_credential(cred)
+        ag.acknowledge_order(external_order_id=agg.external_order_id,
+                             action=action, reason=reason)
+    except AggregatorError as exc:
+        flash(f"Partner rejected the {action}: {exc}", "billing_error")
+        return redirect(url_for("owner_aggregators"))
+
+    now = datetime.now(timezone.utc)
+    if action == "accept":
+        agg.accepted_at = now
+        agg.aggregator_status = "accepted"
+        if agg.order_id:
+            o = Order.query.filter_by(id=agg.order_id, owner_id=owner_id).first()
+            if o and o.status in ("pending", "new"):
+                o.status = "preparing"
+    elif action == "reject":
+        agg.rejected_at = now
+        agg.aggregator_status = "rejected"
+        agg.rejected_reason = reason
+        if agg.order_id:
+            o = Order.query.filter_by(id=agg.order_id, owner_id=owner_id).first()
+            if o:
+                o.status = "cancelled"
+    else:  # ready
+        agg.food_ready_at = now
+        agg.aggregator_status = "ready"
+        if agg.order_id:
+            o = Order.query.filter_by(id=agg.order_id, owner_id=owner_id).first()
+            if o:
+                o.status = "ready"
+    db.session.commit()
+    _billing_log(owner_id=owner_id, order_id=agg.order_id,
+                 action=f"aggregator.{agg.platform}.{action}",
+                 amount=float(agg.total or 0),
+                 payment_method=f"aggregator:{agg.platform}",
+                 reason=reason or f"order {action}",
+                 payload={"external_order_id": agg.external_order_id,
+                          "platform": agg.platform})
+    flash(f"{PLATFORM_LABELS.get(agg.platform, agg.platform)} order #{agg.external_order_id} {action}ed.",
+          "billing_ok")
+    return redirect(url_for("owner_aggregators"))
+
+
+def _settle_aggregator_order(cred: "AggregatorPlatformCredential",
+                              event) -> "AggregatorOrder":
+    """Idempotent upsert of an inbound aggregator order.
+
+    Returns the AggregatorOrder row; creates a backing internal Order on
+    the first NEW_ORDER event so the kitchen sees it immediately, and
+    auto-accepts when ``cred.auto_accept`` is on. Subsequent events for
+    the same external_order_id (cancellations, rider assignments,
+    status updates) only mutate the existing rows."""
+    owner_id = cred.owner_id
+    agg = AggregatorOrder.query.filter_by(
+        platform=cred.platform, external_order_id=event.external_order_id
+    ).first()
+    is_new = agg is None
+    if is_new:
+        agg = AggregatorOrder(
+            owner_id=owner_id, platform=cred.platform,
+            external_order_id=event.external_order_id,
+        )
+        db.session.add(agg)
+    agg.customer_name = event.customer_name or agg.customer_name
+    agg.customer_phone = event.customer_phone or agg.customer_phone
+    agg.items_snapshot = event.items
+    agg.subtotal = round(event.subtotal_minor / 100.0, 2) if event.subtotal_minor else agg.subtotal
+    agg.total = round(event.total_minor / 100.0, 2) if event.total_minor else agg.total
+    agg.currency = event.currency or agg.currency
+    agg.aggregator_status = event.status
+    agg.pickup_eta_minutes = event.pickup_eta_minutes or agg.pickup_eta_minutes
+    if event.rider_name:
+        agg.rider_name = event.rider_name
+    if event.rider_phone:
+        agg.rider_phone = event.rider_phone
+    if event.notes:
+        agg.notes = event.notes
+    agg.raw = {"event_type": event.event_type, "object": event.raw}
+
+    if event.status == "cancelled":
+        agg.rejected_at = agg.rejected_at or datetime.now(timezone.utc)
+        if agg.order_id:
+            o = Order.query.filter_by(id=agg.order_id, owner_id=owner_id).first()
+            if o:
+                o.status = "cancelled"
+    elif event.status == "delivered":
+        agg.delivered_at = datetime.now(timezone.utc)
+        if agg.order_id:
+            o = Order.query.filter_by(id=agg.order_id, owner_id=owner_id).first()
+            if o:
+                o.status = "completed"
+    elif is_new and event.status == "placed":
+        # Mirror to internal Order so the kitchen workflow stays uniform
+        # regardless of order source. Owner-id scoped; price already in
+        # major units after the divide above.
+        order = Order(
+            owner_id=owner_id,
+            customer_name=event.customer_name or f"{cred.platform} customer",
+            customer_phone=event.customer_phone,
+            items=event.items,
+            subtotal=agg.subtotal, total=agg.total,
+            status="pending",
+            origin=cred.platform,
+            notes=event.notes or "",
+        )
+        db.session.add(order)
+        db.session.flush()
+        agg.order_id = order.id
+
+        if cred.auto_accept:
+            try:
+                ag = _aggregator_for_credential(cred)
+                ag.acknowledge_order(external_order_id=event.external_order_id,
+                                      action="accept")
+                agg.accepted_at = datetime.now(timezone.utc)
+                agg.aggregator_status = "accepted"
+                order.status = "preparing"
+            except AggregatorError as exc:
+                app.logger.warning("auto-accept failed: %s", exc)
+    return agg
+
+
+@csrf.exempt
+@app.route("/aggregators/webhook/<platform>", methods=["POST"])
+@limiter.limit("600 per minute")
+def aggregator_webhook(platform: str):
+    """Inbound order push from Swiggy/Zomato/UberEats.
+
+    Same defence-in-depth as the payment webhook: HTTPS-only in
+    production, signature verified against every active credential
+    until one matches, then deduped via WebhookEventLog before any
+    state mutation. Returns 200 on duplicate so the partner stops
+    retrying."""
+    platform = (platform or "").lower()
+    if platform not in SUPPORTED_PLATFORMS:
+        return ("unsupported platform", 404)
+
+    if _enforce_https_for_webhooks():
+        scheme = (request.headers.get("X-Forwarded-Proto") or request.scheme or "").lower()
+        if scheme != "https":
+            app.logger.warning("Rejected %s aggregator webhook over %s", platform, scheme)
+            return ("https required", 400)
+
+    body = request.get_data(cache=True) or b""
+    headers = {k: v for k, v in request.headers.items()}
+
+    candidates = (AggregatorPlatformCredential.query
+                  .filter_by(platform=platform, is_active=True).all())
+    if not candidates:
+        return ("no platform configured", 404)
+
+    event = None
+    matched_cred = None
+    last_error = None
+    for cred in candidates:
+        try:
+            ag = _aggregator_for_credential(cred)
+            event = ag.parse_webhook(body, headers)
+            matched_cred = cred
+            break
+        except AggregatorError as exc:
+            last_error = str(exc)
+            continue
+    if event is None:
+        app.logger.warning("Aggregator signature failed for %d %s creds: %s",
+                            len(candidates), platform, last_error)
+        # Audit row so owners can see attempted forgeries / misconfig.
+        try:
+            db.session.add(WebhookEventLog(
+                provider=f"agg:{platform}", event_id=f"bad:{int(time.time()*1000)}",
+                intent_id="", event_type="signature_invalid",
+                processed=False,
+            ))
+            db.session.commit()
+        except Exception:  # noqa: BLE001
+            db.session.rollback()
+        return ("signature invalid", 400)
+
+    # Dedupe on (platform, external_order_id, event_type) — for
+    # aggregators we want to *re-process* status updates (rider assigned
+    # after new_order) but not duplicate retries of the same event.
+    raw_event_id = ""
+    if isinstance(event.raw, dict):
+        raw_event_id = str(event.raw.get("event_id")
+                            or event.raw.get("id") or "")
+    if not raw_event_id:
+        raw_event_id = hashlib.sha256(
+            f"{event.event_type}:{event.external_order_id}:".encode("utf-8") + body
+        ).hexdigest()
+    try:
+        seen = WebhookEventLog.query.filter_by(
+            provider=f"agg:{platform}", event_id=raw_event_id).first()
+        if seen is not None:
+            return ("ok (duplicate)", 200)
+        db.session.add(WebhookEventLog(
+            provider=f"agg:{platform}", event_id=raw_event_id,
+            intent_id=event.external_order_id,
+            event_type=event.event_type, processed=False,
+        ))
+        db.session.flush()
+    except IntegrityError:
+        db.session.rollback()
+        return ("ok (duplicate)", 200)
+
+    _settle_aggregator_order(matched_cred, event)
+    WebhookEventLog.query.filter_by(
+        provider=f"agg:{platform}", event_id=raw_event_id
+    ).update({"processed": True})
+    db.session.commit()
+    return ("ok", 200)
 
 
 @csrf.exempt

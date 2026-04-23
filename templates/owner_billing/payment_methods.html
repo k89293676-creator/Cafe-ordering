@@ -172,14 +172,22 @@
       </div>
     </form>
 
-    <form method="post"
-          action="{{ url_for('owner_billing_payment_methods_test', cred_id=cred.id) }}"
-          style="display:inline;">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="pm-btn pm-btn-secondary" style="margin-top:8px;">
-        Verify connection now
-      </button>
-    </form>
+    <div class="pm-actions" style="margin-top:8px;">
+      <form method="post"
+            action="{{ url_for('owner_billing_payment_methods_test', cred_id=cred.id) }}"
+            style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="pm-btn pm-btn-secondary">Verify connection now</button>
+      </form>
+      <form method="post"
+            action="{{ url_for('owner_billing_payment_methods_delete', cred_id=cred.id) }}"
+            style="display:inline;"
+            onsubmit="return pmConfirm(this, '{{ cred.provider }}');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="confirm_provider" value="">
+        <button type="submit" class="pm-btn" style="background:#dc2626;color:#fff;">Disconnect</button>
+      </form>
+    </div>
 
     {% if cred.guide.steps %}
     <details class="pm-details">
@@ -294,6 +302,12 @@
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(text).then(done).catch(() => fallback(text, done));
     } else { fallback(text, done); }
+  }
+  function pmConfirm(form, expected) {
+    const v = (prompt("Type '" + expected + "' to confirm disconnect:") || "").trim().toLowerCase();
+    if (v !== expected) { alert("Disconnect cancelled."); return false; }
+    form.confirm_provider.value = v;
+    return true;
   }
   function fallback(text, done) {
     const ta = document.createElement("textarea");
