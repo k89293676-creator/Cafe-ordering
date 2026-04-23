@@ -514,6 +514,49 @@ def stop_impersonating():
 
 
 # ---------------------------------------------------------------------------
+# Maintenance mode toggle
+# ---------------------------------------------------------------------------
+
+@bp.route("/maintenance", methods=["GET"], endpoint="maintenance_mode_status")
+@superadmin_only
+def maintenance_status():
+    """Return the current maintenance flag state. JSON for API callers."""
+    from app import _maintenance_mode_enabled
+    enabled = _maintenance_mode_enabled(force_refresh=True)
+    return jsonify({"ok": True, "enabled": enabled}), 200
+
+
+@bp.route("/maintenance", methods=["POST"], endpoint="maintenance_mode_toggle")
+@superadmin_only
+def maintenance_toggle():
+    """Toggle the maintenance-mode flag.
+
+    Accepts ``enabled=true|false`` via JSON body or form. While the flag is on,
+    non-superadmin requests are served a maintenance page (see
+    ``app._enforce_maintenance_mode``). Superadmins themselves keep full
+    access so they can finish whatever they're doing before flipping it back.
+    """
+    from app import _set_maintenance_mode, _maintenance_mode_enabled
+    payload = request.get_json(silent=True) or request.form or {}
+    raw = str(payload.get("enabled", "")).strip().lower()
+    if raw not in {"true", "false", "1", "0", "on", "off", "yes", "no"}:
+        return jsonify({"ok": False, "error": "Body must include enabled=true|false."}), 400
+    enabled = raw in {"true", "1", "on", "yes"}
+    _set_maintenance_mode(enabled)
+
+    sa = _current_sa()
+    audit_log(
+        "MAINTENANCE_TOGGLE",
+        actor_type="superadmin",
+        actor_id=getattr(sa, "id", None),
+        actor_label=getattr(sa, "username", ""),
+        meta={"enabled": enabled},
+        ip=_ip(),
+    )
+    return jsonify({"ok": True, "enabled": _maintenance_mode_enabled(force_refresh=True)}), 200
+
+
+# ---------------------------------------------------------------------------
 # Per-tenant export and delete
 # ---------------------------------------------------------------------------
 

@@ -82,7 +82,19 @@ APP_START_TIME = time.time()
 APP_VERSION = os.environ.get("APP_VERSION") or os.environ.get("RAILWAY_GIT_COMMIT_SHA", "dev")[:12]
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+# Number of trusted reverse-proxy hops in front of this app. Behind Railway's
+# edge the default of 1 is correct; if you place an extra L7 proxy / CDN in
+# front (e.g. Cloudflare → Railway → app) bump TRUSTED_PROXIES to 2 so
+# X-Forwarded-* headers are honoured for the right hop. Keeping this in env
+# is what lets Talisman's HSTS + secure-cookie checks work behind the proxy.
+_trusted_proxies = max(1, int(os.environ.get("TRUSTED_PROXIES", "1") or "1"))
+app.wsgi_app = ProxyFix(
+    app.wsgi_app,
+    x_for=_trusted_proxies,
+    x_proto=_trusted_proxies,
+    x_host=_trusted_proxies,
+    x_prefix=_trusted_proxies,
+)
 
 IS_PRODUCTION = (
     os.environ.get("IS_PRODUCTION", "").lower() in {"1", "true", "yes", "on"}
@@ -399,6 +411,20 @@ class Settings(db.Model):
     logo_url = db.Column(db.Text, default="")
     brand_color = db.Column(db.Text, default="#4f46e5")
     updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+
+class SystemFlag(db.Model):
+    """Global, single-row key/value flags for cross-tenant runtime toggles.
+
+    Used today for the maintenance-mode banner. Kept deliberately schemaless
+    (text value) so superadmins can toggle new flags without migrations.
+    """
+
+    __tablename__ = "system_flags"
+    key = db.Column(db.Text, primary_key=True)
+    value = db.Column(db.Text, nullable=False, default="")
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(),
+                           onupdate=db.func.now())
 
 
 USE_DB = True
@@ -1907,6 +1933,36 @@ def health_check_full():
     else:
         checks["redis"] = {"ok": True, "configured": False}
 
+    # ── DB connection pool ─────────────────────────────────────────────────
+    try:
+        pool = db.engine.pool
+        pool_info: dict = {"ok": True}
+        # SQLAlchemy QueuePool exposes these helpers; SQLite's NullPool does not.
+        for attr in ("size", "checkedin", "checkedout", "overflow"):
+            fn = getattr(pool, attr, None)
+            if callable(fn):
+                try:
+                    pool_info[attr] = fn()
+                except Exception:
+                    pass
+        checks["dbPool"] = pool_info
+    except Exception as exc:
+        checks["dbPool"] = {"ok": False, "error": str(exc)[:200]}
+
+    # ── SSE subscribers ────────────────────────────────────────────────────
+    try:
+        sse_total = sum(len(v) for v in _sse_subscribers.values())
+        checks["sseSubscribers"] = {
+            "ok": True,
+            "owners": len(_sse_subscribers),
+            "connections": sse_total,
+        }
+    except Exception as exc:
+        checks["sseSubscribers"] = {"ok": False, "error": str(exc)[:200]}
+
+    # ── Maintenance mode flag ──────────────────────────────────────────────
+    checks["maintenanceMode"] = {"ok": True, "enabled": _maintenance_mode_enabled()}
+
     # ── Worker / runtime info ───────────────────────────────────────────────
     checks["runtime"] = {
         "ok": True,
@@ -2001,6 +2057,104 @@ def _ensure_runtime_ready():
     if _wants_json():
         return jsonify(status="starting", description=message, db_error=_DB_INIT_ERROR), 503
     return message, 503
+
+
+# ---------------------------------------------------------------------------
+# Maintenance mode
+# ---------------------------------------------------------------------------
+
+# Cheap process-local cache for the maintenance flag so the before_request
+# hook doesn't hit the DB on every single request. We refresh at most once
+# every MAINTENANCE_FLAG_TTL seconds; toggling the flag via the superadmin
+# endpoint also forces an immediate refresh.
+MAINTENANCE_FLAG_KEY = "maintenance_mode"
+MAINTENANCE_FLAG_TTL = 5.0  # seconds
+_maintenance_cache: dict = {"value": False, "ts": 0.0}
+
+
+def _maintenance_mode_enabled(*, force_refresh: bool = False) -> bool:
+    now = time.time()
+    if not force_refresh and (now - _maintenance_cache["ts"]) < MAINTENANCE_FLAG_TTL:
+        return bool(_maintenance_cache["value"])
+    enabled = False
+    try:
+        if _DB_READY:
+            row = db.session.get(SystemFlag, MAINTENANCE_FLAG_KEY)
+            enabled = bool(row and (row.value or "").lower() in {"1", "true", "on", "yes"})
+    except Exception:  # pragma: no cover — never block requests on a bad DB
+        enabled = _maintenance_cache["value"]
+    _maintenance_cache["value"] = enabled
+    _maintenance_cache["ts"] = now
+    return enabled
+
+
+def _set_maintenance_mode(enabled: bool) -> None:
+    row = db.session.get(SystemFlag, MAINTENANCE_FLAG_KEY)
+    if row is None:
+        row = SystemFlag(key=MAINTENANCE_FLAG_KEY, value=("true" if enabled else "false"))
+        db.session.add(row)
+    else:
+        row.value = "true" if enabled else "false"
+    db.session.commit()
+    _maintenance_cache["value"] = enabled
+    _maintenance_cache["ts"] = time.time()
+
+
+# Endpoints that must remain reachable while maintenance mode is active so
+# that operators can recover the system and probes keep working.
+_MAINTENANCE_ALLOWED_ENDPOINTS = {
+    "health_check",
+    "readiness_check",
+    "health_check_full",
+    "public_metrics",
+    "static",
+    "owner_login",
+    "owner_login_totp_verify",
+    "owner_logout",
+    "admin_login",
+    "admin_logout",
+    "maintenance_mode_toggle",
+    "maintenance_mode_status",
+}
+
+
+@app.before_request
+def _enforce_maintenance_mode():
+    """Show a friendly maintenance page to non-superadmin traffic when toggled.
+
+    Superadmins (and admin-elevated sessions) keep full access so they can
+    finish migrations / debugging before flipping the flag back off.
+    """
+    endpoint = request.endpoint or ""
+    if endpoint in _MAINTENANCE_ALLOWED_ENDPOINTS:
+        return None
+    # Always allow the superadmin namespace through so operators can toggle
+    # the flag back even if they hit a stale tab.
+    if endpoint.startswith("multi_tenant.") or endpoint.startswith("superadmin"):
+        return None
+    if not _maintenance_mode_enabled():
+        return None
+    # Let elevated operators bypass.
+    try:
+        owner = logged_in_owner_obj()
+    except Exception:
+        owner = None
+    if (owner and getattr(owner, "is_superadmin", False)) or session.get("admin_authenticated"):
+        return None
+    if _wants_json():
+        return jsonify(
+            status="maintenance",
+            description="The service is temporarily down for maintenance. Please try again shortly.",
+        ), 503
+    try:
+        return render_template("maintenance.html"), 503
+    except Exception:
+        # Template may not exist on older deploys — fall back to plain text.
+        return (
+            "We're performing a quick maintenance — please try again in a minute.",
+            503,
+            {"Content-Type": "text/plain; charset=utf-8", "Retry-After": "60"},
+        )
 
 
 @app.before_request
@@ -4577,10 +4731,34 @@ def checkout() -> tuple[dict, int]:
 @limiter.limit("60 per minute")
 @api_login_required
 def orders_api() -> tuple[dict, int]:
+    """Paginated, owner-scoped orders feed.
+
+    Previous implementation called ``load_orders()`` with no arguments — which
+    materialised every order in the system into memory and then filtered in
+    Python. That scaled linearly with global order volume on every poll and
+    leaked one tenant's row count to another's request latency. Now we push
+    both ownership and pagination down to the database so the new
+    ``ix_orders_owner_status_created`` index can serve the query.
+
+    Query params (both optional):
+      - ``limit``  — 1..500, default 100
+      - ``offset`` — >=0, default 0
+    """
     owner_id = logged_in_owner_id()
-    all_orders = load_orders()
-    owner_orders = [o for o in all_orders if o.get("ownerId") == owner_id]
-    return {"orders": owner_orders}, 200
+
+    try:
+        limit = int(request.args.get("limit", "100"))
+    except (TypeError, ValueError):
+        limit = 100
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except (TypeError, ValueError):
+        offset = 0
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+
+    orders = load_orders(owner_id=owner_id, limit=limit, offset=offset)
+    return {"orders": orders, "limit": limit, "offset": offset, "count": len(orders)}, 200
 
 
 @app.route("/api/orders/<int:order_id>", methods=["GET"])
