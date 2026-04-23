@@ -58,15 +58,43 @@ function esc(s) {
 function _slug(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
+// Per-item image fallback chain. Populated when each menu card is rendered;
+// consumed by `window.__menuImgFail` (below) when an <img> 404s/blocks. We
+// store the chain on a JS object instead of in the DOM to keep the markup
+// small and to avoid JSON-encoding URLs into HTML attributes (which is what
+// kept breaking before — query strings full of `&` and `'` rapidly turned the
+// onerror handler into a syntax error and the fallback never fired).
+const _imgFallbacks = Object.create(null);
+window.__menuImgFail = function (img) {
+  const id = img.getAttribute("data-item-img");
+  const chain = id ? _imgFallbacks[id] : null;
+  if (!chain || !chain.length) {
+    img.onerror = null; // give up silently — we've already tried everything
+    return;
+  }
+  const next = chain.shift();
+  if (!chain.length) img.onerror = null; // last hop, no more retries
+  img.src = next;
+};
 function _hash(s) {
   let h = 0;
   for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
   return Math.abs(h);
 }
 function autoImageUrl(item) {
-  // Use Pollinations AI's default (turbo) model — it's free, fast, and doesn't
-  // require an API token (unlike `flux`, which now gates many requests). Seed
-  // is deterministic per item so the same dish always shows the same image.
+  // Pollinations AI generates a dish-specific image from the item's name.
+  // Free, no API token, deterministic per item via `seed` so the same dish
+  // always shows the same picture. The dish name is the prompt — we add a
+  // short style suffix for consistent food-photo aesthetics.
+  //
+  // Why this is the *only* remote source now:
+  //   - LoremFlickr was the previous backup but it 302-redirects to
+  //     live.staticflickr.com, which our CSP doesn't (and shouldn't) allow,
+  //     so every "fallback" image was silently blocked by the browser.
+  //   - Unsplash/keyword sources return wildly off-topic photos for
+  //     compound dish names ("paneer butter masala" → random scenery).
+  // If Pollinations is slow or fails, we drop straight to the SVG placeholder
+  // which is on-brand and never breaks.
   const prompt = encodeURIComponent(
     `${item.name}, professional food photography, restaurant dish, natural light, close-up, appetizing, high detail`
   );
@@ -76,17 +104,11 @@ function autoImageUrl(item) {
     ? Number(item.image_seed) || 0
     : _hash(item.id || item.name);
   const seed = Math.abs(seedBase) % 999983;
-  return `https://image.pollinations.ai/prompt/${prompt}?width=400&height=250&nologo=true&nofeed=true&seed=${seed}`;
-}
-function autoImageUrlBackup(item) {
-  // LoremFlickr serves real Flickr photos for keywords. Deterministic via lock.
-  // Used as a second-tier fallback before the SVG placeholder.
-  const kw = _slug(item.name).split("-").filter(Boolean).slice(0, 3).join(",") || "food";
-  const seedBase = item.image_seed != null
-    ? Number(item.image_seed) || 0
-    : _hash(item.id || item.name);
-  const lock = Math.abs(seedBase) % 9999;
-  return `https://loremflickr.com/400/250/${encodeURIComponent(kw + ",food")}?lock=${lock}`;
+  // `model=flux` gives noticeably better food shots than the default turbo
+  // model and no longer requires a token for sub-512px requests. `nologo`
+  // strips the watermark; `nofeed` keeps these out of the public gallery.
+  return `https://image.pollinations.ai/prompt/${prompt}`
+       + `?width=400&height=250&nologo=true&nofeed=true&model=flux&seed=${seed}`;
 }
 function fallbackImageUrl(item) {
   // Deterministic SVG placeholder: a soft gradient (color picked from the item
@@ -268,19 +290,28 @@ function itemCard(item) {
          </div>`;
 
   const popularBadge = item.popular ? `<span class="o-popular-badge">🔥 Popular</span>` : "";
-  // PERFORMANCE: LoremFlickr is the primary source (real photos, ~200ms).
-  // Pollinations is only used when the owner has explicitly saved an AI url
-  // via image_url, since on-demand AI generation takes 5–15s and stalls the
-  // whole menu render. Final fallback is a data-URI SVG that can never fail.
-  const fastUrl   = item.image_url || autoImageUrlBackup(item); // LoremFlickr / explicit
-  const aiBackup  = item.image_url ? "" : autoImageUrl(item);   // Pollinations
-  const finalUrl  = fallbackImageUrl(item);
-  const onerrAttr = aiBackup
-    ? `this.onerror=function(){this.onerror=null;this.src='${esc(finalUrl)}';};this.src='${esc(aiBackup)}';`
-    : `this.onerror=null;this.src='${esc(finalUrl)}';`;
-  const imgHtml = `<img class="o-item__img" src="${esc(fastUrl)}" alt="${esc(item.name)}"
+  // Image cascade (kept intentionally tiny and CSP-safe):
+  //   1. Custom image_url the owner saved (could be /static/... or any allowed
+  //      origin — explicit owner intent always wins).
+  //   2. Pollinations AI image generated from the dish name + image_seed.
+  //   3. Inline SVG placeholder with the item name on a soft gradient.
+  // We don't chain inline JS in the onerror attribute anymore — the previous
+  // `onerror="this.onerror=function(){...};this.src='...';"` pattern broke as
+  // soon as the URL contained a quote or ampersand and silently swallowed the
+  // fallback. Now onerror just calls a tiny helper with the item id, which
+  // looks up the next URL in `_imgFallbacks` and assigns it. Two strikes max,
+  // then the SVG locks in.
+  const aiUrl     = autoImageUrl(item);
+  const svgUrl    = fallbackImageUrl(item);
+  const primary   = item.image_url || aiUrl;
+  // Only AI → SVG, or explicit → AI → SVG. Skip duplicate steps.
+  const chain = item.image_url ? [aiUrl, svgUrl] : [svgUrl];
+  _imgFallbacks[item.id] = chain;
+  const imgHtml = `<img class="o-item__img" src="${esc(primary)}" alt="${esc(item.name)}"
                         loading="lazy" decoding="async" fetchpriority="low"
-                        onerror="${onerrAttr}" />`;
+                        referrerpolicy="no-referrer"
+                        data-item-img="${esc(item.id)}"
+                        onerror="window.__menuImgFail&&window.__menuImgFail(this)" />`;
 
   return `
     <div class="o-item${avail ? "" : " o-item--sold-out"}" data-item="${esc(item.id)}">
