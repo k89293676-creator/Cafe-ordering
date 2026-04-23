@@ -2268,15 +2268,6 @@ def err_server(e):
 # Health check
 # ---------------------------------------------------------------------------
 
-@app.route("/healthz")
-@limiter.exempt
-def health_check_alias():
-    """Kubernetes/GCP-style alias for /health. Same payload, same status code.
-    Kept so probes that hard-code ``/healthz`` (the test suite does) keep
-    working alongside the canonical ``/health``."""
-    return health_check()
-
-
 @app.route("/health")
 @limiter.exempt
 def health_check():
@@ -4207,22 +4198,6 @@ def owner_billing_payment_methods_test(cred_id: int):
     except Exception as exc:  # noqa: BLE001
         app.logger.exception("payment test crashed")
         flash(f"Unexpected error testing credentials: {exc}", "billing_error")
-    return redirect(url_for("owner_billing_payment_methods"))
-
-
-@app.route("/owner/billing/payment-methods/<int:cred_id>/delete", methods=["POST"])
-@login_required
-def owner_billing_payment_methods_delete(cred_id: int):
-    owner_id = logged_in_owner_id()
-    cred = PaymentProviderCredential.query.filter_by(id=cred_id, owner_id=owner_id).first_or_404()
-    provider = cred.provider
-    db.session.delete(cred)
-    db.session.commit()
-    _billing_log(owner_id=owner_id, order_id=None,
-                 action=f"payment_methods.{provider}.deleted",
-                 amount=0, payment_method=provider, reason="credential removed",
-                 payload={"provider": provider})
-    flash(f"{PROVIDER_LABELS.get(provider, provider).title()} credentials removed.", "billing_ok")
     return redirect(url_for("owner_billing_payment_methods"))
 
 
