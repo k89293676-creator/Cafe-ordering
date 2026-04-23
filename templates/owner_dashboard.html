@@ -279,6 +279,72 @@
 
       <!-- ===================== OVERVIEW TAB ===================== -->
       <div id="tab-overview" class="tab-panel active">
+        {% if integration_health %}
+        <div class="card" style="margin-bottom:1rem;">
+          <div class="card-header">
+            <div>
+              <h3>Integrations</h3>
+              <div class="card-subtitle">
+                {% if integration_health.configured == 0 %}
+                  No payment or food-delivery integrations configured yet.
+                {% else %}
+                  {{ integration_health.counts.live }} live ·
+                  {{ integration_health.counts.ready }} test-ready ·
+                  {{ integration_health.counts.unverified }} unverified ·
+                  {{ integration_health.counts.failing }} failing
+                  {% if integration_health.counts.disabled %} · {{ integration_health.counts.disabled }} disabled{% endif %}
+                {% endif %}
+              </div>
+            </div>
+            <div style="display:flex;gap:.4rem;">
+              <a class="btn btn-sm btn-secondary" href="{{ url_for('owner_billing_payment_methods') }}">Payments</a>
+              <a class="btn btn-sm btn-secondary" href="{{ url_for('owner_aggregators') }}">Food Delivery</a>
+            </div>
+          </div>
+          <div class="card-body">
+            {% if integration_health.configured == 0 %}
+              <div style="display:flex;flex-wrap:wrap;gap:.6rem;">
+                <a class="btn btn-sm btn-primary" href="{{ url_for('owner_billing_payment_methods') }}">+ Add Stripe / Razorpay</a>
+                <a class="btn btn-sm btn-primary" href="{{ url_for('owner_aggregators') }}">+ Connect Swiggy / Zomato</a>
+              </div>
+            {% else %}
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:.6rem;">
+                {% for it in integration_health.items %}
+                  {% set palette = {
+                    'live':       ('#16a34a', '#dcfce7', 'Live'),
+                    'ready':      ('#2563eb', '#dbeafe', 'Test ready'),
+                    'unverified': ('#b45309', '#fef3c7', 'Needs test'),
+                    'failing':    ('#b91c1c', '#fee2e2', 'Failing'),
+                    'disabled':   ('#525252', '#e5e5e5', 'Disabled'),
+                  }[it.state] %}
+                  <div style="border:1px solid #e5e7eb;border-radius:10px;padding:.65rem .75rem;display:flex;flex-direction:column;gap:.4rem;background:#fff;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:.4rem;">
+                      <div style="display:flex;flex-direction:column;min-width:0;">
+                        <div style="font-weight:600;font-size:.9rem;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ it.display_name }}</div>
+                        <div style="font-size:.7rem;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">
+                          {{ it.label }} · {{ it.mode|default('test') }}
+                        </div>
+                      </div>
+                      <span style="font-size:.65rem;font-weight:700;padding:.18rem .5rem;border-radius:999px;color:{{ palette[0] }};background:{{ palette[1] }};white-space:nowrap;">
+                        <span style="display:inline-block;width:.45rem;height:.45rem;border-radius:50%;background:{{ palette[0] }};margin-right:.3rem;vertical-align:middle;"></span>{{ palette[2] }}
+                      </span>
+                    </div>
+                    {% if it.last_test_message %}
+                    <div style="font-size:.7rem;color:#6b7280;line-height:1.3;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">{{ it.last_test_message }}</div>
+                    {% endif %}
+                    <div style="display:flex;gap:.35rem;">
+                      <form method="post" action="{{ it.test_url }}" style="margin:0;flex:1;">
+                        <button type="submit" class="btn btn-sm btn-secondary" style="width:100%;font-size:.75rem;padding:.3rem;">Test connection</button>
+                      </form>
+                      <a class="btn btn-sm btn-secondary" href="{{ it.manage_url }}" style="font-size:.75rem;padding:.3rem .55rem;">Manage</a>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
         <div class="overview-grid">
 
           <!-- Live Orders -->

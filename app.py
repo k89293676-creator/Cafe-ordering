@@ -3411,6 +3411,8 @@ def owner_dashboard() -> Response:
     ingredients = Ingredient.query.filter_by(owner_id=owner_id).all()
     low_stock = [i for i in ingredients if float(i.stock or 0) <= float(i.low_stock_threshold or 5)]
 
+    integration_health = _integration_health_summary(owner_id)
+
     resp = app.make_response(render_template(
         "owner_dashboard.html",
         owner_username=logged_in_owner(),
@@ -3426,8 +3428,96 @@ def owner_dashboard() -> Response:
         avg_rating=avg_rating,
         total_feedback=len(owner_feedback),
         low_stock_alerts=low_stock,
+        integration_health=integration_health,
     ))
     return _no_store(resp)
+
+
+def _integration_health_summary(owner_id: int) -> dict:
+    """Build a compact at-a-glance status block for every payment provider
+    and aggregator credential the owner has saved.
+
+    Each entry returns one of four states:
+    - ``live``      — verified secret matches what's stored, ready in live mode
+    - ``ready``     — verified, but still in test mode
+    - ``unverified``— credential saved but never successfully tested (or the
+                      stored secret was rotated since the last verification)
+    - ``failing``   — last test attempt explicitly returned a failure status
+    - ``disabled``  — credential exists but ``is_active`` is False
+
+    Wrapped in try/except so a misconfigured row never breaks the dashboard."""
+    payment_items: list[dict] = []
+    aggregator_items: list[dict] = []
+    try:
+        for cred in (PaymentProviderCredential.query
+                     .filter_by(owner_id=owner_id)
+                     .order_by(PaymentProviderCredential.created_at.asc()).all()):
+            view = _credential_view(cred)
+            payment_items.append({
+                "id": view["id"],
+                "kind": "payment",
+                "slug": view["provider"],
+                "label": view["provider_label"],
+                "display_name": view["display_name"],
+                "mode": view["mode"],
+                "is_active": view["is_active"],
+                "is_verified": view["is_verified"],
+                "last_test_status": view["last_test_status"] or "",
+                "last_test_message": view["last_test_message"] or "",
+                "last_tested_at": view["last_tested_at"],
+                "manage_url": url_for("owner_billing_payment_methods"),
+                "test_url": url_for("owner_billing_payment_methods_test", cred_id=view["id"]),
+                "state": _integration_state(view),
+            })
+    except Exception as exc:  # pragma: no cover — defensive only
+        app.logger.warning("integration_health: payment summary failed: %s", exc)
+    try:
+        for cred in (AggregatorPlatformCredential.query
+                     .filter_by(owner_id=owner_id)
+                     .order_by(AggregatorPlatformCredential.created_at.asc()).all()):
+            view = _aggregator_credential_view(cred)
+            aggregator_items.append({
+                "id": view["id"],
+                "kind": "aggregator",
+                "slug": view["platform"],
+                "label": view["platform_label"],
+                "display_name": view["display_name"],
+                "mode": view["mode"],
+                "is_active": view["is_active"],
+                "is_verified": view["is_verified"],
+                "last_test_status": view["last_test_status"] or "",
+                "last_test_message": view["last_test_message"] or "",
+                "last_tested_at": view["last_tested_at"],
+                "manage_url": url_for("owner_aggregators"),
+                "test_url": url_for("owner_aggregators_test", cred_id=view["id"]),
+                "state": _integration_state(view),
+            })
+    except Exception as exc:  # pragma: no cover — defensive only
+        app.logger.warning("integration_health: aggregator summary failed: %s", exc)
+    items = payment_items + aggregator_items
+    counts = {"live": 0, "ready": 0, "unverified": 0, "failing": 0, "disabled": 0}
+    for it in items:
+        counts[it["state"]] = counts.get(it["state"], 0) + 1
+    return {
+        "items": items,
+        "payments": payment_items,
+        "aggregators": aggregator_items,
+        "counts": counts,
+        "configured": len(items),
+        "needs_attention": counts["failing"] + counts["unverified"],
+    }
+
+
+def _integration_state(view: dict) -> str:
+    if not view.get("is_active"):
+        return "disabled"
+    if (view.get("last_test_status") or "").lower() in ("failed", "error", "fail"):
+        return "failing"
+    if not view.get("is_verified"):
+        return "unverified"
+    if (view.get("mode") or "test").lower() == "live":
+        return "live"
+    return "ready"
 
 
 # ---------------------------------------------------------------------------
