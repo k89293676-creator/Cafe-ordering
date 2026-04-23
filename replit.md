@@ -1,27 +1,72 @@
-# Workspace
+# Cafe Ordering System
+
+A web-based cafe ordering system built with Python and Flask.
 
 ## Overview
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+Customers can browse the cafe menu and place orders from their table via QR codes or online. The app includes an Owner Portal for managing menus, tracking orders, importing menus, and generating table-specific QR codes.
 
-## Stack
+## Tech Stack
 
-- **Monorepo tool**: pnpm workspaces
-- **Node.js version**: 24
-- **Package manager**: pnpm
-- **TypeScript version**: 5.9
-- **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
-- **Validation**: Zod (`zod/v4`), `drizzle-zod`
-- **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (CJS bundle)
+- **Backend:** Python 3.12 with Flask
+- **Frontend:** HTML, CSS, Vanilla JavaScript with Jinja2 templating
+- **Primary storage:** JSON files with portalocker-backed atomic reads/writes
+- **Optional storage:** PostgreSQL when `DATABASE_URL` is set
+- **Auth:** Session-based with Werkzeug password hashing and CSRF protection
+- **Deployment:** Railway-ready Gunicorn + gevent configuration
+- **Security:** Flask-WTF CSRF, Flask-Talisman security headers in production, upload validation, rate limiting, compressed responses
 
-## Key Commands
+## Project Layout
 
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run dev` — run API server locally
+```
+app.py                 # Main Flask application with all routes and data access
+migrate_json_to_db.py  # Imports JSON data into PostgreSQL when DATABASE_URL is set
+requirements.txt       # Python dependencies
+railway.json           # Railway build and deployment configuration
+Procfile               # Gunicorn process command
+.env.example           # Required and optional environment variables
+menu.json              # Menu data fallback
+orders.json            # Order records fallback
+owners.json            # Owner account storage fallback
+tables.json            # Table metadata fallback
+static/                # CSS and JavaScript
+templates/             # Jinja2 templates
+```
 
-See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+## Environment Variables
+
+- `SECRET_KEY` — Flask session secret key; required in production
+- `IS_PRODUCTION` — set to `true` to enable production-only safeguards
+- `PORT` — port provided by the host
+- `FLASK_ENV` — set to `production` or `development`
+- `DATA_DIR` — optional directory for JSON fallback files
+- `DATABASE_URL` — optional PostgreSQL connection string
+- `REDIS_URL` — optional Redis backend for rate limiting
+- `GEMINI_API_KEY` — optional AI image menu extraction key
+- `LOG_FILE` — optional production JSON log file path
+
+## Running the App
+
+```bash
+python app.py
+```
+
+For production-like local testing:
+
+```bash
+gunicorn app:app --bind 0.0.0.0:$PORT --worker-class gevent --workers 1
+```
+
+## Deployment
+
+Railway uses `railway.json` and `Procfile` to install dependencies, start Gunicorn, and health-check `/health`.
+
+## Key Features
+
+- Menu browsing with categories and item tags
+- Cart and checkout for online and table orders
+- Table-based ordering via QR codes
+- Owner portal with menu, table, order, and profile management
+- JSON fallback mode for local/free-tier development
+- Optional PostgreSQL mode with JSON-to-database import script
+- Production-grade file locking, atomic writes, cache invalidation, security headers, CSRF, logging, and rate limiting

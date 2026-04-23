@@ -1,0 +1,1730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <title>Dashboard — Cafe 11:11</title>
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#4f46e5" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/enhancements.css" />
+</head>
+<body>
+<div class="dashboard-wrapper">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-inner">
+        <div class="brand-wordmark">11:11</div>
+        <div class="brand-text">
+          <h2>Cafe 11:11</h2>
+          <span>Owner Dashboard</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-nav">
+      <div class="sidebar-section-label">Management</div>
+      <button class="sidebar-link active" data-tab="overview">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Overview
+      </button>
+      <button class="sidebar-link" data-tab="tables">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h18M3 6h18M3 14h18M3 18h18"/></svg>
+        Tables
+      </button>
+      <button class="sidebar-link" data-tab="menu">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        Menu
+      </button>
+      <button class="sidebar-link" data-tab="orders">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18"/></svg>
+        Orders
+        {% if pending_orders %}
+        <span class="link-badge">{{ pending_orders | length }}</span>
+        {% endif %}
+      </button>
+      <button class="sidebar-link" data-tab="feedback">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        Reviews
+        {% if total_feedback %}
+        <span class="link-badge" style="background:var(--success);">{{ total_feedback }}</span>
+        {% endif %}
+      </button>
+
+      <div class="sidebar-section-label" style="margin-top:1rem;">Operations</div>
+      <a class="sidebar-link" href="{{ url_for('kitchen_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2v6a1 1 0 01-1 1H4"/><path d="M15 2v6a1 1 0 001 1h4"/><path d="M12 19v3M8 19h8"/><rect x="3" y="9" width="18" height="10" rx="2"/></svg>
+        Kitchen View
+      </a>
+      <a class="sidebar-link" href="{{ url_for('inventory_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        Inventory
+        {% if low_stock_alerts %}<span class="link-badge" style="background:var(--danger,#ef4444);">{{ low_stock_alerts|length }}</span>{% endif %}
+      </a>
+      <a class="sidebar-link" href="{{ url_for('reorder_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        Reorder
+      </a>
+
+      <div class="sidebar-section-label" style="margin-top:1rem;">Insights</div>
+      <a class="sidebar-link" href="{{ url_for('owner_analytics') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Analytics
+      </a>
+      <a class="sidebar-link" href="{{ url_for('sales_dashboard.sales_dashboard_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+        Sales Dashboard
+      </a>
+      <a class="sidebar-link" href="{{ url_for('menu_engineering.view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Menu Engineering
+      </a>
+      <a class="sidebar-link" href="{{ url_for('ltv.view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+        Customer LTV
+      </a>
+      <a class="sidebar-link" href="{{ url_for('employees.view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        Employees
+      </a>
+      <a class="sidebar-link" href="#" id="table-calls-link" data-tab="table-calls">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+        Table Calls <span id="ays-badge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;padding:0 .45rem;font-size:.65rem;font-weight:700;margin-left:.4rem;">0</span>
+      </a>
+      <a class="sidebar-link" href="{{ url_for('owner_customers') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        Customers
+      </a>
+      <a class="sidebar-link" href="{{ url_for('export_orders_csv') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17"/></svg>
+        Export CSV
+      </a>
+      <a class="sidebar-link" href="{{ url_for('daily_report_pdf') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Daily PDF Report
+      </a>
+      {% if owner.isSuperadmin %}
+      <div class="sidebar-section-label" style="margin-top:1rem;">Admin</div>
+      <a class="sidebar-link" href="{{ url_for('superadmin_dashboard') }}" style="color:#ef4444;">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Superadmin
+      </a>
+      {% endif %}
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-user-card">
+        <div class="user-avatar-lg">{{ owner_username[0].upper() }}</div>
+        <div class="user-info">
+          <div class="user-name">{{ owner_username }}</div>
+          <div class="user-role">{{ owner.cafeName or 'Cafe 11:11' }}</div>
+        </div>
+      </div>
+      <a href="{{ url_for('owner_profile') }}" class="sidebar-link">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Profile &amp; Settings
+      </a>
+      <a href="{{ url_for('owner_logout') }}" class="sidebar-link sidebar-link--danger">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Sign Out
+      </a>
+    </div>
+  </nav>
+
+  <!-- Sidebar overlay (closes sidebar on mobile when tapped) -->
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <!-- Main content -->
+  <div class="dashboard-main">
+    <div class="dashboard-topbar">
+      <button class="sidebar-toggle-btn" id="sidebar-toggle" aria-label="Open navigation menu">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div class="topbar-title">
+        <h1 id="topbar-title">Overview</h1>
+        <p id="topbar-subtitle">Welcome back, {{ owner_username }}</p>
+      </div>
+      <div class="topbar-actions">
+        {% if pending_orders %}
+        <div class="topbar-alert">
+          <span class="pulse-dot"></span>
+          {{ pending_orders | length }} pending order{{ 's' if pending_orders | length != 1 }}
+        </div>
+        {% endif %}
+        <button class="btn btn-secondary btn-sm" id="refresh-btn" onclick="window.location.reload()" title="Refresh dashboard">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <div class="dashboard-content">
+
+      {% with messages = get_flashed_messages() %}
+      {% if messages %}
+      <div class="flash-container">
+        {% for message in messages %}
+        <div class="alert alert-success">{{ message }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endwith %}
+
+      {% if low_stock_alerts %}
+      <div class="alert" style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:.75rem;padding:.75rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:.75rem;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <strong>Low Stock Alert:</strong>
+        {% for ing in low_stock_alerts %}
+        <span style="background:#fee2e2;padding:.1rem .5rem;border-radius:.4rem;font-size:.85rem;">
+          {{ ing.name }}: {{ ing.stock }} {{ ing.unit }} (threshold: {{ ing.low_stock_threshold }})
+        </span>
+        {% endfor %}
+        <a href="{{ url_for('inventory_view') }}" style="margin-left:auto;color:#dc2626;font-weight:600;text-decoration:none;">Manage →</a>
+      </div>
+      {% endif %}
+
+      <!-- Stats Row -->
+      <div class="stats-grid-5">
+        <div class="stat-card">
+          <div class="stat-icon purple">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h18M3 6h18M3 14h18M3 18h18"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{{ tables | length }}</div>
+            <div class="stat-label">Active Tables</div>
+          </div>
+        </div>
+        <div class="stat-card {% if pending_orders %}stat-card--alert{% endif %}">
+          <div class="stat-icon amber">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{{ pending_orders | length }}</div>
+            <div class="stat-label">Pending Orders</div>
+          </div>
+          {% if pending_orders %}<span class="pulse-dot pulse-dot--card"></span>{% endif %}
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon green">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><polyline points="9 11 12 14 22 4"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{{ total_items }}</div>
+            <div class="stat-label">Menu Items</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon blue">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <div class="stat-info">
+            <div class="stat-value">{{ completed_orders | length }}</div>
+            <div class="stat-label">Completed</div>
+          </div>
+        </div>
+        <div class="stat-card stat-card--revenue">
+          <div class="stat-icon emerald">₹</div>
+          <div class="stat-info">
+            <div class="stat-value stat-value--revenue">{{ '%.0f' | format(total_revenue) }}</div>
+            <div class="stat-label">Total Revenue</div>
+            {% if completed_orders | length > 0 %}
+            <div class="stat-avg">avg ₹{{ '%.0f' | format(total_revenue / (completed_orders | length)) }} / order</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab bar -->
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="overview">Overview</button>
+        <button class="tab-btn" data-tab="tables">Tables</button>
+        <button class="tab-btn" data-tab="menu">Menu</button>
+        <button class="tab-btn" data-tab="orders">
+          Orders
+          {% if pending_orders %}<span class="tab-count">{{ pending_orders | length }}</span>{% endif %}
+        </button>
+        <button class="tab-btn" data-tab="feedback">Reviews</button>
+      </div>
+
+      <!-- ===================== OVERVIEW TAB ===================== -->
+      <div id="tab-overview" class="tab-panel active">
+        <div class="overview-grid">
+
+          <!-- Live Orders -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h3>Live Orders</h3>
+                <div class="card-subtitle">Requires your attention right now</div>
+              </div>
+              {% if pending_orders %}
+              <span class="live-badge">Live</span>
+              {% endif %}
+            </div>
+            <div class="card-body" style="padding:0;">
+              {% if pending_orders %}
+                {% for order in pending_orders[:6] %}
+                <div class="order-row" data-order-id="{{ order.id }}">
+                  <div class="order-row-left">
+                    <div class="order-row-id">#{{ order.id }}</div>
+                    <div class="order-row-name">{{ order.customerName | default('Guest') }}</div>
+                    <div class="order-row-meta">
+                      <span class="order-table-badge">{{ order.tableName or 'Online' }}</span>
+                      <span class="order-row-time">{{ (order.createdAt or '')[:16] | replace('T',' ') }}</span>
+                    </div>
+                  </div>
+                  <div class="order-row-right">
+                    <div style="margin-bottom:0.4rem;">
+                      {% if order.status == 'preparing' %}
+                        <span class="order-status-badge status-preparing badge-preparing">Preparing</span>
+                      {% elif order.status == 'ready' %}
+                        <span class="order-status-badge status-ready badge-ready">Ready</span>
+                      {% else %}
+                        <span class="order-status-badge status-pending badge-pending">Pending</span>
+                      {% endif %}
+                    </div>
+                    <div class="order-row-total">₹{{ '%.2f' | format((order.total or 0) | float) }}</div>
+                    <div class="order-row-actions" style="gap:.5rem;">
+                      {% if order.pickupCode %}
+                      <span title="Pickup Code" style="font-family:monospace;background:#f3f4f6;padding:.15rem .5rem;border-radius:.4rem;font-size:.85rem;">🎫 {{ order.pickupCode }}</span>
+                      {% endif %}
+                      <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                        <select name="status" onchange="this.form.submit()" class="btn btn-secondary btn-sm" style="padding:.2rem .5rem;cursor:pointer;">
+                          <option value="pending" {% if order.status=='pending' %}selected{% endif %}>Pending</option>
+                          <option value="confirmed" {% if order.status=='confirmed' %}selected{% endif %}>Confirmed</option>
+                          <option value="preparing" {% if order.status=='preparing' %}selected{% endif %}>Preparing</option>
+                          <option value="ready" {% if order.status=='ready' %}selected{% endif %}>Ready</option>
+                          <option value="completed" {% if order.status=='completed' %}selected{% endif %}>Completed</option>
+                          <option value="cancelled" {% if order.status=='cancelled' %}selected{% endif %}>Cancelled</option>
+                        </select>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+                {% endfor %}
+                {% if pending_orders | length > 6 %}
+                <div style="padding:1rem 1.5rem;text-align:center;">
+                  <button class="btn btn-ghost btn-sm" data-tab="orders">View all {{ pending_orders | length }} orders</button>
+                </div>
+                {% endif %}
+              {% else %}
+                <div class="empty-state">
+                  <div class="empty-icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  </div>
+                  <h4>All clear!</h4>
+                  <p>No pending orders. Enjoy the break.</p>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Analytics Panel -->
+          <div style="display:flex;flex-direction:column;gap:1.25rem;">
+
+            <!-- KPI Summary -->
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <h3>Analytics</h3>
+                  <div class="card-subtitle">Performance at a glance</div>
+                </div>
+                <div style="display:flex;gap:0.5rem;">
+                  <a href="/owner/analytics" class="btn btn-outline btn-sm">Full Report</a>
+                  <a href="/owner/export/orders" class="btn btn-outline btn-sm">⬇ CSV</a>
+                </div>
+              </div>
+              <div class="card-body" style="padding:0;">
+                <div class="kpi-list">
+                  <div class="kpi-row">
+                    <div class="kpi-label"><span class="kpi-dot" style="background:#4f46e5;"></span>Total Revenue</div>
+                    <div class="kpi-value kpi-value--primary">₹{{ '%.2f' | format(total_revenue) }}</div>
+                  </div>
+                  <div class="kpi-row">
+                    <div class="kpi-label"><span class="kpi-dot" style="background:#10b981;"></span>Orders Completed</div>
+                    <div class="kpi-value">{{ completed_orders | length }}</div>
+                  </div>
+                  <div class="kpi-row">
+                    <div class="kpi-label"><span class="kpi-dot" style="background:#f59e0b;"></span>Avg. Order Value</div>
+                    <div class="kpi-value">
+                      {% if completed_orders | length > 0 %}₹{{ '%.2f' | format(total_revenue / (completed_orders | length)) }}{% else %}—{% endif %}
+                    </div>
+                  </div>
+                  <div class="kpi-row">
+                    <div class="kpi-label"><span class="kpi-dot" style="background:#6366f1;"></span>Menu Categories</div>
+                    <div class="kpi-value">{{ menu.categories | length }}</div>
+                  </div>
+                  <div class="kpi-row">
+                    <div class="kpi-label"><span class="kpi-dot" style="background:#ec4899;"></span>Total Menu Items</div>
+                    <div class="kpi-value">{{ total_items }}</div>
+                  </div>
+                  <div class="kpi-row">
+                    <div class="kpi-label"><span class="kpi-dot" style="background:#10b981;"></span>Avg. Guest Rating</div>
+                    <div class="kpi-value">{% if avg_rating %}{{ avg_rating }}/5{% else %}—{% endif %}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Recent Completions -->
+            <div class="card">
+              <div class="card-header">
+                <div><h3>Recent Completions</h3><div class="card-subtitle">Last completed orders</div></div>
+              </div>
+              <div class="card-body" style="padding:0;">
+                {% if completed_orders %}
+                  {% for order in completed_orders[-5:] | reverse %}
+                  <div class="order-row order-row--completed">
+                    <div class="order-row-left">
+                      <div class="order-row-id">#{{ order.id }}</div>
+                      <div class="order-row-name">{{ order.customerName | default('Guest') }}</div>
+                    </div>
+                    <div class="order-row-right">
+                      <span class="order-status-badge status-completed">Done</span>
+                      <div class="order-row-total" style="margin-top:0.25rem;">₹{{ '%.2f' | format((order.total or 0) | float) }}</div>
+                    </div>
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <div class="empty-state" style="padding:2rem;">
+                    <div class="empty-icon">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3h18v18H3z"/><path d="M9 9h6M9 13h4"/></svg>
+                    </div>
+                    <p>No completed orders yet</p>
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== TABLES TAB ===================== -->
+      <div id="tab-tables" class="tab-panel">
+        <div class="tables-layout">
+          <div class="table-form-card">
+            <h3>Add New Table</h3>
+            <form action="{{ url_for('create_table') }}" method="post">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <div class="field">
+                <label for="tableName">Table Name</label>
+                <input id="tableName" name="tableName" placeholder="e.g. Table 3, Window Seat, Rooftop 1" required />
+              </div>
+              <button class="btn btn-primary btn-full" type="submit">Create Table</button>
+            </form>
+          </div>
+
+          <div>
+            {% if tables %}
+            <div class="tables-grid">
+              {% for table in tables %}
+              <div class="table-item">
+                <div class="table-qr-wrap">
+                  <img src="{{ url_for('table_qr', table_id=table.id) }}" alt="QR for {{ table.name }}" />
+                </div>
+                <div class="table-info">
+                  <h4>{{ table.name }}</h4>
+                  <div class="table-id">{{ table.id }}</div>
+                  <a href="{{ url_for('table_order', table_id=table.id, _external=True) }}" target="_blank" rel="noopener noreferrer" class="table-link">Open ordering page</a>
+                </div>
+                <div class="table-actions-wrap">
+                  <a href="{{ url_for('table_qr', table_id=table.id) }}" download="qr-{{ table.id }}.png" class="btn btn-secondary btn-sm">Download QR</a>
+                  <form action="{{ url_for('delete_table', table_id=table.id) }}" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <button class="btn btn-danger btn-sm" type="submit" data-confirm="Remove this table?">Remove</button>
+                  </form>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div class="card">
+              <div class="empty-state">
+                <div class="empty-icon">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 10h18M3 6h18M3 14h18M3 18h18"/></svg>
+                </div>
+                <h4>No tables yet</h4>
+                <p>Create a table to generate a QR code for customer ordering.</p>
+              </div>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== MENU TAB ===================== -->
+      <div id="tab-menu" class="tab-panel">
+        <div class="menu-layout">
+
+          <div>
+            <div class="card" style="margin-bottom:1.25rem;">
+              <div class="card-header"><h3>Add Category</h3></div>
+              <div class="card-body">
+                <form action="{{ url_for('create_menu_category') }}" method="post" style="display:flex;gap:0.75rem;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <input name="categoryName" placeholder="Category name (e.g. Coffee)" required
+                    style="flex:1;padding:0.75rem 1rem;border:1.5px solid var(--border);border-radius:var(--radius);font-family:inherit;font-size:0.9375rem;outline:none;" />
+                  <button class="btn btn-primary" type="submit">Add</button>
+                </form>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header"><h3>Categories &amp; Items</h3></div>
+              <div class="card-body">
+                {% if menu.categories %}
+                  {% for category in menu.categories %}
+                  <div class="category-item">
+                    <div class="category-header">
+                      <span class="category-name">{{ category.name }}</span>
+                      <span class="category-count">{{ category['items'] | length }} items</span>
+                      <form action="{{ url_for('delete_menu_category', category_id=category.id) }}" method="post" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                        <button class="btn btn-danger btn-sm" type="submit" data-confirm="Delete this category and all its items?">Delete</button>
+                      </form>
+                    </div>
+                    <div class="category-rename-form">
+                      <form action="{{ url_for('rename_menu_category', category_id=category.id) }}" method="post" style="display:flex;gap:0.5rem;flex:1;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                        <input name="categoryName" value="{{ category.name }}" placeholder="Rename"
+                          style="flex:1;padding:0.5rem 0.75rem;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:0.875rem;outline:none;" />
+                        <button class="btn btn-secondary btn-sm" type="submit">Rename</button>
+                      </form>
+                    </div>
+
+                    {% if category['items'] %}
+                    <div class="menu-items-list">
+                      {% for item in category['items'] %}
+                      <div class="menu-item-row{% if not item.get('available', True) %} menu-item-row--unavailable{% endif %}">
+                        <div class="item-row-grid">
+                          <div>
+                            <div class="item-name">{{ item.name }}{% if not item.get('available', True) %} <span class="badge-sold-out">SOLD OUT</span>{% endif %}</div>
+                            {% if item.description %}<div style="font-size:0.8rem;color:var(--text-muted);">{{ item.description }}</div>{% endif %}
+                            {% if item.tags %}<div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">{{ item.tags | join(', ') }}</div>{% endif %}
+                          </div>
+                          <div class="item-price">₹{{ '%.2f' | format(item.price) }}</div>
+                        </div>
+                        <div class="item-row-actions">
+                          <form action="{{ url_for('toggle_menu_item_availability', item_id=item.id) }}" method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                            <button class="btn btn-sm {% if item.get('available', True) %}btn-warning{% else %}btn-success{% endif %}" type="submit">
+                              {% if item.get('available', True) %}Sold Out{% else %}Mark Available{% endif %}
+                            </button>
+                          </form>
+                          <button class="btn btn-secondary btn-sm" type="button" data-edit-target="edit-{{ item.id }}">Edit</button>
+                          <form action="{{ url_for('delete_menu_item', item_id=item.id) }}" method="post" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                            <button class="btn btn-danger btn-sm" type="submit" data-confirm="Delete this item?">Delete</button>
+                          </form>
+                        </div>
+                        <form id="edit-{{ item.id }}" class="item-edit-form" action="{{ url_for('save_menu_item') }}" method="post">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                          <input type="hidden" name="categoryId" value="{{ category.id }}" />
+                          <input type="hidden" name="itemId" value="{{ item.id }}" />
+                          <div><input name="itemName" value="{{ item.name }}" placeholder="Name" required /></div>
+                          <div><input name="itemPrice" type="number" step="0.01" value="{{ item.price }}" placeholder="Price" required /></div>
+                          <div class="full-col"><input name="itemDescription" value="{{ item.description }}" placeholder="Description" /></div>
+                          <div class="full-col"><input name="itemTags" value="{{ item.tags | join(', ') }}" placeholder="Tags (comma separated)" /></div>
+                          <div class="full-col"><input name="itemDietaryTags" value="{{ item.get('dietary_tags', []) | join(', ') }}" placeholder="Dietary tags (vegan, gluten-free, nut-free)" /></div>
+                          <div class="full-col">
+                            <input name="itemImageUrl" type="text" value="{{ item.get('image_url', '') }}" placeholder="Image URL or /static/... (or upload below)" class="js-image-url" />
+                            <div style="display:flex;gap:.4rem;margin-top:.35rem;align-items:center;flex-wrap:wrap;">
+                              <label class="btn btn-secondary btn-sm" style="margin:0;cursor:pointer;">
+                                📷 Upload photo
+                                <input type="file" accept="image/png,image/jpeg" class="js-image-upload" style="display:none;" />
+                              </label>
+                              <button type="button" class="btn btn-ghost btn-sm js-image-clear">✨ Use AI image</button>
+                              <span class="js-image-status" style="font-size:.72rem;color:#6b7280;"></span>
+                            </div>
+                          </div>
+                          <div><input name="itemPrepTime" type="number" min="0" max="300" value="{{ item.get('prep_time', '') }}" placeholder="Prep time (min)" /></div>
+                          <div class="full-col" style="display:flex;gap:0.5rem;">
+                            <button class="btn btn-primary btn-sm" type="submit">Save Changes</button>
+                            <button class="btn btn-ghost btn-sm" type="button" data-edit-target="edit-{{ item.id }}">Cancel</button>
+                          </div>
+                        </form>
+                      </div>
+                      {% endfor %}
+                    </div>
+                    {% endif %}
+                  </div>
+                  {% endfor %}
+                {% else %}
+                  <div class="empty-state">
+                    <div class="empty-icon">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/></svg>
+                    </div>
+                    <h4>No categories yet</h4>
+                    <p>Add a category above to start building your menu.</p>
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="card" style="margin-bottom:1.25rem;">
+              <div class="card-header"><h3>Add New Item</h3></div>
+              <div class="card-body">
+                {% if menu.categories %}
+                <form action="{{ url_for('save_menu_item') }}" method="post">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <div class="field">
+                    <label>Category</label>
+                    <select name="categoryId" required>
+                      {% for category in menu.categories %}
+                      <option value="{{ category.id }}">{{ category.name }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label>Item Name</label>
+                    <input name="itemName" placeholder="e.g. Latte" required />
+                  </div>
+                  <div class="field">
+                    <label>Price (₹)</label>
+                    <input name="itemPrice" type="number" step="0.01" placeholder="0.00" min="0" max="9999.99" required />
+                  </div>
+                  <div class="field">
+                    <label>Description</label>
+                    <input name="itemDescription" placeholder="Short description" />
+                  </div>
+                  <div class="field">
+                    <label>Tags <span class="text-muted">(comma separated)</span></label>
+                    <input name="itemTags" placeholder="hot, popular" />
+                  </div>
+                  <div class="field">
+                    <label>Dietary Tags <span class="text-muted">(comma separated — for filters)</span></label>
+                    <input name="itemDietaryTags" placeholder="vegan, gluten-free, nut-free" />
+                  </div>
+                  <div class="field">
+                    <label>Image <span class="text-muted">(upload a photo or paste a URL — leave blank for AI image)</span></label>
+                    <input name="itemImageUrl" type="text" placeholder="https://example.com/image.jpg or /static/... — leave blank for AI" class="js-image-url" />
+                    <div style="display:flex;gap:.4rem;margin-top:.4rem;align-items:center;flex-wrap:wrap;">
+                      <label class="btn btn-secondary btn-sm" style="margin:0;cursor:pointer;">
+                        📷 Upload photo
+                        <input type="file" accept="image/png,image/jpeg" class="js-image-upload" style="display:none;" />
+                      </label>
+                      <button type="button" class="btn btn-ghost btn-sm js-image-clear">✨ Use AI image</button>
+                      <span class="js-image-status" style="font-size:.72rem;color:#6b7280;"></span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>Prep Time <span class="text-muted">(minutes, optional)</span></label>
+                    <input name="itemPrepTime" type="number" min="0" max="300" placeholder="e.g. 10" />
+                  </div>
+                  <button class="btn btn-primary btn-full" type="submit">Add Item to Menu</button>
+                </form>
+                {% else %}
+                <div class="empty-state" style="padding:1.5rem;">
+                  <div class="empty-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>
+                  </div>
+                  <p>Create a category first before adding items.</p>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- Menu Upload -->
+            <div class="card">
+              <div class="card-header"><h3>Upload Menu</h3></div>
+              <div class="card-body">
+                <div class="upload-tabs">
+                  <button class="upload-tab-btn active" data-upload-tab="image">Image</button>
+                  <button class="upload-tab-btn" data-upload-tab="json">JSON</button>
+                </div>
+
+                <!-- Image Upload -->
+                <div id="upload-tab-image" class="upload-tab-panel active">
+                  <p class="text-muted" style="margin:0 0 1rem;font-size:0.875rem;">Upload a JPG or PNG photo of your printed menu. The system will extract items automatically.</p>
+                  <form action="{{ url_for('update_menu') }}" method="post" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <div class="file-drop-zone" id="file-drop-zone">
+                      <div class="file-drop-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                      </div>
+                      <p class="file-drop-text">Drop your menu image here</p>
+                      <p class="file-drop-hint">JPG or PNG — up to 16 MB</p>
+                      <input type="file" name="menu_file" id="menu-file-input" accept=".jpg,.jpeg,.png" class="file-drop-input" />
+                      <label for="menu-file-input" class="btn btn-secondary btn-sm" style="margin-top:0.75rem;cursor:pointer;">Browse Files</label>
+                      <div id="file-selected-name" style="display:none;margin-top:0.5rem;font-size:0.875rem;color:var(--primary);font-weight:500;"></div>
+                    </div>
+                    <button class="btn btn-primary btn-full" type="submit" style="margin-top:0.75rem;">Extract &amp; Import Menu</button>
+                  </form>
+                </div>
+
+                <!-- JSON Import/Export -->
+                <div id="upload-tab-json" class="upload-tab-panel" style="display:none;">
+                  <p class="text-muted" style="margin:0 0 1rem;font-size:0.875rem;">Paste or upload a menu.json to replace the current menu.</p>
+                  <form action="{{ url_for('update_menu') }}" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <div class="field">
+                      <label>Menu JSON</label>
+                      <textarea name="menu_data" rows="8" style="min-height:120px;font-family:monospace;font-size:0.8125rem;">{{ menu_json }}</textarea>
+                    </div>
+                    <button class="btn btn-secondary btn-full" type="submit" style="margin-bottom:0.75rem;">Import JSON</button>
+                  </form>
+                  <form action="{{ url_for('update_menu') }}" method="post" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <div class="field">
+                      <label>Upload menu.json</label>
+                      <input type="file" name="menu_file" accept="application/json,.json" style="font-size:0.875rem;" />
+                    </div>
+                    <button class="btn btn-secondary btn-full" type="submit" style="margin-bottom:0.75rem;">Upload JSON File</button>
+                  </form>
+                  <a href="{{ url_for('download_menu') }}" class="btn btn-ghost btn-full" style="border:1.5px solid var(--border);">Download Current Menu</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ===================== ORDERS TAB ===================== -->
+      <div id="tab-orders" class="tab-panel">
+
+        {% set orders_new = pending_orders | selectattr('status', 'equalto', 'pending') | list %}
+        {% set orders_preparing = pending_orders | selectattr('status', 'equalto', 'preparing') | list %}
+        {% set orders_ready = pending_orders | selectattr('status', 'equalto', 'ready') | list %}
+        {% set orders_inprogress = orders_preparing + orders_ready %}
+
+        <div class="kanban-board">
+
+          <!-- Column: Pending -->
+          <div class="kanban-col">
+            <div class="kanban-col-header kanban-col-header--pending">
+              <span class="kanban-col-title">Pending</span>
+              <span class="kanban-col-count">{{ orders_new | length }}</span>
+            </div>
+            {% if orders_new %}
+              {% for order in orders_new %}
+              <div class="order-card" data-order-id="{{ order.id }}">
+                <div class="order-card-head">
+                  <div>
+                    <div class="order-id">Order #{{ order.id }}</div>
+                    <div class="order-customer">{{ order.customerName | default('Guest') }}</div>
+                    <div class="order-time">{{ (order.createdAt or '')[:16] | replace('T',' ') }}</div>
+                  </div>
+                  <span class="order-table-badge">{{ order.tableName or 'Online' }}</span>
+                </div>
+                <div class="order-items-list">
+                  {% for item in (order['items'] or []) %}
+                  <div class="order-line">
+                    <span>{{ item.name | default('Item') }} × {{ item.quantity | default(1) }}</span>
+                    <span>₹{{ '%.2f' | format((item.lineTotal or 0) | float) }}</span>
+                  </div>
+                  {% endfor %}
+                </div>
+                <div class="order-total-row">
+                  <span class="order-total-label">Total</span>
+                  <span class="order-total-value">₹{{ '%.2f' | format((order.total or 0) | float) }}</span>
+                </div>
+                {% if order.pickupCode %}
+                <div style="font-family:monospace;background:#f3f4f6;padding:.2rem .6rem;border-radius:.4rem;font-size:.82rem;margin-bottom:.5rem;">🎫 Pickup: {{ order.pickupCode }}</div>
+                {% endif %}
+                <div class="order-card-actions">
+                  <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="flex:1;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <select name="status" onchange="this.form.submit()" class="btn btn-secondary btn-sm btn-full" style="cursor:pointer;">
+                      <option value="pending" selected>Pending</option>
+                      <option value="confirmed">Confirmed</option>
+                      <option value="preparing">Preparing</option>
+                      <option value="ready">Ready</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </form>
+                </div>
+              </div>
+              {% endfor %}
+            {% else %}
+              <div class="kanban-empty">No new orders</div>
+            {% endif %}
+          </div>
+
+          <!-- Column: In Progress -->
+          <div class="kanban-col">
+            <div class="kanban-col-header kanban-col-header--preparing">
+              <span class="kanban-col-title">In Progress</span>
+              <span class="kanban-col-count">{{ orders_inprogress | length }}</span>
+            </div>
+            {% if orders_inprogress %}
+              {% for order in orders_inprogress %}
+              <div class="order-card" data-order-id="{{ order.id }}">
+                <div class="order-card-head">
+                  <div>
+                    <div class="order-id">Order #{{ order.id }}</div>
+                    <div class="order-customer">{{ order.customerName | default('Guest') }}</div>
+                    <div class="order-time">{{ (order.createdAt or '')[:16] | replace('T',' ') }}</div>
+                  </div>
+                  <div style="text-align:right;">
+                    <span class="order-table-badge">{{ order.tableName or 'Online' }}</span>
+                    <div style="margin-top:0.375rem;">
+                      {% if order.status == 'ready' %}
+                        <span class="order-status-badge status-ready">Ready</span>
+                      {% else %}
+                        <span class="order-status-badge status-preparing">Preparing</span>
+                      {% endif %}
+                    </div>
+                  </div>
+                </div>
+                <div class="order-items-list">
+                  {% for item in (order['items'] or []) %}
+                  <div class="order-line">
+                    <span>{{ item.name | default('Item') }} × {{ item.quantity | default(1) }}</span>
+                    <span>₹{{ '%.2f' | format((item.lineTotal or 0) | float) }}</span>
+                  </div>
+                  {% endfor %}
+                </div>
+                <div class="order-total-row">
+                  <span class="order-total-label">Total</span>
+                  <span class="order-total-value">₹{{ '%.2f' | format((order.total or 0) | float) }}</span>
+                </div>
+                {% if order.pickupCode %}
+                <div style="font-family:monospace;background:#f3f4f6;padding:.2rem .6rem;border-radius:.4rem;font-size:.82rem;margin-bottom:.5rem;">🎫 Pickup: {{ order.pickupCode }}</div>
+                {% endif %}
+                <div class="order-card-actions">
+                  <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="flex:1;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <select name="status" onchange="this.form.submit()" class="btn btn-secondary btn-sm btn-full" style="cursor:pointer;">
+                      <option value="pending" {% if order.status=='pending' %}selected{% endif %}>Pending</option>
+                      <option value="confirmed" {% if order.status=='confirmed' %}selected{% endif %}>Confirmed</option>
+                      <option value="preparing" {% if order.status=='preparing' %}selected{% endif %}>Preparing</option>
+                      <option value="ready" {% if order.status=='ready' %}selected{% endif %}>Ready</option>
+                      <option value="completed" {% if order.status=='completed' %}selected{% endif %}>Completed</option>
+                      <option value="cancelled" {% if order.status=='cancelled' %}selected{% endif %}>Cancelled</option>
+                    </select>
+                  </form>
+                </div>
+              </div>
+              {% endfor %}
+            {% else %}
+              <div class="kanban-empty">Nothing in progress</div>
+            {% endif %}
+          </div>
+
+          <!-- Column: Completed -->
+          <div class="kanban-col">
+            <div class="kanban-col-header kanban-col-header--completed">
+              <span class="kanban-col-title">Completed</span>
+              <span class="kanban-col-count">{{ completed_orders | length }}</span>
+            </div>
+            {% if completed_orders %}
+              {% for order in completed_orders | reverse %}
+              <div class="order-card order-card--done">
+                <div class="order-card-head">
+                  <div>
+                    <div class="order-id">Order #{{ order.id }}</div>
+                    <div class="order-customer">{{ order.customerName | default('Guest') }}</div>
+                    <div class="order-time">{{ (order.createdAt or '')[:16] | replace('T',' ') }}</div>
+                  </div>
+                  <div style="text-align:right;">
+                    <span class="order-table-badge">{{ order.tableName or 'Online' }}</span>
+                    <div style="margin-top:0.375rem;"><span class="order-status-badge status-completed">Done</span></div>
+                  </div>
+                </div>
+                <div class="order-total-row">
+                  <span class="order-total-label">Total</span>
+                  <span class="order-total-value">₹{{ '%.2f' | format((order.total or 0) | float) }}</span>
+                </div>
+              </div>
+              {% endfor %}
+            {% else %}
+              <div class="kanban-empty">No completed orders yet</div>
+            {% endif %}
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ===================== TABLE CALLS TAB ===================== -->
+      <div id="tab-table-calls" class="tab-panel">
+        <div class="card">
+          <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;">
+            <div>
+              <h3>🛎️ Table Calls</h3>
+              <div class="card-subtitle">Live service requests from your dining floor</div>
+            </div>
+            <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+              <div id="tc-filter" style="display:flex;gap:.25rem;background:var(--surface-alt,#f1f5f9);padding:.2rem;border-radius:999px;">
+                <button data-status="open" class="tc-pill tc-pill--active">Open</button>
+                <button data-status="acknowledged" class="tc-pill">Acknowledged</button>
+                <button data-status="resolved" class="tc-pill">Resolved</button>
+              </div>
+              <select id="tc-reason-filter" class="form-input" style="font-size:.78rem;padding:.3rem .55rem;border-radius:8px;">
+                <option value="">All reasons</option>
+                <option value="service">🛎️ Service</option>
+                <option value="bill">💳 Bill</option>
+                <option value="water">💧 Water</option>
+                <option value="cutlery">🍴 Cutlery</option>
+                <option value="help">❓ Help</option>
+              </select>
+              <button id="tc-resolve-all" class="btn btn-sm" type="button"
+                      style="background:#dcfce7;color:#065f46;border:0;display:none;">✓ Resolve all</button>
+              <label style="display:flex;align-items:center;gap:.3rem;font-size:.75rem;color:#475569;cursor:pointer;">
+                <input id="tc-sound-toggle" type="checkbox" checked /> Sound
+              </label>
+              <button id="tc-refresh" class="btn btn-ghost btn-sm" type="button">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="tc-summary" style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;font-size:.78rem;">
+              <span class="tc-stat" data-kind="open">Open <strong id="tc-count-open">0</strong></span>
+              <span class="tc-stat" data-kind="acknowledged">Acknowledged <strong id="tc-count-ack">0</strong></span>
+              <span class="tc-stat" data-kind="resolved">Resolved today <strong id="tc-count-resolved">0</strong></span>
+              <span class="tc-stat" data-kind="avg">Avg response <strong id="tc-count-avg">—</strong></span>
+            </div>
+            <div id="tc-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.75rem;">
+              <div style="grid-column:1/-1;color:var(--text-muted,#9ca3af);text-align:center;padding:2rem;">Loading…</div>
+            </div>
+          </div>
+        </div>
+        <style>
+          .tc-pill{background:transparent;border:0;padding:.35rem .85rem;border-radius:999px;font-size:.75rem;font-weight:600;color:#475569;cursor:pointer;}
+          .tc-pill--active{background:#0f172a;color:#fff;}
+          .tc-stat{background:var(--surface-alt,#f1f5f9);border-radius:999px;padding:.35rem .8rem;color:var(--text-secondary,#475569);}
+          .tc-stat strong{margin-left:.25rem;color:var(--text-primary,#0f172a);}
+          .tc-card{border:1px solid var(--border,#e5e7eb);border-radius:12px;padding:.85rem;background:var(--surface,#fff);display:flex;flex-direction:column;gap:.45rem;}
+          .tc-card.tc-card--open{border-left:4px solid #ef4444;}
+          .tc-card.tc-card--acknowledged{border-left:4px solid #f59e0b;}
+          .tc-card.tc-card--resolved{border-left:4px solid #10b981;opacity:.85;}
+          .tc-card-head{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;}
+          .tc-card-table{font-weight:700;font-size:1rem;color:var(--text-primary,#0f172a);}
+          .tc-card-time{font-size:.72rem;color:var(--text-muted,#9ca3af);}
+          .tc-card-reason{font-size:.85rem;color:#374151;}
+          .tc-card-note{font-size:.78rem;color:#6b7280;font-style:italic;background:#f9fafb;border-radius:8px;padding:.4rem .55rem;}
+          .tc-card-meta{font-size:.72rem;color:var(--text-muted,#9ca3af);display:flex;gap:.75rem;flex-wrap:wrap;}
+          .tc-card-actions{display:flex;gap:.4rem;margin-top:.25rem;}
+          .tc-act{flex:1;border:0;border-radius:8px;padding:.45rem;font-weight:600;font-size:.78rem;cursor:pointer;}
+          .tc-act-ack{background:#fef3c7;color:#92400e;}
+          .tc-act-resolve{background:#dcfce7;color:#065f46;}
+          .tc-act:hover{filter:brightness(.95);}
+          .tc-age-bad{color:#b91c1c;font-weight:700;}
+          .tc-age-warn{color:#b45309;font-weight:700;}
+          /* Auto-escalation: any open call still unattended after 2.5 min */
+          .tc-card.tc-card--escalated{
+            border:2px solid #dc2626;
+            box-shadow:0 0 0 0 rgba(220,38,38,.55);
+            animation:tcPulse 1.4s ease-out infinite;
+            background:#fff5f5;
+          }
+          .tc-escalated-badge{
+            display:inline-block;background:#dc2626;color:#fff;
+            font-size:.65rem;font-weight:700;letter-spacing:.04em;
+            padding:.15rem .5rem;border-radius:999px;margin-left:.4rem;
+            text-transform:uppercase;
+          }
+          @keyframes tcPulse{
+            0%  {box-shadow:0 0 0 0   rgba(220,38,38,.55);}
+            70% {box-shadow:0 0 0 12px rgba(220,38,38,0);}
+            100%{box-shadow:0 0 0 0   rgba(220,38,38,0);}
+          }
+        </style>
+      </div>
+
+      <!-- ===================== FEEDBACK TAB ===================== -->
+      <div id="tab-feedback" class="tab-panel">
+        <div class="overview-grid">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h3>Guest Feedback</h3>
+                <div class="card-subtitle">What your customers are saying</div>
+              </div>
+              {% if avg_rating %}
+              <div class="rating-summary-pill">
+                <span class="rating-star">★</span>
+                <span class="rating-val">{{ avg_rating }}</span>
+                <span class="rating-count">({{ total_feedback }})</span>
+              </div>
+              {% endif %}
+            </div>
+            <div class="card-body" style="padding:0;">
+              {% if owner_feedback %}
+                {% for fb in owner_feedback %}
+                <div class="feedback-row">
+                  <div class="feedback-row-top">
+                    <div class="feedback-avatar">{{ fb.customerName[0].upper() if fb.customerName else 'G' }}</div>
+                    <div class="feedback-info">
+                      <div class="feedback-name">{{ fb.customerName or 'Guest' }}</div>
+                      <div class="feedback-stars-display">
+                        {% for i in range(1, 6) %}
+                        <span class="star-display {% if i <= fb.rating %}star-filled{% endif %}">★</span>
+                        {% endfor %}
+                      </div>
+                    </div>
+                    <div class="feedback-time">{{ (fb.createdAt or '')[:10] }}</div>
+                  </div>
+                  {% if fb.comment %}
+                  <div class="feedback-comment">"{{ fb.comment }}"</div>
+                  {% endif %}
+                </div>
+                {% endfor %}
+              {% else %}
+                <div class="empty-state" style="padding:3rem;">
+                  <div class="empty-icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                  </div>
+                  <h4>No reviews yet</h4>
+                  <p>Customer feedback will appear here once guests submit reviews from the ordering page.</p>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div><h3>Rating Breakdown</h3><div class="card-subtitle">Distribution of guest ratings</div></div>
+            </div>
+            <div class="card-body">
+              {% if owner_feedback %}
+                {% for star in [5, 4, 3, 2, 1] %}
+                {% set count = owner_feedback | selectattr('rating', 'equalto', star) | list | length %}
+                {% set pct = ((count / total_feedback) * 100) | round | int if total_feedback else 0 %}
+                <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.625rem;">
+                  <span style="font-size:0.875rem;color:var(--text-secondary);width:12px;text-align:right;">{{ star }}</span>
+                  <span style="color:#f59e0b;">★</span>
+                  <div style="flex:1;height:8px;background:var(--surface-alt);border-radius:999px;overflow:hidden;">
+                    <div style="height:100%;width:{{ pct }}%;background:{% if star >= 4 %}#10b981{% elif star == 3 %}#f59e0b{% else %}#ef4444{% endif %};border-radius:999px;transition:width 0.4s;"></div>
+                  </div>
+                  <span style="font-size:0.8125rem;color:var(--text-muted);width:28px;">{{ count }}</span>
+                </div>
+                {% endfor %}
+              {% else %}
+                <div class="empty-state" style="padding:2rem;">
+                  <p>No data yet</p>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- New order notification banner placeholder -->
+<div id="new-order-banner" style="display:none;"></div>
+
+<!-- Floating Table Calls drawer -->
+<div id="ays-drawer" style="position:fixed;bottom:1.25rem;right:1.25rem;width:340px;max-height:60vh;background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 12px 28px rgba(15,23,42,.18);z-index:50;display:none;flex-direction:column;overflow:hidden;">
+  <div style="padding:.75rem 1rem;background:#0f172a;color:#fff;display:flex;justify-content:space-between;align-items:center;">
+    <strong style="font-size:.9rem;">🛎️ Open table calls</strong>
+    <button id="ays-close" style="background:transparent;border:0;color:#fff;font-size:1.2rem;cursor:pointer;">×</button>
+  </div>
+  <div id="ays-list" style="overflow:auto;padding:.5rem;font-size:.85rem;"></div>
+</div>
+
+<script src="/static/js/dashboard.js"></script>
+<script>
+// Dark mode persistence
+if (localStorage.getItem('darkMode') === '1') document.documentElement.classList.add('dark');
+
+// ─── Menu image upload (per-form wiring) ────────────────────────────────
+(function(){
+  const csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+  function wire(input) {
+    const wrap   = input.closest('.field, .full-col');
+    if (!wrap) return;
+    const url    = wrap.querySelector('.js-image-url');
+    const status = wrap.querySelector('.js-image-status');
+    const clear  = wrap.querySelector('.js-image-clear');
+    if (!url) return;
+    input.addEventListener('change', async () => {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      if (f.size > 16 * 1024 * 1024) {
+        status.textContent = 'File too large (max 16 MB).';
+        status.style.color = '#b91c1c';
+        input.value = '';
+        return;
+      }
+      status.style.color = '#6b7280';
+      status.textContent = 'Uploading…';
+      try {
+        const fd = new FormData();
+        fd.append('image', f);
+        const r = await fetch('/owner/menu/upload-image', {
+          method: 'POST',
+          body: fd,
+          credentials: 'same-origin',
+          headers: { 'X-CSRFToken': csrf }
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || 'Upload failed');
+        url.value = j.url;
+        status.style.color = '#065f46';
+        status.textContent = '✓ Uploaded — saved on next "Save".';
+      } catch (e) {
+        status.style.color = '#b91c1c';
+        status.textContent = (e && e.message) || 'Upload failed.';
+      }
+      input.value = '';  // allow re-selecting the same file
+    });
+    if (clear) {
+      clear.addEventListener('click', () => {
+        url.value = '';
+        status.style.color = '#6b7280';
+        status.textContent = 'Cleared — an AI image will be generated.';
+      });
+    }
+  }
+  document.querySelectorAll('.js-image-upload').forEach(wire);
+})();
+
+// ─── Table Calls: drawer (peek), sidebar badge, and full tab panel ──────
+(function(){
+  const csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+  const badge = document.getElementById('ays-badge');
+  const drawer = document.getElementById('ays-drawer');
+  const list = document.getElementById('ays-list');
+  const close = document.getElementById('ays-close');
+  if (!badge) return;
+
+  const REASON_LABEL = {
+    service:'🛎️ Service',
+    bill:'💳 Bill',
+    water:'💧 Water refill',
+    help:'❓ Need help',
+    cutlery:'🍴 Cutlery',
+  };
+
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+  }
+  function fmtAge(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    if (s < 60)   return s + 's';
+    const m = Math.floor(s / 60);
+    if (m < 60)  return m + 'm' + (s % 60 ? ' ' + (s%60) + 's' : '');
+    return Math.floor(m/60) + 'h ' + (m%60) + 'm';
+  }
+  // Escalation kicks in at 2.5 min (150 s).
+  const ESCALATE_MS = 150000;
+  function ageClass(ms) {
+    if (ms >= ESCALATE_MS) return 'tc-age-bad';
+    if (ms >= 90000)        return 'tc-age-warn';
+    return '';
+  }
+  function fmtTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+
+  // ── Notification support ─────────────────────────────────────────────────
+  let _seenCallIds = null;             // null = first load (seed without notifying)
+  let _lastReminderAt = 0;             // throttle the periodic reminder chime
+  const _escalatedAt = new Map();      // call.id -> last escalation chime ts
+  let _audioCtx = null;                // shared, created lazily on a user gesture
+  let _audioReady = false;             // becomes true after first successful chime
+  const soundToggle = document.getElementById('tc-sound-toggle');
+  if (soundToggle) {
+    try { soundToggle.checked = localStorage.getItem('tcSoundOn') !== '0'; } catch (_) {}
+    soundToggle.addEventListener('change', () => {
+      try { localStorage.setItem('tcSoundOn', soundToggle.checked ? '1' : '0'); } catch (_) {}
+    });
+  }
+  function _soundOn() { return soundToggle ? soundToggle.checked : true; }
+
+  function requestNotifPerms() {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }
+  function _ensureAudio() {
+    // Browsers block AudioContext until a user gesture. Create+resume here.
+    if (_audioCtx) return _audioCtx;
+    try {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      if (!Ctor) return null;
+      _audioCtx = new Ctor();
+      if (_audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
+      _audioReady = true;
+    } catch (_) { _audioCtx = null; }
+    return _audioCtx;
+  }
+  // First click anywhere: ask for OS notification perms AND warm up the
+  // AudioContext so the very first table call actually beeps.
+  document.addEventListener('click', function _once() {
+    requestNotifPerms();
+    _ensureAudio();
+    document.removeEventListener('click', _once);
+  }, { once: true });
+
+  function _beep(ctx, freq, startOffset, duration, volume) {
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = freq;
+    const t = ctx.currentTime + startOffset;
+    gain.gain.setValueAtTime(volume, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    osc.start(t); osc.stop(t + duration);
+  }
+
+  function playChime() {
+    if (!_soundOn()) return;
+    const ctx = _ensureAudio();
+    if (!ctx) return;
+    try {
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      _beep(ctx, 880,  0.00, 0.55, 0.25);
+      _beep(ctx, 1100, 0.18, 0.55, 0.25);
+    } catch (_) {}
+  }
+
+  // Louder, more urgent siren-style chime for escalated (>2.5 min) calls.
+  function playEscalationChime() {
+    if (!_soundOn()) return;
+    const ctx = _ensureAudio();
+    if (!ctx) return;
+    try {
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      // Three-tone alternating siren, ~1.5 s long, noticeably louder than
+      // the normal chime so it stands out in a busy floor environment.
+      _beep(ctx, 1320, 0.00, 0.32, 0.55);
+      _beep(ctx, 880,  0.30, 0.32, 0.55);
+      _beep(ctx, 1320, 0.60, 0.32, 0.55);
+      _beep(ctx, 880,  0.90, 0.32, 0.55);
+      _beep(ctx, 1320, 1.20, 0.40, 0.55);
+    } catch (_) {}
+  }
+
+  function notifyNewCall(c) {
+    playChime();
+    // Re-pop the drawer unless the user is already on the table-calls tab
+    if (!drawer.dataset.userClosed && location.hash !== '#table-calls') {
+      drawer.style.display = 'flex';
+    }
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification(`🛎️ Table Call — ${c.tableName || c.tableId}`, {
+          body: (REASON_LABEL[c.reason] || c.reason) + (c.note ? `\n"${c.note}"` : ''),
+          icon: '/static/images/icon-192.png',
+          tag: 'tc-' + c.id,
+          requireInteraction: true,
+        });
+      } catch (_) {}
+    }
+  }
+
+  // Action helper used by both the drawer and the full panel.
+  async function _doCallAction(id, action, btn) {
+    if (!id || !action) return;
+    if (btn) {
+      btn.disabled = true;
+      btn.dataset._origText = btn.textContent;
+      btn.textContent = '…';
+    }
+    try {
+      const r = await fetch(`/api/owner/table-calls/${id}/${action}`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf },
+        credentials: 'same-origin',
+      });
+      if (!r.ok) {
+        // Surface a quick toast — most likely a stale state-machine error.
+        let msg = 'Action failed.';
+        try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (_) {}
+        if (r.status === 400 && !csrf) msg = 'Security token missing — please refresh the page.';
+        if (r.status === 400 && csrf)  msg = 'Security token expired — please refresh the page.';
+        if (r.status === 401) msg = 'Session expired — please refresh.';
+        if (r.status === 410) msg = 'Undo window expired.';
+        try { console.error('[table-call] action failed', { id, action, status: r.status }); } catch (_) {}
+        showToast(msg, '#b91c1c');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = btn.dataset._origText || btn.textContent;
+        }
+        return;
+      }
+      // Successful resolve → offer a 10 s Undo. SSE will auto-refresh.
+      if (action === 'resolve') {
+        showToast('✓ Resolved', '#0f172a', { label: 'Undo', onClick: () => _undoResolve(id) }, 10000);
+      } else if (action === 'ack') {
+        showToast('✓ Acknowledged', '#0f172a');
+      } else if (action === 'reopen') {
+        showToast('↺ Re-opened', '#0f172a');
+      }
+    } catch (_) {
+      showToast('Network error.', '#b91c1c');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = btn.dataset._origText || btn.textContent;
+      }
+      return;
+    }
+    refreshAll();
+  }
+
+  async function _undoResolve(id) {
+    try {
+      const r = await fetch(`/api/owner/table-calls/${id}/reopen`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf },
+        credentials: 'same-origin',
+      });
+      if (!r.ok) {
+        let msg = 'Could not undo.';
+        try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (_) {}
+        if (r.status === 410) msg = 'Undo window expired.';
+        showToast(msg, '#b91c1c');
+        return;
+      }
+      showToast('↺ Re-opened', '#0f172a');
+      refreshAll();
+    } catch (_) {
+      showToast('Network error.', '#b91c1c');
+    }
+  }
+
+  function showToast(msg, color, action, durationMs) {
+    let el = document.getElementById('tc-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'tc-toast';
+      el.style.cssText = 'position:fixed;left:50%;bottom:1.5rem;transform:translateX(-50%);background:#0f172a;color:#fff;padding:.55rem 1rem;border-radius:999px;font-size:.85rem;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:200;opacity:0;transition:opacity .25s;display:flex;align-items:center;gap:.6rem;';
+      document.body.appendChild(el);
+    }
+    el.style.background = color || '#0f172a';
+    el.style.pointerEvents = action ? 'auto' : 'none';
+    el.innerHTML = '';
+    const text = document.createElement('span');
+    text.textContent = msg;
+    el.appendChild(text);
+    if (action && action.label && typeof action.onClick === 'function') {
+      const btn = document.createElement('button');
+      btn.textContent = action.label;
+      btn.style.cssText = 'background:#fbbf24;color:#0f172a;border:0;border-radius:999px;padding:.25rem .7rem;font-weight:700;cursor:pointer;font-size:.8rem;';
+      btn.addEventListener('click', () => {
+        try { action.onClick(); } catch (_) {}
+        el.style.opacity = '0';
+      });
+      el.appendChild(btn);
+    }
+    el.style.opacity = '1';
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => { el.style.opacity = '0'; }, durationMs || 2800);
+  }
+
+  // Drawer (quick peek of OPEN calls only) ----------------------------------
+  async function refreshDrawer() {
+    let r;
+    try {
+      r = await fetch('/api/owner/table-calls?status=open', {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+    } catch (_) { return; }
+    if (!r.ok) return;
+    const j = await r.json().catch(() => ({}));
+    const calls = j.calls || [];
+    badge.textContent = calls.length;
+    badge.style.display = calls.length ? 'inline-block' : 'none';
+
+    // Detect genuinely new calls (not seen on a previous poll)
+    if (_seenCallIds === null) {
+      // First load — seed without notifying.
+      _seenCallIds = new Set(calls.map(c => c.id));
+      if (calls.length && !drawer.dataset.userClosed && location.hash !== '#table-calls') {
+        drawer.style.display = 'flex';
+      }
+    } else {
+      calls.forEach(c => {
+        if (!_seenCallIds.has(c.id)) {
+          _seenCallIds.add(c.id);
+          notifyNewCall(c);
+        }
+      });
+      // Bound the seen-set so a long-running dashboard doesn't leak forever.
+      // Anything no longer in the open list AND older than 1h is dropped.
+      if (_seenCallIds.size > 200) {
+        const liveIds = new Set(calls.map(c => c.id));
+        _seenCallIds = liveIds;
+      }
+    }
+
+    // Re-arm the drawer when the floor goes quiet so the next wave of
+    // calls actually pops it again (otherwise once-closed = closed forever).
+    if (calls.length === 0) {
+      delete drawer.dataset.userClosed;
+      _lastReminderAt = 0;
+      _escalatedAt.clear();
+    } else {
+      // Auto-escalation: any call still OPEN past 2.5 min triggers the
+      // louder siren chime, re-pings every 60 s, and re-pops the drawer
+      // even if staff dismissed it. This is the safety net for a busy
+      // floor that may have missed the original ping.
+      const now = Date.now();
+      let anyEscalated = false;
+      for (const c of calls) {
+        const t = new Date(c.createdAt || now).getTime();
+        if (!isFinite(t)) continue;
+        const age = now - t;
+        if (age >= ESCALATE_MS) {
+          anyEscalated = true;
+          const last = _escalatedAt.get(c.id) || 0;
+          if (now - last >= 60000) {     // first crossing OR 60s since last
+            _escalatedAt.set(c.id, now);
+            playEscalationChime();
+            try {
+              if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('⚠ Escalated table call', {
+                  body: `${c.tableName || c.tableId} — ${REASON_LABEL[c.reason] || c.reason} (waiting ${fmtAge(age)})`,
+                  tag: `escalated-${c.id}`,
+                  renotify: true,
+                });
+              }
+            } catch (_) {}
+          }
+        }
+      }
+      // If something is escalated, force-show the drawer regardless of
+      // whether the user dismissed it earlier.
+      if (anyEscalated && location.hash !== '#table-calls') {
+        delete drawer.dataset.userClosed;
+        drawer.style.display = 'flex';
+      }
+      // Also forget escalation timestamps for calls that are no longer open
+      // (acknowledged or resolved) so the map can't grow forever.
+      const liveIds = new Set(calls.map(c => c.id));
+      for (const id of _escalatedAt.keys()) {
+        if (!liveIds.has(id)) _escalatedAt.delete(id);
+      }
+    }
+
+    // FIFO: oldest open call surfaces at the top.
+    calls.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+    const _now = Date.now();
+    list.innerHTML = calls.length ? calls.map(c => {
+      const age = _now - new Date(c.createdAt || _now).getTime();
+      const escalated = age >= ESCALATE_MS;
+      const wrapStyle = escalated
+        ? 'border:2px solid #dc2626;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;background:#fff5f5;animation:tcPulse 1.4s ease-out infinite;'
+        : 'border:1px solid #e5e7eb;border-radius:10px;padding:.55rem .65rem;margin-bottom:.5rem;';
+      const badge = escalated
+        ? ' <span class="tc-escalated-badge" title="Open over 2.5 min">⚠</span>'
+        : '';
+      return `
+      <div style="${wrapStyle}">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <strong>${esc(c.tableName || c.tableId)}${badge}</strong>
+          <span style="font-size:.7rem;color:#6b7280;">${fmtTime(c.createdAt)}</span>
+        </div>
+        <div style="font-size:.8rem;color:#374151;margin:.2rem 0;">${esc(REASON_LABEL[c.reason] || c.reason)} <span style="float:right;font-size:.7rem;" class="${ageClass(age)}">${fmtAge(age)}</span></div>
+        ${c.note ? `<div style="font-size:.75rem;color:#6b7280;font-style:italic;margin:.1rem 0 .2rem;">"${esc(c.note)}"</div>` : ''}
+        <div style="display:flex;gap:.35rem;">
+          <button data-id="${c.id}" data-action="ack"     class="ays-act" style="flex:1;background:#fef3c7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Acknowledge</button>
+          <button data-id="${c.id}" data-action="resolve" class="ays-act" style="flex:1;background:#dcfce7;border:0;border-radius:8px;padding:.3rem;font-weight:600;cursor:pointer;">Resolve</button>
+        </div>
+      </div>`;
+    }).join('') : '<div style="color:#9ca3af;text-align:center;padding:1rem;">No open calls.</div>';
+    list.querySelectorAll('button.ays-act').forEach(b => b.addEventListener('click', () => {
+      _doCallAction(b.dataset.id, b.dataset.action, b);
+    }));
+  }
+
+  if (close) close.addEventListener('click', () => {
+    drawer.style.display = 'none';
+    drawer.dataset.userClosed = '1';
+  });
+
+  // Full tab panel ----------------------------------------------------------
+  const tcList         = document.getElementById('tc-list');
+  const tcRefresh      = document.getElementById('tc-refresh');
+  const tcFilter       = document.getElementById('tc-filter');
+  const tcReasonFilter = document.getElementById('tc-reason-filter');
+  const tcResolveAll   = document.getElementById('tc-resolve-all');
+  let currentStatus = 'open';
+  let currentReason = '';
+
+  async function refreshTab() {
+    if (!tcList) return;
+    try {
+      // Three fetches cover all four needs: stats use open/ack/res, and
+      // the visible list reuses whichever bucket matches currentStatus
+      // (no need for a duplicate 4th request).
+      const [openR, ackR, resR] = await Promise.all([
+        fetch('/api/owner/table-calls?status=open',         {credentials:'same-origin', cache:'no-store'}),
+        fetch('/api/owner/table-calls?status=acknowledged', {credentials:'same-origin', cache:'no-store'}),
+        fetch('/api/owner/table-calls?status=resolved',     {credentials:'same-origin', cache:'no-store'}),
+      ]);
+      const open = (openR.ok ? (await openR.json()).calls : []) || [];
+      const ack  = (ackR.ok  ? (await ackR.json()).calls  : []) || [];
+      const res  = (resR.ok  ? (await resR.json()).calls  : []) || [];
+      const calls = currentStatus === 'open' ? open
+                  : currentStatus === 'acknowledged' ? ack
+                  : res;
+
+      // Stats
+      document.getElementById('tc-count-open').textContent = open.length;
+      document.getElementById('tc-count-ack').textContent  = ack.length;
+      const today = new Date().toISOString().slice(0,10);
+      const resolvedToday = res.filter(c => (c.resolvedAt||'').slice(0,10) === today);
+      document.getElementById('tc-count-resolved').textContent = resolvedToday.length;
+      const responseTimes = ack.concat(res)
+        .map(c => (c.acknowledgedAt && c.createdAt) ? (new Date(c.acknowledgedAt) - new Date(c.createdAt)) : null)
+        .filter(v => v !== null && v >= 0);
+      const avg = responseTimes.length ? responseTimes.reduce((a,b)=>a+b,0)/responseTimes.length : null;
+      document.getElementById('tc-count-avg').textContent = avg !== null ? fmtAge(avg) : '—';
+
+      // Apply reason filter (client-side; the API only filters by status)
+      const filteredCalls = currentReason
+        ? calls.filter(c => c.reason === currentReason)
+        : calls;
+
+      // FIFO sort for open/acknowledged so old waiters surface first;
+      // resolved tab keeps newest-first (most recently handled at top).
+      if (currentStatus === 'resolved') {
+        filteredCalls.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      } else {
+        filteredCalls.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      }
+
+      // Show "Resolve all" only when there's something live to clear.
+      if (tcResolveAll) {
+        tcResolveAll.style.display = (open.length + ack.length) > 0 ? 'inline-block' : 'none';
+      }
+
+      if (!filteredCalls.length) {
+        const reasonLbl = currentReason ? ` for "${REASON_LABEL[currentReason] || currentReason}"` : '';
+        tcList.innerHTML = `<div style="grid-column:1/-1;color:#9ca3af;text-align:center;padding:2.5rem;">
+          <div style="font-size:2rem;margin-bottom:.5rem;">${currentStatus==='open' ? '✅' : '—'}</div>
+          ${currentStatus==='open' ? `No open calls${reasonLbl}. The floor is calm.` : `Nothing to show${reasonLbl}.`}
+        </div>`;
+        return;
+      }
+
+      const now = Date.now();
+      tcList.innerHTML = filteredCalls.map(c => {
+        const created = c.createdAt ? new Date(c.createdAt) : null;
+        const age = created ? (now - created.getTime()) : 0;
+        const ackTime = (c.acknowledgedAt && c.createdAt)
+          ? (new Date(c.acknowledgedAt) - new Date(c.createdAt)) : null;
+        const resTime = (c.resolvedAt && c.createdAt)
+          ? (new Date(c.resolvedAt) - new Date(c.createdAt)) : null;
+        const billBtn = (c.reason === 'bill' && c.tableId)
+          ? `<a class="tc-act tc-act-print" href="/owner/table/${encodeURIComponent(c.tableId)}/bill" target="_blank" style="background:#0f172a;color:#fff;text-align:center;text-decoration:none;line-height:1.6;">🖨 Print bill</a>`
+          : '';
+        const actions = c.status === 'open' ? `
+            <div class="tc-card-actions">
+              <button class="tc-act tc-act-ack"     data-id="${c.id}" data-action="ack">Acknowledge</button>
+              <button class="tc-act tc-act-resolve" data-id="${c.id}" data-action="resolve">Resolve</button>
+              ${billBtn}
+            </div>`
+          : c.status === 'acknowledged' ? `
+            <div class="tc-card-actions">
+              <button class="tc-act tc-act-resolve" data-id="${c.id}" data-action="resolve">Mark resolved</button>
+              ${billBtn}
+            </div>` : '';
+        const isEscalated = c.status === 'open' && age >= ESCALATE_MS;
+        const escalatedCls = isEscalated ? ' tc-card--escalated' : '';
+        const escalatedBadge = isEscalated
+          ? '<span class="tc-escalated-badge" title="Open for over 2.5 minutes">⚠ Escalated</span>'
+          : '';
+        return `
+          <div class="tc-card tc-card--${c.status}${escalatedCls}" data-id="${c.id}" data-created-at="${esc(c.createdAt || '')}" data-status="${c.status}">
+            <div class="tc-card-head">
+              <span class="tc-card-table">${esc(c.tableName || c.tableId)}${escalatedBadge}</span>
+              <span class="tc-card-time">${fmtTime(c.createdAt)}</span>
+            </div>
+            <div class="tc-card-reason">${esc(REASON_LABEL[c.reason] || c.reason)}</div>
+            ${c.note ? `<div class="tc-card-note">"${esc(c.note)}"</div>` : ''}
+            <div class="tc-card-meta">
+              <span>Call #${c.id}</span>
+              ${c.status === 'open'
+                ? `<span class="${ageClass(age)}">⏱ Waiting ${fmtAge(age)}</span>`
+                : ackTime !== null
+                  ? `<span>Acknowledged in ${fmtAge(ackTime)}</span>` : ''}
+              ${resTime !== null ? `<span>Resolved in ${fmtAge(resTime)}</span>` : ''}
+            </div>
+            ${actions}
+          </div>`;
+      }).join('');
+
+      tcList.querySelectorAll('.tc-act').forEach(b => {
+        if (!b.dataset.action || !b.dataset.id) return;  // skip the print-bill <a>
+        b.addEventListener('click', () => _doCallAction(b.dataset.id, b.dataset.action, b));
+      });
+    } catch (e) {
+      try { console.error('[table-call] refreshTab failed', e); } catch (_) {}
+      tcList.innerHTML = '<div style="grid-column:1/-1;color:#b91c1c;text-align:center;padding:2rem;">Could not load table calls. <button id="tc-retry" class="btn btn-sm" style="margin-left:.5rem;">Retry</button></div>';
+      const retry = document.getElementById('tc-retry');
+      if (retry) retry.addEventListener('click', () => refreshAll());
+    }
+  }
+
+  if (tcFilter) {
+    tcFilter.addEventListener('click', e => {
+      const b = e.target.closest('button[data-status]');
+      if (!b) return;
+      currentStatus = b.dataset.status;
+      tcFilter.querySelectorAll('button').forEach(x => x.classList.toggle('tc-pill--active', x === b));
+      refreshTab();
+    });
+  }
+  if (tcReasonFilter) {
+    tcReasonFilter.addEventListener('change', () => {
+      currentReason = tcReasonFilter.value || '';
+      refreshTab();
+    });
+  }
+  if (tcResolveAll) {
+    tcResolveAll.addEventListener('click', async () => {
+      if (!confirm('Mark every open and acknowledged call as resolved?')) return;
+      tcResolveAll.disabled = true;
+      const prev = tcResolveAll.textContent;
+      tcResolveAll.textContent = '…';
+      try {
+        await fetch('/api/owner/table-calls/resolve-all', {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrf },
+          credentials: 'same-origin'
+        });
+      } catch (_) {}
+      tcResolveAll.disabled = false;
+      tcResolveAll.textContent = prev;
+      refreshAll();
+    });
+  }
+  if (tcRefresh) tcRefresh.addEventListener('click', refreshAll);
+
+  let _refreshing = false;
+  async function refreshAll() {
+    if (_refreshing) return;            // never overlap polls
+    _refreshing = true;
+    try { await Promise.all([refreshDrawer(), refreshTab()]); }
+    finally { _refreshing = false; }
+  }
+
+  // ── Live ticking age timers ────────────────────────────────────────────
+  // Re-renders are expensive (innerHTML wipe), so instead we update only the
+  // age <span> text every second. This makes the "Waiting 12s" counter feel
+  // truly live without the cards flickering or losing input focus.
+  function _tickAges() {
+    if (document.hidden) return;
+    const now = Date.now();
+    document.querySelectorAll('.tc-card[data-id]').forEach(card => {
+      const meta = card.querySelector('.tc-card-meta');
+      if (!meta) return;
+      // Only the open-status cards show "Waiting …".
+      const span = meta.querySelector('span.tc-age-bad, span.tc-age-warn, span:not([class])');
+      if (!span || !span.textContent.startsWith('⏱ Waiting')) return;
+      const created = card.dataset.createdAt;
+      if (!created) return;
+      const age = now - new Date(created).getTime();
+      span.textContent = '⏱ Waiting ' + fmtAge(age);
+      span.className = ageClass(age);
+      // Promote to escalated styling exactly when crossing 2.5 min.
+      const escalated = age >= ESCALATE_MS;
+      card.classList.toggle('tc-card--escalated', escalated && card.classList.contains('tc-card--open'));
+    });
+  }
+  setInterval(_tickAges, 1000);
+
+  // ── Live SSE handler (driven by the global EventSource in dashboard.js) ──
+  // dashboard.js listens to /api/orders/stream and re-broadcasts table-call
+  // events as a 'tableCallSSE' window event. We debounce the resulting
+  // refreshes so a burst of events (e.g. resolve-all) only triggers one.
+  let _ssePending = null;
+  function _ssePoke() {
+    if (_ssePending) return;
+    _ssePending = setTimeout(() => { _ssePending = null; refreshAll(); }, 250);
+  }
+  window.addEventListener('tableCallSSE', evt => {
+    const { type, data } = evt.detail || {};
+    // For brand-new calls, chime + drawer-pop right away so the staff hears
+    // it even before the refetch finishes (notifyNewCall handles dedup).
+    if (type === 'table_call' && data && data.id != null) {
+      if (_seenCallIds && !_seenCallIds.has(data.id)) {
+        _seenCallIds.add(data.id);
+        notifyNewCall(data);
+      }
+    }
+    _ssePoke();
+  });
+
+  refreshAll();
+  // SSE drives instant updates; the timer is now a 30 s safety net for
+  // missed events / reconnects, and pauses while the tab is hidden so
+  // background tabs don't hammer the server.
+  let _pollInt = setInterval(refreshAll, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      clearInterval(_pollInt); _pollInt = null;
+    } else if (!_pollInt) {
+      refreshAll();
+      _pollInt = setInterval(refreshAll, 30000);
+    }
+  });
+})();
+
+// ─── Employee assignment on order cards ─────────────────────────────────────
+(function(){
+  const csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+
+  async function wireEmployeeAssign() {
+    let employees = [];
+    try {
+      const r = await fetch('/api/owner/employees', {credentials:'same-origin'});
+      if (r.ok) employees = (await r.json()).employees || [];
+    } catch(e) {}
+    if (!employees.length) return;
+
+    document.querySelectorAll('.order-card:not(.order-card--done)[data-order-id]').forEach(card => {
+      const orderId = card.dataset.orderId;
+      if (!orderId || card.querySelector('.emp-assign-sel')) return;
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'margin-top:.5rem;';
+      const sel = document.createElement('select');
+      sel.className = 'btn btn-secondary btn-sm btn-full emp-assign-sel';
+      sel.style.cursor = 'pointer';
+      sel.innerHTML = '<option value="">Assign employee…</option>' +
+        employees.map(e => `<option value="${e.id}">${e.name} (${e.role})</option>`).join('');
+      sel.addEventListener('change', async () => {
+        if (!sel.value) return;
+        try {
+          await fetch(`/api/owner/orders/${orderId}/assign`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+            body: JSON.stringify({employee_id: parseInt(sel.value), role: 'server'})
+          });
+          const empName = sel.options[sel.selectedIndex].text;
+          const lbl = document.createElement('span');
+          lbl.style.cssText = 'font-size:.75rem;color:#16a34a;margin-left:.4rem;font-weight:600;';
+          lbl.textContent = '✓ Assigned ' + empName;
+          wrap.appendChild(lbl);
+          setTimeout(() => lbl.remove(), 3000);
+        } catch(e) {}
+        sel.value = '';
+      });
+      wrap.appendChild(sel);
+      const actions = card.querySelector('.order-card-actions');
+      if (actions) actions.insertAdjacentElement('afterend', wrap);
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', wireEmployeeAssign);
+})();
+</script>
+<script src="/static/js/push-subscribe.js" defer></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  if (window.cafePush) cafePush.subscribeOwner();
+});
+</script>
+</body>
+</html>

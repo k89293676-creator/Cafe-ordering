@@ -1,0 +1,40 @@
+{
+  "categories": [
+    {
+      "id": "coffee",
+      "name": "Coffee",
+      "items": [
+        {"id": "coffee-espresso", "name": "Espresso", "description": "Rich and bold", "price": 2.50, "tags": ["hot"]},
+        {"id": "coffee-americano", "name": "Americano", "description": "Smooth espresso with hot water", "price": 3.00, "tags": ["hot"]},
+        {"id": "coffee-latte", "name": "Latte", "description": "Espresso with steamed milk", "price": 4.25, "tags": ["hot", "milk"]},
+        {"id": "coffee-cappuccino", "name": "Cappuccino", "description": "Espresso with foamed milk", "price": 4.50, "tags": ["hot", "milk"]}
+      ]
+    },
+    {
+      "id": "tea",
+      "name": "Tea",
+      "items": [
+        {"id": "tea-earl-grey", "name": "Earl Grey", "description": "Classic bergamot black tea", "price": 2.75, "tags": ["hot"]},
+        {"id": "tea-green", "name": "Green Tea", "description": "Light and floral", "price": 2.50, "tags": ["hot"]},
+        {"id": "tea-chai", "name": "Chai Latte", "description": "Spiced tea with steamed milk", "price": 4.00, "tags": ["hot", "milk"]}
+      ]
+    },
+    {
+      "id": "pastries",
+      "name": "Pastries",
+      "items": [
+        {"id": "pastry-croissant", "name": "Butter Croissant", "description": "Flaky and golden", "price": 3.25, "tags": ["bakery"]},
+        {"id": "pastry-muffin", "name": "Blueberry Muffin", "description": "Fresh berries and crumb topping", "price": 3.00, "tags": ["bakery"]},
+        {"id": "pastry-brownie", "name": "Chocolate Brownie", "description": "Rich and fudgy", "price": 3.50, "tags": ["bakery"]}
+      ]
+    },
+    {
+      "id": "sandwiches",
+      "name": "Sandwiches",
+      "items": [
+        {"id": "sandwich-turkey", "name": "Turkey Club", "description": "Turkey, bacon, lettuce, tomato", "price": 6.75, "tags": ["savory"]},
+        {"id": "sandwich-veggie", "name": "Veggie Delight", "description": "Avocado, greens, and hummus", "price": 6.50, "tags": ["vegetarian"]}
+      ]
+    }
+  ]
+}

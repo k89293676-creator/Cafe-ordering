@@ -1,0 +1,114 @@
+{% extends "admin/base.html" %}
+{% block title %}System Status{% endblock %}
+{% block page_title %}System Status{% endblock %}
+
+{% block content %}
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white border-bottom py-3 fw-600">
+        <i class="bi bi-database me-2"></i>Database
+      </div>
+      <div class="card-body">
+        {% if use_db %}
+          {% if db_ok %}
+          <div class="d-flex align-items-center gap-2 text-success mb-2">
+            <i class="bi bi-check-circle-fill fs-5"></i>
+            <span class="fw-500">{{ db_msg }}</span>
+          </div>
+          {% else %}
+          <div class="d-flex align-items-center gap-2 text-danger mb-2">
+            <i class="bi bi-x-circle-fill fs-5"></i>
+            <span class="fw-500">{{ db_msg }}</span>
+          </div>
+          {% endif %}
+          <p class="text-muted mb-0" style="font-size:.85rem;">PostgreSQL mode active — JSON fallback disabled.</p>
+        {% else %}
+          <div class="d-flex align-items-center gap-2 text-warning mb-2">
+            <i class="bi bi-file-earmark-fill fs-5"></i>
+            <span class="fw-500">JSON File Storage</span>
+          </div>
+          <p class="text-muted mb-0" style="font-size:.85rem;">No DATABASE_URL configured. Data stored in JSON files.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white border-bottom py-3 fw-600">
+        <i class="bi bi-hdd me-2"></i>Disk Usage
+      </div>
+      <div class="card-body">
+        {% if disk_pct is not none %}
+        <div class="d-flex justify-content-between mb-1" style="font-size:.85rem;">
+          <span>{{ disk_used_gb }} GB used of {{ disk_total_gb }} GB</span>
+          <span class="fw-600">{{ disk_pct }}%</span>
+        </div>
+        <div class="progress mb-2" style="height:8px;">
+          <div class="progress-bar {% if disk_pct > 85 %}bg-danger{% elif disk_pct > 65 %}bg-warning{% else %}bg-success{% endif %}"
+               style="width:{{ disk_pct }}%"></div>
+        </div>
+        <small class="text-muted">{{ disk_free_gb }} GB free</small>
+        {% else %}
+        <p class="text-muted mb-0">Disk usage unavailable.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white border-bottom py-3 fw-600">
+        <i class="bi bi-file-earmark-code me-2"></i>Data Files
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+          <thead class="bg-light">
+            <tr>
+              <th class="ps-3">File</th>
+              <th>Status</th>
+              <th class="text-end pe-3">Size</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in file_stats %}
+            <tr>
+              <td class="ps-3"><code style="font-size:.85rem;">{{ f.name }}</code></td>
+              <td>
+                {% if f.exists %}
+                <span class="badge badge-active rounded-pill px-2">Present</span>
+                {% else %}
+                <span class="badge badge-inactive rounded-pill px-2">Missing</span>
+                {% endif %}
+              </td>
+              <td class="text-end pe-3 text-muted" style="font-size:.88rem;">{{ f.size_kb }} KB</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white border-bottom py-3 fw-600">
+        <i class="bi bi-info-circle me-2"></i>Server Info
+      </div>
+      <div class="card-body">
+        <dl class="row mb-0" style="font-size:.9rem;">
+          <dt class="col-sm-3 text-muted">Server Time</dt>
+          <dd class="col-sm-9">{{ server_time }}</dd>
+          <dt class="col-sm-3 text-muted">Health Endpoint</dt>
+          <dd class="col-sm-9"><a href="/health" target="_blank">/health</a></dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

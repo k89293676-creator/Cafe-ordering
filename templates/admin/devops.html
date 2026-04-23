@@ -1,0 +1,307 @@
+{% extends "admin/base.html" %}
+{% block title %}DevOps{% endblock %}
+{% block page_title %}DevOps{% endblock %}
+
+{% block head %}
+<style>
+  .check-card{background:#fff;border-radius:.6rem;padding:1rem 1.1rem;border:1px solid #e5e7eb;display:flex;align-items:center;gap:.85rem;}
+  .check-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+  .ok{background:#10b981;}
+  .bad{background:#ef4444;}
+  .warn{background:#f59e0b;}
+  .meta-table td{padding:.35rem .6rem;font-size:.86rem;border-top:1px solid #f3f4f6;}
+  .meta-table td:first-child{color:#6b7280;width:40%;}
+  .pill{display:inline-block;padding:.15rem .55rem;border-radius:9999px;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;}
+  .pill-ok{background:#d1fae5;color:#065f46;}
+  .pill-bad{background:#fee2e2;color:#991b1b;}
+  .pill-info{background:#dbeafe;color:#1e40af;}
+  pre.json{background:#0f172a;color:#a7f3d0;padding:1rem;border-radius:.5rem;font-size:.78rem;max-height:280px;overflow:auto;}
+  .danger-zone{border:1px dashed #ef4444;border-radius:.5rem;padding:1rem;background:#fef2f2;}
+</style>
+{% endblock %}
+
+{% block content %}
+{% with messages = get_flashed_messages(with_categories=True) %}
+  {% for cat, msg in messages %}
+    <div class="alert alert-{% if cat == 'danger' %}danger{% elif cat == 'success' %}success{% else %}info{% endif %} alert-dismissible fade show">
+      {{ msg|safe }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+  {% endfor %}
+{% endwith %}
+
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="d-flex justify-content-between align-items-center">
+      <div>
+        <h5 class="mb-1"><i class="bi bi-hdd-network-fill text-primary me-2"></i>DevOps Console</h5>
+        <small class="text-muted">Monitor service health, system resources, and operational tools.
+          {% if admin_owner_id %}<span class="pill pill-info ms-2">authenticated as owner #{{ admin_owner_id }}</span>{% endif %}
+        </small>
+      </div>
+      <form method="post" action="{{ url_for('admin.devops_health') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <button class="btn btn-primary"><i class="bi bi-activity me-1"></i>Run health check</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Application info -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="stat-card">
+      <h6 class="mb-3"><i class="bi bi-box-seam me-2 text-primary"></i>Application</h6>
+      <table class="meta-table w-100">
+        <tr><td>Version</td><td><code>{{ app_info.version }}</code></td></tr>
+        <tr><td>Uptime</td><td>{{ (app_info.uptimeSeconds // 3600) }}h {{ ((app_info.uptimeSeconds % 3600) // 60) }}m {{ app_info.uptimeSeconds % 60 }}s</td></tr>
+        <tr><td>Storage backend</td><td>{% if app_info.useDb %}<span class="pill pill-ok">Database</span>{% else %}<span class="pill pill-info">JSON files</span>{% endif %}</td></tr>
+        <tr><td>Data directory</td><td><code>{{ app_info.dataDir }}</code></td></tr>
+        <tr><td>Server time (UTC)</td><td>{{ now }}</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="stat-card">
+      <h6 class="mb-3"><i class="bi bi-cpu-fill me-2 text-primary"></i>Host &amp; Process</h6>
+      <table class="meta-table w-100">
+        <tr><td>Host</td><td><code>{{ metrics.host }}</code></td></tr>
+        <tr><td>Platform</td><td>{{ metrics.platform }}</td></tr>
+        <tr><td>Python</td><td><code>{{ metrics.python }}</code></td></tr>
+        <tr><td>PID</td><td><code>{{ metrics.pid }}</code></td></tr>
+        {% if metrics.psutilAvailable %}
+        <tr><td>CPU</td><td>{{ metrics.cpuPercent }}% across {{ metrics.cpuCount }} cores</td></tr>
+        <tr><td>Memory</td><td>{{ metrics.memoryUsedPercent }}% of {{ "%.0f"|format(metrics.memoryTotalMb) }} MB used</td></tr>
+        <tr><td>Process RSS</td><td>{{ metrics.processRssMb }} MB</td></tr>
+        <tr><td>Process uptime</td><td>{{ metrics.processUptimeSeconds }}s</td></tr>
+          {% if metrics.loadAvg %}
+          <tr><td>Load avg</td><td>{{ metrics.loadAvg["1m"] }} / {{ metrics.loadAvg["5m"] }} / {{ metrics.loadAvg["15m"] }}</td></tr>
+          {% endif %}
+        {% else %}
+        <tr><td colspan="2"><em class="text-muted">Install <code>psutil</code> for live resource metrics.</em></td></tr>
+        {% endif %}
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Health check -->
+<div class="stat-card mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h6 class="mb-0"><i class="bi bi-heart-pulse-fill me-2 text-danger"></i>Last health check</h6>
+    {% if last_health %}
+      {% if last_health.ok %}<span class="pill pill-ok">All systems OK</span>
+      {% else %}<span class="pill pill-bad">{{ last_health.failing|length }} issue(s)</span>
+      {% endif %}
+      <small class="text-muted ms-2">{{ last_health.elapsedMs }} ms · {{ last_health.ranAt[:19].replace('T',' ') }} UTC</small>
+    {% else %}
+      <span class="text-muted small">No checks run yet — click "Run health check" above.</span>
+    {% endif %}
+  </div>
+  {% if last_health and last_health.failing %}
+    <div class="alert alert-warning mb-0">
+      <strong>Failing:</strong> {{ last_health.failing|join(', ') }}
+    </div>
+  {% endif %}
+
+  {% if recent_health and recent_health|length > 1 %}
+    <details class="mt-3">
+      <summary class="text-muted small">Recent runs ({{ recent_health|length }})</summary>
+      <table class="table table-sm mt-2 mb-0">
+        <thead><tr><th>When</th><th>Result</th><th>Latency</th><th>Failing</th></tr></thead>
+        <tbody>
+        {% for r in recent_health %}
+          <tr>
+            <td class="small text-muted">{{ r.ranAt[:19].replace('T',' ') }}</td>
+            <td>{% if r.ok %}<span class="pill pill-ok">OK</span>{% else %}<span class="pill pill-bad">FAIL</span>{% endif %}</td>
+            <td class="small">{{ r.elapsedMs }} ms</td>
+            <td class="small">{{ r.failing|join(', ') if r.failing else '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </details>
+  {% endif %}
+
+  <div class="text-muted small mt-3">
+    Programmatic JSON: <code>GET {{ url_for('admin.devops_health') }}</code> (requires admin session or <code>X-Admin-Key</code> header).
+  </div>
+</div>
+
+<!-- Environment -->
+<div class="stat-card mb-4">
+  <h6 class="mb-3"><i class="bi bi-sliders me-2 text-primary"></i>Environment configuration</h6>
+  <p class="text-muted small mb-3">Sensitive values are never displayed — only whether they are configured on the server.</p>
+  <div class="row g-2">
+    {% for env in env_summary %}
+      <div class="col-sm-6 col-lg-4">
+        <div class="check-card">
+          <div class="check-dot {{ 'ok' if env.set else 'warn' }}"></div>
+          <div>
+            <code>{{ env.key }}</code>
+            <div class="text-muted small">
+              {% if env.set %}{% if env.value %}<code>{{ env.value }}</code>{% else %}<em>configured</em>{% endif %}
+              {% else %}<em>not set</em>{% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Operational tools -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="stat-card h-100">
+      <h6 class="mb-2"><i class="bi bi-speedometer2 me-2 text-primary"></i>Rate limiter</h6>
+      <p class="text-muted small mb-3">Reset accumulated counters across all endpoints. Useful when legitimate traffic is being throttled after a burst.</p>
+      <form method="post" action="{{ url_for('admin.devops_clear_rate_limits') }}" onsubmit="return confirm('Clear all rate-limit counters?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <button class="btn btn-outline-warning btn-sm"><i class="bi bi-eraser me-1"></i>Clear rate-limit counters</button>
+      </form>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="stat-card h-100">
+      <h6 class="mb-2"><i class="bi bi-link-45deg me-2 text-primary"></i>Public probes</h6>
+      <p class="text-muted small mb-3">These endpoints are intentionally public for uptime monitors and load balancer probes.</p>
+      <ul class="small mb-0">
+        <li><a href="/health" target="_blank">/health</a> — fast liveness</li>
+        <li><a href="/ready" target="_blank">/ready</a> — DB ping</li>
+        <li><a href="/health/full" target="_blank">/health/full</a> — deep diagnostics</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="danger-zone">
+  <h6 class="text-danger mb-2"><i class="bi bi-shield-exclamation me-2"></i>Security notice</h6>
+  <ul class="mb-0 small text-muted">
+    <li>All DevOps actions are guarded by the admin session and CSRF tokens.</li>
+    <li>Destructive actions (rate-limit reset, key revocation) are recorded in the security audit log.</li>
+    <li>Server secrets are never echoed back to this page — only their presence is shown.</li>
+  </ul>
+</div>
+
+<!-- ── Git / Deployment Info ─────────────────────────────── -->
+<div class="stat-card mb-4" id="git-info-panel">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h6 class="mb-0"><i class="bi bi-git me-2 text-primary"></i>Deployment info</h6>
+    <span class="text-muted small" id="git-last-refreshed"></span>
+  </div>
+  <div id="git-info-body">
+    <div class="text-muted small">Loading…</div>
+  </div>
+</div>
+
+<!-- ── Live DB Pool Stats ─────────────────────────────────── -->
+<div class="stat-card mb-4" id="db-stats-panel">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h6 class="mb-0"><i class="bi bi-database-fill me-2 text-primary"></i>Database pool</h6>
+    <button class="btn btn-sm btn-outline-secondary" onclick="refreshDbStats()"><i class="bi bi-arrow-repeat me-1"></i>Refresh</button>
+  </div>
+  <div id="db-stats-body">
+    <div class="text-muted small">Loading…</div>
+  </div>
+</div>
+
+<!-- ── Maintenance Tools ─────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="stat-card h-100">
+      <h6 class="mb-2"><i class="bi bi-trash3 me-2 text-danger"></i>Prune resolved table calls</h6>
+      <p class="text-muted small mb-3">Delete resolved service-call records older than 30 days to reduce database size.</p>
+      <form method="post" action="{{ url_for('admin.devops_prune_resolved') }}" onsubmit="return confirm('Permanently delete resolved table calls older than 30 days?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash3 me-1"></i>Prune old resolved calls</button>
+      </form>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="stat-card h-100">
+      <h6 class="mb-2"><i class="bi bi-download me-2 text-primary"></i>Export orders (last 7 days)</h6>
+      <p class="text-muted small mb-3">Download a CSV of all orders from the last 7 days for diagnostics or audit.</p>
+      <a href="{{ url_for('admin.devops_export_orders') }}" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-file-earmark-csv me-1"></i>Download CSV
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- ── Auto-refresh metrics JS ──────────────────────────── -->
+<script>
+(function () {
+  function refreshGitInfo() {
+    fetch('{{ url_for("admin.devops_git_info") }}', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => {
+        const el = document.getElementById('git-info-body');
+        if (!el) return;
+        if (d.error) { el.innerHTML = '<span class="text-muted small">Git info unavailable: ' + d.error + '</span>'; return; }
+        el.innerHTML = `<table class="meta-table w-100">
+          <tr><td>Branch</td><td><code>${d.branch || '—'}</code></td></tr>
+          <tr><td>Commit</td><td><code>${d.commit || '—'}</code></td></tr>
+          <tr><td>Message</td><td>${d.subject || '—'}</td></tr>
+          <tr><td>Date</td><td class="text-muted small">${d.date || '—'}</td></tr>
+          <tr><td>App version</td><td><code>${d.appVersion || '—'}</code></td></tr>
+        </table>`;
+        const ts = document.getElementById('git-last-refreshed');
+        if (ts) ts.textContent = 'as of ' + new Date().toLocaleTimeString();
+      })
+      .catch(() => {
+        const el = document.getElementById('git-info-body');
+        if (el) el.innerHTML = '<span class="text-muted small">Could not fetch git info.</span>';
+      });
+  }
+
+  function refreshDbStats() {
+    fetch('{{ url_for("admin.devops_db_stats") }}', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => {
+        const el = document.getElementById('db-stats-body');
+        if (!el) return;
+        if (!d.available) { el.innerHTML = '<span class="text-muted small">DB stats unavailable' + (d.error ? ': ' + d.error : '') + '</span>'; return; }
+        el.innerHTML = `<table class="meta-table w-100">
+          <tr><td>Dialect</td><td><code>${d.dialect || '—'}</code></td></tr>
+          <tr><td>Pool size</td><td>${d.poolSize}</td></tr>
+          <tr><td>Checked out</td><td>${d.checkedOut}</td></tr>
+          <tr><td>Checked in</td><td>${d.checkedIn}</td></tr>
+          <tr><td>Overflow</td><td>${d.overflow}</td></tr>
+        </table>`;
+      })
+      .catch(() => {
+        const el = document.getElementById('db-stats-body');
+        if (el) el.innerHTML = '<span class="text-muted small">Could not fetch DB stats.</span>';
+      });
+  }
+
+  window.refreshDbStats = refreshDbStats;
+
+  // Auto-refresh live metrics every 30 seconds
+  function refreshMetrics() {
+    fetch('{{ url_for("admin.devops_metrics_json") }}', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => {
+        const m = d.metrics || {};
+        // Update CPU / memory if the elements exist (rendered server-side on load)
+        const cpuEl = document.getElementById('live-cpu');
+        const memEl = document.getElementById('live-mem');
+        if (cpuEl && m.cpuPercent !== undefined) cpuEl.textContent = m.cpuPercent + '%';
+        if (memEl && m.memoryUsedPercent !== undefined) memEl.textContent = m.memoryUsedPercent + '%';
+      })
+      .catch(() => {});
+  }
+
+  // Initial loads
+  refreshGitInfo();
+  refreshDbStats();
+  refreshMetrics();
+
+  // Periodic refresh
+  setInterval(refreshMetrics, 30000);
+  setInterval(refreshDbStats, 60000);
+})();
+</script>
+
+{% endblock %}
