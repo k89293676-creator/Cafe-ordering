@@ -24,6 +24,7 @@ waitress~=3.0.0
 sqlalchemy
 psutil~=6.1.0
 pywebpush~=2.0.0
+sentry-sdk[flask]~=2.18.0
 Flask~=3.1.0
 Flask-Bcrypt~=1.0.1
 Flask-Compress~=1.15

@@ -33,12 +33,47 @@ in a `.env` file loaded by your shell.
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_CLAIM_EMAIL` | Web push notification keys. | Generate with `python extensions/generate_vapid.py`. |
 | `TRUSTED_PROXIES` | Comma-separated list of trusted proxy IPs/CIDRs in front of the app. | Required so Flask-Talisman correctly applies HSTS behind Railway's reverse proxy. Example: `0.0.0.0/0` for Railway's edge. |
 
-## Gunicorn tuning (defaults are baked into `start.py`)
+## Gunicorn tuning (defaults live in `gunicorn_conf.py`)
 
-The defaults in `start.py` are tuned for Railway's free tier (512 MB RAM,
-1 vCPU): 1 worker, 2 threads, 60 s timeout, 500 max-requests, 50 jitter,
-gevent worker class. Override these only after load testing on a paid plan
-with more headroom.
+The defaults in `gunicorn_conf.py` are tuned for Railway's free tier
+(512 MB RAM, 1 vCPU): 1 worker, 2 threads, 60 s timeout, 500 max-requests,
+50 jitter, gevent worker class. Each value can be overridden via env vars
+without editing code:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `WEB_CONCURRENCY` | `1` | Number of gunicorn workers. Bump only after raising container memory. |
+| `GUNICORN_THREADS` | `2` | Threads per worker (I/O concurrency on top of gevent). |
+| `GUNICORN_TIMEOUT` | `60` | Seconds before a stuck worker is killed. |
+| `GUNICORN_GRACEFUL_TIMEOUT` | `30` | Drain window on SIGTERM (Railway redeploys). |
+| `GUNICORN_KEEPALIVE` | `5` | HTTP keep-alive seconds. |
+| `GUNICORN_MAX_REQUESTS` | `500` | Recycle workers after N requests to bound memory creep. |
+| `GUNICORN_MAX_REQUESTS_JITTER` | `50` | Random offset to avoid thundering-herd recycles. |
+| `GUNICORN_WORKER_CONNECTIONS` | `1000` | gevent concurrent connections per worker. |
+| `GUNICORN_LOG_LEVEL` | `info` | gunicorn log level. |
+| `FORWARDED_ALLOW_IPS` | `*` | Trust X-Forwarded-* from any IP (Railway terminates TLS at the edge). |
+
+## Observability & error tracking
+
+| Variable | Purpose | Notes |
+| --- | --- | --- |
+| `SENTRY_DSN` | Enables Sentry error + performance monitoring. | Leave unset to disable. The Sentry SDK is loaded lazily so it costs nothing when off. |
+| `SENTRY_TRACES_SAMPLE_RATE` | Fraction of requests to sample for performance tracing (0.0–1.0). | Defaults to `0.0`. Start small (e.g. `0.05`) on production. |
+| `SENTRY_PROFILES_SAMPLE_RATE` | Fraction of sampled traces to profile. | Defaults to `0.0`. |
+| `APP_VERSION` | Build identifier surfaced at `/version`, `/health`, and as the Sentry release tag. | Falls back to the first 12 chars of `RAILWAY_GIT_COMMIT_SHA`. |
+| `SLOW_REQUEST_MS` | Requests slower than this (in milliseconds) are logged at WARNING with their `X-Request-ID`. | Default: `1500`. |
+| `SECURITY_CONTACT` | Email/URL surfaced at `/.well-known/security.txt` for vuln disclosure. | Default: `mailto:security@example.com` — change before going live. |
+
+## Health-check endpoints
+
+| Path | Purpose |
+| --- | --- |
+| `/health` | Liveness — always cheap, no DB. Use as Railway's healthcheck. |
+| `/ready` | Readiness — DB ping. Returns 503 while the DB is unreachable. |
+| `/health/full` | Deep diagnostics: DB latency, disk, redis, pool stats, SSE subs. |
+| `/metrics` | JSON runtime metrics (orders today, active orders, version). |
+| `/metrics/prom` | Prometheus text-format exposition for `cafe_*` gauges. |
+| `/version` | Build identifier (commit, branch, deployedAt). Useful for post-deploy smoke tests. |
 
 ## Quick checklist for production
 

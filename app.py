@@ -203,6 +203,30 @@ def configure_logging() -> None:
 
 configure_logging()
 
+# ---------------------------------------------------------------------------
+# Sentry error tracking (optional). Enabled when SENTRY_DSN is configured.
+# Lazily imported so the dependency stays optional in dev / CI.
+# ---------------------------------------------------------------------------
+_SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
+if _SENTRY_DSN:
+    try:
+        import sentry_sdk  # type: ignore
+        from sentry_sdk.integrations.flask import FlaskIntegration  # type: ignore
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration  # type: ignore
+
+        sentry_sdk.init(
+            dsn=_SENTRY_DSN,
+            integrations=[FlaskIntegration(), SqlalchemyIntegration()],
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.0") or 0.0),
+            profiles_sample_rate=float(os.environ.get("SENTRY_PROFILES_SAMPLE_RATE", "0.0") or 0.0),
+            send_default_pii=False,
+            release=APP_VERSION,
+            environment=("production" if IS_PRODUCTION else "development"),
+        )
+        app.logger.info("Sentry initialised (release=%s)", APP_VERSION)
+    except Exception as _sentry_err:  # pragma: no cover — Sentry must never crash the app
+        app.logger.warning("Sentry init failed: %s", _sentry_err)
+
 Compress(app)
 csrf = CSRFProtect(app)
 
@@ -509,6 +533,25 @@ def _initialize_runtime_state(force: bool = False) -> bool:
 # Security headers
 # ---------------------------------------------------------------------------
 
+_REQUEST_ID_HEADER = "X-Request-ID"
+_SLOW_REQUEST_MS = int(os.environ.get("SLOW_REQUEST_MS", "1500") or "1500")
+
+
+@app.before_request
+def _assign_request_id() -> None:
+    """Attach a correlation id to every request. Honour an upstream
+    ``X-Request-ID`` header (e.g. set by Railway's edge / Cloudflare) so
+    a single trace stitches across the proxy hop."""
+    incoming = (request.headers.get(_REQUEST_ID_HEADER) or "").strip()
+    # Reject pathological values; fall back to a fresh id.
+    if incoming and len(incoming) <= 128 and all(c.isalnum() or c in "-_" for c in incoming):
+        rid = incoming
+    else:
+        rid = secrets.token_hex(8)
+    request.environ["request_id"] = rid
+    request.environ["_t_start"] = time.perf_counter()
+
+
 @app.after_request
 def extra_security_headers(response: Response) -> Response:
     response.headers["Server"] = "CafePortal"
@@ -520,6 +563,33 @@ def extra_security_headers(response: Response) -> Response:
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    # Echo the request correlation id so clients can quote it in bug reports.
+    rid = request.environ.get("request_id")
+    if rid:
+        response.headers.setdefault(_REQUEST_ID_HEADER, rid)
+    # Long-cache fingerprinted static assets, but never HTML responses.
+    if request.path.startswith("/static/") and response.status_code == 200:
+        response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+    # Per-request access log + slow-request warning. Skipped for SSE streams
+    # whose duration is meaningless in this context.
+    t0 = request.environ.get("_t_start")
+    if t0 is not None and not request.path.startswith("/api/orders/stream"):
+        dur_ms = (time.perf_counter() - t0) * 1000.0
+        log_payload = {
+            "event": "http.request",
+            "rid": rid,
+            "method": request.method,
+            "path": request.path,
+            "status": response.status_code,
+            "durationMs": round(dur_ms, 2),
+            "ip": _client_ip() if "_client_ip" in globals() else request.remote_addr,
+        }
+        if dur_ms >= _SLOW_REQUEST_MS:
+            app.logger.warning("slow_request %s", json.dumps(log_payload))
+        elif response.status_code >= 500:
+            app.logger.error("server_error %s", json.dumps(log_payload))
+        else:
+            app.logger.info("access %s", json.dumps(log_payload))
     # HSTS only when the request was HTTPS — never on plain HTTP, which
     # would lock developers out of localhost.
     is_https = (
@@ -2003,6 +2073,96 @@ def public_metrics():
         payload["ordersToday"] = None
         payload["activeOrders"] = None
     return jsonify(payload), 200
+
+
+@app.route("/metrics/prom")
+@limiter.exempt
+def prometheus_metrics():
+    """Minimal Prometheus text-format exposition. No new dependencies — emitted
+    by hand because the only metrics we currently track are derived from the DB
+    and the running process. Safe to expose publicly: counts only, no PII."""
+    lines: list[str] = []
+
+    def _emit(name: str, help_text: str, mtype: str, value, labels: str = "") -> None:
+        lines.append(f"# HELP {name} {help_text}")
+        lines.append(f"# TYPE {name} {mtype}")
+        lines.append(f"{name}{labels} {value}")
+
+    _emit("cafe_uptime_seconds", "Process uptime in seconds.", "gauge",
+          int(time.time() - APP_START_TIME))
+    _emit("cafe_build_info", "Build info; value is always 1.", "gauge", 1,
+          labels=f'{{version="{APP_VERSION}"}}')
+
+    orders_today = active_orders = -1
+    try:
+        if _initialize_runtime_state(force=False):
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            orders_today = db.session.query(Order).filter(Order.created_at >= today_start).count()
+            active_orders = db.session.query(Order).filter(
+                Order.status.in_(("pending", "confirmed", "preparing", "ready"))
+            ).count()
+    except Exception as exc:
+        app.logger.warning("Prometheus metrics query failed: %s", exc)
+
+    if orders_today >= 0:
+        _emit("cafe_orders_today", "Orders created since UTC midnight.", "gauge", orders_today)
+    if active_orders >= 0:
+        _emit("cafe_orders_active", "Orders not yet completed/cancelled.", "gauge", active_orders)
+
+    try:
+        sse_total = sum(len(v) for v in _sse_subscribers.values())
+        _emit("cafe_sse_subscribers", "Currently connected SSE clients.", "gauge", sse_total)
+    except Exception:
+        pass
+
+    body = "\n".join(lines) + "\n"
+    return Response(body, mimetype="text/plain; version=0.0.4; charset=utf-8")
+
+
+@app.route("/version")
+@limiter.exempt
+def version_endpoint():
+    """Cheap, cache-friendly build identifier — handy for smoke tests after deploy."""
+    return jsonify(
+        version=APP_VERSION,
+        commit=os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:40] or None,
+        branch=os.environ.get("RAILWAY_GIT_BRANCH") or None,
+        deployedAt=os.environ.get("RAILWAY_DEPLOYMENT_CREATED_AT") or None,
+        startedAt=datetime.fromtimestamp(APP_START_TIME, tz=timezone.utc).isoformat(),
+    ), 200
+
+
+@app.route("/robots.txt")
+@limiter.exempt
+def robots_txt():
+    """Block search-engine indexing of authenticated/admin surfaces by default.
+    Override with a real robots.txt in /static/ if you ever want public SEO."""
+    body = (
+        "User-agent: *\n"
+        "Disallow: /owner/\n"
+        "Disallow: /admin/\n"
+        "Disallow: /superadmin/\n"
+        "Disallow: /api/\n"
+        "Disallow: /kitchen\n"
+        "Allow: /\n"
+    )
+    return Response(body, mimetype="text/plain; charset=utf-8")
+
+
+@app.route("/.well-known/security.txt")
+@limiter.exempt
+def security_txt():
+    """RFC 9116 security disclosure contact. Override SECURITY_CONTACT to point
+    at your own mailbox or HackerOne page."""
+    contact = os.environ.get("SECURITY_CONTACT") or "mailto:security@example.com"
+    expires = (datetime.now(timezone.utc) + timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    body = (
+        f"Contact: {contact}\n"
+        f"Expires: {expires}\n"
+        "Preferred-Languages: en\n"
+        "Canonical: https://" + (request.host or "example.com") + "/.well-known/security.txt\n"
+    )
+    return Response(body, mimetype="text/plain; charset=utf-8")
 
 
 # ---------------------------------------------------------------------------
