@@ -4291,6 +4291,21 @@ def owner_billing_create_charge(order_id: int):
         flash("This bill is already settled.", "billing_info")
         return redirect(url_for("owner_billing_order_detail", order_id=order_id))
 
+    # Idempotency guard: if a pending OnlinePayment already exists for this
+    # order created within the last 5 minutes, return the existing pay link
+    # instead of double-billing the customer. Catches accidental form
+    # double-submits, mobile retries on flaky 3G, and proxy retries.
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    existing = (OnlinePayment.query
+                .filter_by(owner_id=owner_id, order_id=order.id)
+                .filter(OnlinePayment.status.in_(("pending", "processing")))
+                .filter(OnlinePayment.created_at >= recent_cutoff)
+                .order_by(OnlinePayment.created_at.desc()).first())
+    if existing is not None:
+        flash("A payment link for this bill is already active. "
+              "Re-using it instead of starting a new charge.", "billing_info")
+        return redirect(url_for("billing_pay_page", order_id=order.id))
+
     provider_name = (request.form.get("provider") or "").strip().lower()
     if provider_name:
         cred = PaymentProviderCredential.query.filter_by(
@@ -6492,6 +6507,125 @@ def _collect_schema_diagnostics() -> dict:
     return payload
 
 
+@app.route("/superadmin/devops")
+@superadmin_required
+def superadmin_devops_index():
+    """Hub page linking every operational tool: schema diag, payment
+    reconciliation, aggregator stats, webhook event log."""
+    return render_template("superadmin/devops_index.html")
+
+
+@app.route("/superadmin/devops/reconcile/payments", methods=["GET", "POST"])
+@superadmin_required
+def superadmin_devops_reconcile_payments():
+    """Manually trigger the payment reconciliation sweep + show history.
+
+    GET renders the page with the most recent runs. POST runs the sweep
+    synchronously (capped, so it can't time out the request) and prepends
+    the result to the history buffer."""
+    if request.method == "POST":
+        try:
+            max_age = int(request.form.get("max_age_minutes", "10"))
+        except ValueError:
+            max_age = 10
+        try:
+            limit = int(request.form.get("limit", "200"))
+        except ValueError:
+            limit = 200
+        max_age = max(1, min(max_age, 1440))
+        limit = max(1, min(limit, 1000))
+        summary = reconcile_pending_payments(
+            max_age_minutes=max_age, limit=limit)
+        _record_reconcile_run(summary, source="manual")
+        flash(f"Reconciliation done — scanned {summary['scanned']}, "
+              f"settled {summary['settled']}, failed {summary['failed']}, "
+              f"errors {len(summary['errors'])}.",
+              "billing_ok" if not summary["errors"] else "billing_info")
+        return redirect(url_for("superadmin_devops_reconcile_payments"))
+
+    # Snapshot of currently stuck rows for visibility.
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    stuck = (db.session.query(OnlinePayment.provider, db.func.count())
+             .filter(OnlinePayment.status.in_(("pending", "processing")))
+             .filter(OnlinePayment.created_at < cutoff)
+             .group_by(OnlinePayment.provider).all())
+    stuck_summary = [{"provider": p, "count": int(c)} for p, c in stuck]
+    return render_template(
+        "superadmin/devops_reconcile.html",
+        history=list(reversed(_RECONCILE_HISTORY)),
+        stuck_summary=stuck_summary,
+    )
+
+
+@app.route("/superadmin/devops/aggregators")
+@superadmin_required
+def superadmin_devops_aggregators():
+    """Operational view of Swiggy/Zomato/UberEats integration health.
+
+    Shows configured credentials per platform, today's order volume +
+    GMV, pending acknowledgements, signature-failure count from the
+    webhook log, and the last few aggregator events processed.
+    """
+    today_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+
+    # Credentials currently configured per platform.
+    platforms_summary = []
+    for plat in SUPPORTED_PLATFORMS:
+        creds = AggregatorPlatformCredential.query.filter_by(
+            platform=plat).all()
+        active = [c for c in creds if c.is_active]
+        platforms_summary.append({
+            "platform": plat,
+            "configured": len(creds),
+            "active": len(active),
+            "modes": sorted({c.mode or "test" for c in creds}),
+        })
+
+    # Today's volume + GMV per platform.
+    volume_rows = (db.session.query(
+                        AggregatorOrder.platform,
+                        AggregatorOrder.aggregator_status,
+                        db.func.count(),
+                        db.func.coalesce(db.func.sum(AggregatorOrder.total), 0))
+                   .filter(AggregatorOrder.created_at >= today_start)
+                   .group_by(AggregatorOrder.platform,
+                              AggregatorOrder.aggregator_status).all())
+    volume_today = [
+        {"platform": p, "status": s, "count": int(c), "gmv": float(g or 0)}
+        for p, s, c, g in volume_rows
+    ]
+
+    # Pending = needs acceptance from the cafe.
+    pending_count = (AggregatorOrder.query
+                     .filter(AggregatorOrder.aggregator_status == "placed",
+                              AggregatorOrder.accepted_at.is_(None),
+                              AggregatorOrder.rejected_at.is_(None))
+                     .count())
+
+    # Signature failures from webhook log (last 24h).
+    yday = datetime.now(timezone.utc) - timedelta(hours=24)
+    sig_failures = (WebhookEventLog.query
+                    .filter(WebhookEventLog.provider.like("agg:%"))
+                    .filter(WebhookEventLog.event_type == "signature_invalid")
+                    .filter(WebhookEventLog.created_at >= yday).count())
+
+    # Recent webhook events processed for aggregators.
+    recent_events = (WebhookEventLog.query
+                     .filter(WebhookEventLog.provider.like("agg:%"))
+                     .order_by(WebhookEventLog.created_at.desc())
+                     .limit(20).all())
+
+    return render_template(
+        "superadmin/devops_aggregators.html",
+        platforms=platforms_summary,
+        volume_today=volume_today,
+        pending_count=pending_count,
+        sig_failures=sig_failures,
+        recent_events=recent_events,
+    )
+
+
 @app.route("/superadmin/devops/schema.json")
 @superadmin_required
 def superadmin_devops_schema_json():
@@ -7717,6 +7851,152 @@ def _make_superadmin_if_missing() -> None:
 # ---------------------------------------------------------------------------
 # CLI commands — invoked from scripts/release.sh during Railway deploys.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Payment reconciliation — recovers from missed/late provider webhooks.
+#
+# Webhooks are best-effort by every PSP we support: Stripe will retry for
+# up to 3 days but can be silently dropped by an upstream proxy; Razorpay
+# fires only twice; Cashfree gives up after 4 attempts. If we miss the
+# 'succeeded' event, the customer is charged but the bill stays "unpaid"
+# in the dashboard — money on the floor. The reconciler sweeps any
+# OnlinePayment row stuck in pending/processing for longer than the cutoff
+# and re-fetches authoritative status straight from the provider.
+# ---------------------------------------------------------------------------
+
+def _apply_provider_status_to_op(op: "OnlinePayment", event) -> bool:
+    """Mutates ``op`` (and its Order if status flipped to succeeded).
+
+    Mirrors the webhook settlement path so reconciliation produces the
+    exact same end state — same invoice number sequencing, same billing
+    log entries, same audit trail. Returns True if state changed.
+    """
+    if event.status == op.status:
+        return False
+    prev = op.status
+    op.status = event.status
+    op.raw = {"event_type": event.event_type, "object": event.raw}
+    if event.status == "failed" and isinstance(event.raw, dict):
+        op.error_message = (event.raw.get("last_payment_error", {}) or {}).get(
+            "message", "")[:500]
+    db.session.add(op)
+
+    if event.status == "succeeded":
+        order = Order.query.filter_by(id=op.order_id, owner_id=op.owner_id).first()
+        if order and (order.payment_status or "unpaid") != "paid":
+            settings = _settings_for(order.owner_id)
+            totals = compute_bill_totals(
+                subtotal=float(order.amount or 0),
+                discount=float(order.discount or 0),
+                service_charge_pct=float(settings.service_charge_percent or 0),
+                tax_pct=float(settings.tax_rate_percent or 0),
+            )
+            order.payment_status = "paid"
+            order.payment_method = op.provider
+            order.tax = totals.tax
+            order.service_charge = totals.service_charge
+            order.paid_at = datetime.now(timezone.utc)
+            order.payments_breakdown = [{
+                "method": op.provider, "amount": float(op.amount or totals.total),
+                "reference": event.intent_id, "via": "reconcile",
+            }]
+            if not order.invoice_number:
+                inv, seq = next_invoice_number(settings.invoice_prefix or "INV",
+                                                int(settings.invoice_seq or 0))
+                order.invoice_number = inv
+                settings.invoice_seq = seq
+            db.session.add(order)
+            _billing_log(owner_id=order.owner_id, order_id=order.id,
+                         action="online_charge.reconciled",
+                         amount=float(op.amount or totals.total),
+                         payment_method=op.provider,
+                         reason=f"reconcile {prev}→succeeded ({event.event_type})",
+                         payload={"intent_id": event.intent_id,
+                                   "provider": op.provider})
+            _invalidate_billing_cache(order.owner_id)
+    return True
+
+
+def reconcile_pending_payments(max_age_minutes: int = 10,
+                                limit: int = 200) -> dict:
+    """Sweep stuck OnlinePayment rows and pull authoritative status.
+
+    Conservative defaults: only rows older than ``max_age_minutes`` are
+    touched (so we don't race a webhook that's still in flight) and the
+    batch is capped to ``limit`` per call so a Railway cron tick can't
+    blow the request budget. Provider failures are logged and skipped —
+    one bad credential doesn't poison the whole sweep.
+
+    Returns a summary dict suitable for surfacing in admin / metrics.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+    rows = (OnlinePayment.query
+            .filter(OnlinePayment.status.in_(("pending", "processing")))
+            .filter(OnlinePayment.created_at < cutoff)
+            .order_by(OnlinePayment.created_at.asc())
+            .limit(limit).all())
+    summary = {"scanned": len(rows), "updated": 0, "settled": 0,
+               "failed": 0, "errors": []}
+    for op in rows:
+        cred = (PaymentProviderCredential.query
+                .filter_by(owner_id=op.owner_id, provider=op.provider,
+                            is_active=True).first())
+        if cred is None:
+            summary["errors"].append(
+                f"op#{op.id}: no active {op.provider} credential for owner {op.owner_id}")
+            continue
+        try:
+            provider = _provider_for_credential(cred)
+            event = provider.fetch_payment_status(op.intent_id)
+        except PaymentProviderError as exc:
+            summary["errors"].append(f"op#{op.id}: {exc}")
+            continue
+        except NotImplementedError:
+            summary["errors"].append(
+                f"op#{op.id}: provider {op.provider} has no fetch_payment_status")
+            continue
+        try:
+            if _apply_provider_status_to_op(op, event):
+                summary["updated"] += 1
+                if event.status == "succeeded":
+                    summary["settled"] += 1
+                elif event.status == "failed":
+                    summary["failed"] += 1
+                db.session.commit()
+        except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            summary["errors"].append(f"op#{op.id}: settle failed: {exc}")
+    summary["completed_at"] = datetime.now(timezone.utc).isoformat()
+    return summary
+
+
+# Buffer the most recent reconciliation runs for the admin dashboard.
+_RECONCILE_HISTORY: list[dict] = []
+_RECONCILE_HISTORY_MAX = 25
+
+
+def _record_reconcile_run(summary: dict, source: str) -> None:
+    entry = dict(summary)
+    entry["source"] = source
+    _RECONCILE_HISTORY.append(entry)
+    if len(_RECONCILE_HISTORY) > _RECONCILE_HISTORY_MAX:
+        del _RECONCILE_HISTORY[: len(_RECONCILE_HISTORY) - _RECONCILE_HISTORY_MAX]
+
+
+@app.cli.command("reconcile-payments")
+def cli_reconcile_payments() -> None:
+    """Run the payment reconciliation sweep (intended for Railway cron).
+
+    Usage: ``flask reconcile-payments`` — scans all OnlinePayment rows
+    older than 10 minutes still stuck in pending/processing, asks each
+    provider for ground truth, and settles or fails them locally.
+    Idempotent and safe to run on a 1-minute schedule.
+    """
+    with app.app_context():
+        summary = reconcile_pending_payments()
+        _record_reconcile_run(summary, source="cli")
+    app.logger.info("reconcile-payments: %s", summary)
+
 
 @app.cli.command("sync-schema")
 def cli_sync_schema() -> None:

@@ -206,6 +206,18 @@ class PaymentProvider:
     def parse_webhook(self, payload_bytes: bytes, signature_header: str) -> WebhookEvent:
         raise NotImplementedError
 
+    def fetch_payment_status(self, intent_id: str) -> WebhookEvent:
+        """Re-fetch an intent's authoritative status directly from the PSP.
+
+        Used by the reconciliation pipeline to recover from missed/late
+        webhooks: if a row sits in 'pending' for too long, we ask the
+        provider for ground truth and update locally. Subclasses must
+        return a WebhookEvent with the same status vocabulary as
+        parse_webhook (succeeded / failed / cancelled / refunded /
+        pending / processing).
+        """
+        raise NotImplementedError
+
 
 # ---------------------------------------------------------------------------
 # Stripe
@@ -261,6 +273,32 @@ class StripeProvider(PaymentProvider):
             amount_minor=int(amount_minor),
             currency=currency,
             raw={"status": pi.get("status")},
+        )
+
+    def fetch_payment_status(self, intent_id: str) -> WebhookEvent:
+        stripe = self._client()
+        try:
+            pi = stripe.PaymentIntent.retrieve(intent_id)
+        except Exception as exc:  # noqa: BLE001
+            raise PaymentProviderError(
+                f"Stripe could not fetch intent {intent_id}: {exc}") from exc
+        status_map = {
+            "succeeded": "succeeded",
+            "canceled": "cancelled",
+            "requires_payment_method": "failed",
+            "processing": "processing",
+            "requires_action": "pending",
+            "requires_confirmation": "pending",
+            "requires_capture": "pending",
+        }
+        status = status_map.get(pi.get("status", ""), "pending")
+        return WebhookEvent(
+            event_type=f"payment_intent.{pi.get('status', '')}",
+            intent_id=pi.get("id", intent_id),
+            status=status,
+            amount_minor=int(pi.get("amount", 0) or 0),
+            currency=(pi.get("currency") or "inr").upper(),
+            raw=dict(pi),
         )
 
     def parse_webhook(self, payload_bytes, signature_header):
@@ -347,6 +385,26 @@ class RazorpayProvider(PaymentProvider):
             amount_minor=int(amount_minor),
             currency=currency,
             raw={"status": order.get("status"), "key_id": self.public_key},
+        )
+
+    def fetch_payment_status(self, intent_id: str) -> WebhookEvent:
+        client = self._client()
+        try:
+            order = client.order.fetch(intent_id)
+        except Exception as exc:  # noqa: BLE001
+            raise PaymentProviderError(
+                f"Razorpay could not fetch order {intent_id}: {exc}") from exc
+        # status: created | attempted | paid
+        status_map = {"paid": "succeeded", "attempted": "pending",
+                      "created": "pending"}
+        status = status_map.get(order.get("status", ""), "pending")
+        return WebhookEvent(
+            event_type=f"order.{order.get('status', '')}",
+            intent_id=order.get("id", intent_id),
+            status=status,
+            amount_minor=int(order.get("amount", 0) or 0),
+            currency=(order.get("currency") or "INR").upper(),
+            raw=dict(order),
         )
 
     def parse_webhook(self, payload_bytes, signature_header):
@@ -471,6 +529,37 @@ class CashfreeProvider(PaymentProvider):
             checkout_url=data.get("payment_link", ""),
             amount_minor=int(amount_minor),
             currency=currency,
+            raw=data,
+        )
+
+    def fetch_payment_status(self, intent_id: str) -> WebhookEvent:
+        import requests
+        try:
+            r = requests.get(
+                f"{self._base_url()}/orders/{intent_id}",
+                headers=self._headers(), timeout=10,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise PaymentProviderError(
+                f"Cashfree could not fetch order {intent_id}: {exc}") from exc
+        if r.status_code == 404:
+            return WebhookEvent(event_type="order.not_found", intent_id=intent_id,
+                                status="failed", amount_minor=0, currency="INR",
+                                raw={"http_status": 404})
+        if r.status_code >= 400:
+            raise PaymentProviderError(
+                f"Cashfree fetch failed ({r.status_code}): {r.text[:200]}")
+        data = r.json() or {}
+        status_map = {"PAID": "succeeded", "ACTIVE": "pending",
+                      "EXPIRED": "failed", "CANCELLED": "cancelled",
+                      "TERMINATED": "failed"}
+        status = status_map.get((data.get("order_status") or "").upper(), "pending")
+        amount_minor = int(round(float(data.get("order_amount", 0) or 0) * 100))
+        return WebhookEvent(
+            event_type=f"order.{data.get('order_status', '')}",
+            intent_id=data.get("order_id", intent_id),
+            status=status, amount_minor=amount_minor,
+            currency=(data.get("order_currency") or "INR").upper(),
             raw=data,
         )
 
