@@ -4,6 +4,7 @@
     "buildCommand": "pip install -r requirements.txt"
   },
   "deploy": {
+    "preDeployCommand": "bash scripts/release.sh",
     "startCommand": "python start.py",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,

@@ -12,7 +12,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "002_ext_idx"
-down_revision = "001_saas_upgrade_initial"
+down_revision = "001saasupgrade"
 branch_labels = None
 depends_on = None
 
