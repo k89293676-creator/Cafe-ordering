@@ -64,14 +64,21 @@ function _hash(s) {
   return Math.abs(h);
 }
 function autoImageUrl(item) {
-  // Use Pollinations AI: it understands the item name directly and generates
-  // an image that actually matches the dish. Seed is deterministic per item.
-  // `model=flux` and explicit dimensions give the most reliable, on-topic results.
+  // Use Pollinations AI's default (turbo) model — it's free, fast, and doesn't
+  // require an API token (unlike `flux`, which now gates many requests). Seed
+  // is deterministic per item so the same dish always shows the same image.
   const prompt = encodeURIComponent(
     `${item.name}, professional food photography, restaurant dish, natural light, close-up, appetizing, high detail`
   );
   const seed = _hash(item.id || item.name) % 999983;
-  return `https://image.pollinations.ai/prompt/${prompt}?width=400&height=250&nologo=true&model=flux&seed=${seed}`;
+  return `https://image.pollinations.ai/prompt/${prompt}?width=400&height=250&nologo=true&nofeed=true&seed=${seed}`;
+}
+function autoImageUrlBackup(item) {
+  // LoremFlickr serves real Flickr photos for keywords. Deterministic via lock.
+  // Used as a second-tier fallback before the SVG placeholder.
+  const kw = _slug(item.name).split("-").filter(Boolean).slice(0, 3).join(",") || "food";
+  const lock = _hash(item.id || item.name) % 9999;
+  return `https://loremflickr.com/400/250/${encodeURIComponent(kw + ",food")}?lock=${lock}`;
 }
 function fallbackImageUrl(item) {
   // Deterministic SVG placeholder: a soft gradient (color picked from the item
@@ -254,8 +261,16 @@ function itemCard(item) {
 
   const popularBadge = item.popular ? `<span class="o-popular-badge">🔥 Popular</span>` : "";
   const imgSrc = item.image_url || autoImageUrl(item);
+  // Three-tier fallback: explicit/AI image → LoremFlickr photo → SVG placeholder.
+  // Each fallback step rebinds onerror so the chain always lands on the SVG,
+  // which is a data URI and can never fail.
+  const backupUrl = item.image_url ? "" : autoImageUrlBackup(item);
+  const finalUrl  = fallbackImageUrl(item);
+  const onerrAttr = backupUrl
+    ? `this.onerror=function(){this.onerror=null;this.src='${esc(finalUrl)}';};this.src='${esc(backupUrl)}';`
+    : `this.onerror=null;this.src='${esc(finalUrl)}';`;
   const imgHtml = `<img class="o-item__img" src="${esc(imgSrc)}" alt="${esc(item.name)}" loading="lazy"
-                        onerror="this.onerror=null;this.src='${esc(fallbackImageUrl(item))}';" />`;
+                        onerror="${onerrAttr}" />`;
 
   return `
     <div class="o-item${avail ? "" : " o-item--sold-out"}" data-item="${esc(item.id)}">
