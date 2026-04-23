@@ -56,14 +56,34 @@ else:
 
 run(["git", "add", "-A"])
 
-# Skip commit if nothing staged
+# Stash any uncommitted changes so we can rebase cleanly on top of origin/main.
 status = run(["git", "status", "--porcelain"]).stdout.strip()
-if not status:
-    print("Nothing to commit; pushing current HEAD.")
-else:
+stashed = False
+if status:
     msg = sys.argv[1] if len(sys.argv) > 1 else "chore: automated update from Replit"
+    # Commit locally first; rebasing a real commit is more reliable than stashing.
     run(["git", "commit", "-m", msg])
-    print("Committed OK")
+    print(f"Committed locally: {msg}")
+else:
+    print("Nothing new to commit; will sync and push current HEAD.")
+
+# Fetch and rebase onto origin/main so we never get rejected for non-fast-forward.
+run(["git", "fetch", "origin", "main"], check=False)
+rebase = run(["git", "rebase", "origin/main"], check=False)
+if rebase.returncode != 0:
+    print("Rebase hit conflicts — aborting and falling back to a merge.", file=sys.stderr)
+    run(["git", "rebase", "--abort"], check=False)
+    merge = run(
+        ["git", "-c", "user.email=agent@replit.com",
+         "-c", "user.name=Replit Agent",
+         "merge", "--no-edit", "--strategy-option=theirs", "origin/main"],
+        check=False,
+    )
+    if merge.returncode != 0:
+        print(merge.stderr, file=sys.stderr)
+        print("\nCould not auto-merge with origin/main. Resolve conflicts in the Shell, then re-run.",
+              file=sys.stderr)
+        sys.exit(merge.returncode)
 
 # Push current branch to main on GitHub
 push = run(
@@ -72,7 +92,7 @@ push = run(
 )
 if push.returncode != 0:
     print(push.stderr, file=sys.stderr)
-    print("\nIf this failed due to non-fast-forward, you can force-push from the Shell with:")
+    print("\nPush still rejected. As a last resort you can force-push from the Shell with:")
     print("  git push -f origin HEAD:main")
     sys.exit(push.returncode)
 
