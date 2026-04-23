@@ -3991,7 +3991,7 @@ def superadmin_dashboard():
 
     recent_orders = Order.query.order_by(Order.created_at.desc()).limit(50).all()
 
-    # Per-cafe stats for the cafes table
+    # ── Per-cafe stats for the cafes table ──────────────────────────────
     cafe_stats: dict[int, dict] = {}
     for cafe in cafes:
         cafe_owners = [o for o in owners if o.cafe_id == cafe.id]
@@ -4005,6 +4005,118 @@ def superadmin_dashboard():
             "order_count": int(order_count),
             "revenue": round(float(rev), 0),
         }
+
+    # ── Time-bucketed KPIs (today / 7-day / vs prior period) ────────────
+    now_utc = datetime.now(timezone.utc)
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
+    week_ago = today_start - timedelta(days=7)
+    two_weeks_ago = today_start - timedelta(days=14)
+
+    def _count_orders(after, before=None):
+        q = Order.query.filter(Order.created_at >= after)
+        if before is not None:
+            q = q.filter(Order.created_at < before)
+        return q.count()
+
+    def _sum_revenue(after, before=None):
+        q = db.session.query(db.func.sum(Order.total)).filter(
+            Order.created_at >= after, Order.status == "completed"
+        )
+        if before is not None:
+            q = q.filter(Order.created_at < before)
+        return float(q.scalar() or 0)
+
+    orders_today = _count_orders(today_start)
+    orders_yesterday = _count_orders(yesterday_start, today_start)
+    orders_7d = _count_orders(week_ago)
+    orders_prev_7d = _count_orders(two_weeks_ago, week_ago)
+    revenue_today = _sum_revenue(today_start)
+    revenue_7d = _sum_revenue(week_ago)
+    revenue_prev_7d = _sum_revenue(two_weeks_ago, week_ago)
+    new_owners_7d = sum(
+        1 for o in owners
+        if o.created_at and o.created_at.replace(tzinfo=timezone.utc) >= week_ago
+    )
+
+    def _pct(curr, prev):
+        if prev == 0:
+            return None if curr == 0 else 100.0
+        return round((curr - prev) / prev * 100, 1)
+
+    deltas = {
+        "orders_today_vs_yesterday": _pct(orders_today, orders_yesterday),
+        "orders_7d_vs_prev": _pct(orders_7d, orders_prev_7d),
+        "revenue_7d_vs_prev": _pct(revenue_7d, revenue_prev_7d),
+    }
+    avg_ticket = round(float(total_revenue) / total_orders, 2) if total_orders else 0.0
+
+    # ── 14-day order trend for sparkline ────────────────────────────────
+    daily_series = []
+    for i in range(13, -1, -1):
+        day = today_start - timedelta(days=i)
+        end = day + timedelta(days=1)
+        cnt = _count_orders(day, end)
+        daily_series.append({"date": day.strftime("%b %d"), "count": int(cnt)})
+
+    # ── Top 5 cafes by completed revenue ────────────────────────────────
+    top_cafes = sorted(
+        cafes, key=lambda c: cafe_stats.get(c.id, {}).get("revenue", 0), reverse=True
+    )[:5]
+    top_cafes_data = [{
+        "id": c.id, "name": c.name, "is_active": c.is_active,
+        "revenue": cafe_stats.get(c.id, {}).get("revenue", 0),
+        "orders": cafe_stats.get(c.id, {}).get("order_count", 0),
+        "owners": cafe_stats.get(c.id, {}).get("owner_count", 0),
+    } for c in top_cafes]
+
+    # ── Pending attention list ──────────────────────────────────────────
+    pending = []
+    for o in owners:
+        if not o.is_active:
+            pending.append({"icon": "person-x-fill", "color": "warning",
+                            "msg": f"Owner '{o.username}' is deactivated"})
+    for c in cafes:
+        if not c.is_active:
+            pending.append({"icon": "shop-window", "color": "warning",
+                            "msg": f"Cafe '{c.name}' is deactivated"})
+        elif cafe_stats.get(c.id, {}).get("order_count", 0) == 0:
+            pending.append({"icon": "exclamation-circle", "color": "info",
+                            "msg": f"Cafe '{c.name}' has no orders yet"})
+    if open_calls:
+        pending.insert(0, {"icon": "bell-fill", "color": "danger",
+                           "msg": f"{open_calls} open table-service call(s)"})
+
+    # ── Recent security events (newest first, max 8) ────────────────────
+    recent_security = list(SECURITY_EVENT_BUFFER)[-8:][::-1]
+
+    # ── System health snapshot ──────────────────────────────────────────
+    db_latency_ms = None
+    try:
+        t0 = time.time()
+        db.session.execute(text("SELECT 1"))
+        db_latency_ms = round((time.time() - t0) * 1000, 1)
+    except Exception as exc:
+        app.logger.warning("Superadmin DB ping failed: %s", exc)
+
+    uptime_seconds = int(time.time() - APP_START_TIME)
+    days, rem = divmod(uptime_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    uptime_str = (f"{days}d " if days else "") + f"{hours}h {minutes}m"
+
+    health = {
+        "version": APP_VERSION,
+        "uptime": uptime_str,
+        "db_latency_ms": db_latency_ms,
+        "env": ("production" if os.environ.get("IS_PRODUCTION", "").lower() == "true"
+                or os.environ.get("RAILWAY_ENVIRONMENT") else "development"),
+        "events_buffered": len(SECURITY_EVENT_BUFFER),
+        "verified_until": (
+            float(session.get("superadmin_key_verified_at", 0) or 0) + SUPERADMIN_VERIFY_TTL
+            if session.get("superadmin_key_verified") else None
+        ),
+    }
 
     return render_template(
         "superadmin/dashboard.html",
@@ -4022,6 +4134,20 @@ def superadmin_dashboard():
         cafe_count=len(cafes),
         active_cafe_count=sum(1 for c in cafes if c.is_active),
         owner_username=logged_in_owner(),
+        # ── Enhanced metrics ────────────────────────────────────────────
+        orders_today=orders_today,
+        orders_7d=orders_7d,
+        revenue_today=round(revenue_today, 2),
+        revenue_7d=round(revenue_7d, 2),
+        new_owners_7d=new_owners_7d,
+        avg_ticket=avg_ticket,
+        deltas=deltas,
+        daily_series=daily_series,
+        top_cafes=top_cafes_data,
+        pending=pending[:8],
+        pending_total=len(pending),
+        recent_security=recent_security,
+        health=health,
     )
 
 

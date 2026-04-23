@@ -153,6 +153,221 @@
         </div>
       </div>
 
+      <!-- ── System Health Bar ───────────────────────────────────────── -->
+      {% if health %}
+      <div class="card border-0 shadow-sm mb-3" style="background:linear-gradient(135deg,#0f172a,#1e293b);color:#e2e8f0;">
+        <div class="card-body py-3">
+          <div class="row g-3 align-items-center">
+            <div class="col-md-3 d-flex align-items-center gap-2">
+              <span class="badge {% if health.db_latency_ms is not none %}bg-success{% else %}bg-danger{% endif %} rounded-pill">
+                <i class="bi bi-database-fill"></i>
+                {% if health.db_latency_ms is not none %}DB {{ health.db_latency_ms }}ms{% else %}DB DOWN{% endif %}
+              </span>
+              <span class="badge bg-secondary rounded-pill"><i class="bi bi-cloud-fill"></i> {{ health.env }}</span>
+            </div>
+            <div class="col-md-3 small">
+              <i class="bi bi-clock-history me-1 text-info"></i>
+              Uptime <strong>{{ health.uptime }}</strong>
+              <span class="text-secondary">· v{{ health.version }}</span>
+            </div>
+            <div class="col-md-3 small">
+              <i class="bi bi-shield-lock me-1 text-warning"></i>
+              <strong>{{ health.events_buffered }}</strong> security events buffered
+              {% if health.verified_until %}
+                <span class="ms-2 badge bg-success">Key-verified <span id="hdrTtl" data-until="{{ health.verified_until }}"></span></span>
+              {% endif %}
+            </div>
+            <div class="col-md-3 text-md-end">
+              <a href="{{ url_for('superadmin_audit') }}" class="btn btn-sm btn-outline-light"><i class="bi bi-clipboard-data me-1"></i>Audit log</a>
+              <a href="{{ url_for('admin.devops') }}" class="btn btn-sm btn-outline-light ms-1"><i class="bi bi-cpu-fill me-1"></i>DevOps</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- ── Today + 7d KPI Strip ────────────────────────────────────── -->
+      <div class="row g-3 mb-3">
+        <div class="col-6 col-xl-3">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Orders Today</div>
+              <i class="bi bi-cart-check stat-icon text-primary"></i>
+            </div>
+            <div class="stat-value text-primary">{{ orders_today }}</div>
+            {% set d = deltas.orders_today_vs_yesterday %}
+            <small class="{% if d is none %}text-muted{% elif d >= 0 %}text-success{% else %}text-danger{% endif %}">
+              {% if d is none %}vs yesterday — n/a
+              {% else %}<i class="bi bi-arrow-{% if d >= 0 %}up{% else %}down{% endif %}-short"></i>{{ d }}% vs yesterday{% endif %}
+            </small>
+          </div>
+        </div>
+        <div class="col-6 col-xl-3">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Revenue Today</div>
+              <i class="bi bi-cash-coin stat-icon text-success"></i>
+            </div>
+            <div class="stat-value text-success">₹{{ "%.0f"|format(revenue_today) }}</div>
+            <small class="text-muted">7d total ₹{{ "%.0f"|format(revenue_7d) }}</small>
+          </div>
+        </div>
+        <div class="col-6 col-xl-3">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Orders 7d</div>
+              <i class="bi bi-graph-up-arrow stat-icon text-warning"></i>
+            </div>
+            <div class="stat-value text-warning">{{ orders_7d }}</div>
+            {% set d = deltas.orders_7d_vs_prev %}
+            <small class="{% if d is none %}text-muted{% elif d >= 0 %}text-success{% else %}text-danger{% endif %}">
+              {% if d is none %}vs prev 7d — n/a
+              {% else %}<i class="bi bi-arrow-{% if d >= 0 %}up{% else %}down{% endif %}-short"></i>{{ d }}% vs prev 7d{% endif %}
+            </small>
+          </div>
+        </div>
+        <div class="col-6 col-xl-3">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Avg Ticket</div>
+              <i class="bi bi-receipt-cutoff stat-icon text-info"></i>
+            </div>
+            <div class="stat-value text-info">₹{{ "%.0f"|format(avg_ticket) }}</div>
+            <small class="text-muted">{{ new_owners_7d }} new owner(s) this week</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 14-day Sparkline ────────────────────────────────────────── -->
+      {% if daily_series %}
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong><i class="bi bi-bar-chart-line-fill me-2 text-primary"></i>Order volume — last 14 days</strong>
+            <a href="{{ url_for('superadmin_analytics') }}" class="small text-decoration-none">Full analytics →</a>
+          </div>
+          <svg id="trendSpark" viewBox="0 0 700 120" preserveAspectRatio="none" style="width:100%;height:120px;">
+            {% set maxv = (daily_series|map(attribute='count')|max) or 1 %}
+            {% set step = 700 / (daily_series|length - 1 if daily_series|length > 1 else 1) %}
+            {% set pts = [] %}
+            {% for d in daily_series %}
+              {% set x = loop.index0 * step %}
+              {% set y = 110 - (d.count / maxv * 95) %}
+              {% set _ = pts.append((x|round(1, 'common'))|string + ',' + (y|round(1, 'common'))|string) %}
+            {% endfor %}
+            <polyline fill="none" stroke="#6366f1" stroke-width="2.5" stroke-linejoin="round" points="{{ pts|join(' ') }}"/>
+            <polygon fill="#6366f1" fill-opacity=".10" points="0,110 {{ pts|join(' ') }} 700,110"/>
+            {% for d in daily_series %}
+              {% set x = loop.index0 * step %}
+              {% set y = 110 - (d.count / maxv * 95) %}
+              <circle cx="{{ x|round(1, 'common') }}" cy="{{ y|round(1, 'common') }}" r="3" fill="#6366f1">
+                <title>{{ d.date }}: {{ d.count }} orders</title>
+              </circle>
+            {% endfor %}
+          </svg>
+          <div class="d-flex justify-content-between text-muted" style="font-size:.7rem;">
+            {% for d in daily_series %}{% if loop.index0 % 2 == 0 %}<span>{{ d.date }}</span>{% endif %}{% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- ── Two-column: Top Cafes + Recent Security ─────────────────── -->
+      <div class="row g-3 mb-3">
+        <div class="col-lg-6">
+          <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+              <strong><i class="bi bi-trophy-fill text-warning me-2"></i>Top Cafes by Revenue</strong>
+              <span class="small text-muted">all-time completed</span>
+            </div>
+            <div class="card-body p-0">
+              {% if top_cafes %}
+              <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0 align-middle">
+                  <thead class="table-light"><tr>
+                    <th style="width:30px;">#</th><th>Cafe</th>
+                    <th class="text-end">Orders</th><th class="text-end">Revenue</th>
+                  </tr></thead>
+                  <tbody>
+                    {% for c in top_cafes %}
+                    <tr>
+                      <td class="text-muted small">{{ loop.index }}</td>
+                      <td>
+                        <strong>{{ c.name }}</strong>
+                        {% if not c.is_active %}<span class="badge bg-secondary ms-1">paused</span>{% endif %}
+                        <div class="small text-muted">{{ c.owners }} owner(s)</div>
+                      </td>
+                      <td class="text-end">{{ c.orders }}</td>
+                      <td class="text-end fw-semibold text-success">₹{{ "%.0f"|format(c.revenue) }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% else %}
+              <div class="text-center text-muted py-4 small">No cafes yet.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+              <strong><i class="bi bi-shield-shaded text-danger me-2"></i>Recent Security Events</strong>
+              <a href="{{ url_for('superadmin_audit') }}" class="small text-decoration-none">View all →</a>
+            </div>
+            <div class="card-body p-0">
+              {% if recent_security %}
+              <ul class="list-group list-group-flush">
+                {% for e in recent_security %}
+                  {% set evname = e.event or '' %}
+                  {% set color = 'secondary' %}
+                  {% if '_OK' in evname %}{% set color = 'success' %}
+                  {% elif '_FAIL' in evname or '_DENIED' in evname %}{% set color = 'danger' %}
+                  {% elif '_NO_KEY' in evname or '_REVOKED' in evname %}{% set color = 'warning' %}
+                  {% endif %}
+                  <li class="list-group-item py-2 d-flex align-items-start gap-2">
+                    <span class="badge bg-{{ color }} mt-1" style="font-size:.65rem;">{{ evname }}</span>
+                    <div class="flex-fill small">
+                      <div class="text-truncate" style="max-width:300px;color:#4b5563;font-family:ui-monospace,Menlo,monospace;font-size:.72rem;">{{ e.detail or '-' }}</div>
+                      <div class="text-muted" style="font-size:.7rem;">
+                        <span class="ts" data-ts="{{ e.ts }}"></span> · {{ e.ip }}
+                      </div>
+                    </div>
+                  </li>
+                {% endfor %}
+              </ul>
+              {% else %}
+              <div class="text-center text-muted py-4 small">No security events recorded yet.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Needs Attention ─────────────────────────────────────────── -->
+      {% if pending %}
+      <div class="card border-0 shadow-sm mb-3" style="border-left:4px solid #f59e0b !important;">
+        <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+          <strong><i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Needs Attention</strong>
+          <span class="badge bg-warning text-dark">{{ pending_total }}</span>
+        </div>
+        <ul class="list-group list-group-flush">
+          {% for p in pending %}
+          <li class="list-group-item py-2 d-flex align-items-center gap-2">
+            <i class="bi bi-{{ p.icon }} text-{{ p.color }}"></i>
+            <span class="small">{{ p.msg }}</span>
+          </li>
+          {% endfor %}
+          {% if pending_total > pending|length %}
+          <li class="list-group-item py-2 small text-muted">
+            … and {{ pending_total - pending|length }} more.
+          </li>
+          {% endif %}
+        </ul>
+      </div>
+      {% endif %}
+
       <!-- Tabs -->
       <ul class="nav nav-tabs mb-3" id="saTabs">
         <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabCafes"><i class="bi bi-shop me-1"></i>Cafes <span class="badge bg-secondary ms-1">{{ cafe_count }}</span></a></li>
@@ -519,6 +734,25 @@ document.getElementById('renameCafeModal')?.addEventListener('show.bs.modal', fu
   document.getElementById('renameCafeForm').action = '/superadmin/cafes/' + cafeId + '/rename';
   document.getElementById('renameCafeName').value = cafeName;
 });
+
+// Recent security event timestamps -> local time
+document.querySelectorAll('span.ts[data-ts]').forEach(function(el){
+  var t = parseFloat(el.dataset.ts) * 1000;
+  if (!isNaN(t)) el.textContent = new Date(t).toLocaleString();
+});
+
+// SUPERADMIN_KEY verification countdown in the health bar
+(function(){
+  var el = document.getElementById('hdrTtl');
+  if (!el) return;
+  var until = parseFloat(el.dataset.until) * 1000;
+  function tick(){
+    var s = Math.max(0, Math.round((until - Date.now()) / 1000));
+    var m = Math.floor(s/60), r = s%60;
+    el.textContent = '· ' + m + 'm ' + (r<10?'0':'') + r + 's';
+  }
+  tick(); setInterval(tick, 1000);
+})();
 </script>
 </body>
 </html>
