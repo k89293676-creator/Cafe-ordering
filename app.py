@@ -783,6 +783,24 @@ def _init_db() -> None:
         add_column_if_missing("settings", "invoice_seq INTEGER DEFAULT 0", "invoice_seq")
         add_column_if_missing("settings", "billing_address TEXT DEFAULT ''", "billing_address")
         add_column_if_missing("settings", "billing_phone TEXT DEFAULT ''", "billing_phone")
+        # --- Payment provider credential additions (v2 hardening) -----------
+        # These columns were added AFTER payment_credentials shipped, so
+        # existing deployments miss them and the /owner/billing/payment-
+        # methods route 500s on first load until they're backfilled.
+        add_column_if_missing("payment_credentials",
+                              "verified_at TIMESTAMP", "verified_at")
+        add_column_if_missing("payment_credentials",
+                              "verified_fingerprint TEXT DEFAULT ''",
+                              "verified_fingerprint")
+        # --- Aggregator credential additions (safety net in case the table
+        # was created by an older branch without these fields) -------------
+        add_column_if_missing("aggregator_credentials",
+                              "auto_accept BOOLEAN DEFAULT false", "auto_accept")
+        add_column_if_missing("aggregator_credentials",
+                              "verified_at TIMESTAMP", "verified_at")
+        add_column_if_missing("aggregator_credentials",
+                              "verified_fingerprint TEXT DEFAULT ''",
+                              "verified_fingerprint")
         # Indexes that make the high-traffic billing screens stay fast
         # under load (open-tabs query, EOD report, audit log).
         for idx_sql in (
@@ -2460,6 +2478,76 @@ def prometheus_metrics():
     return Response(body, mimetype="text/plain; version=0.0.4; charset=utf-8")
 
 
+@app.route("/healthz")
+@limiter.exempt
+def healthz():
+    """Cheapest possible liveness probe — returns 200 as long as the
+    Python process can service a request. Used by load balancers
+    (Railway, Render, Fly, Kubernetes) to decide whether to keep this
+    instance in rotation. Deliberately does not touch the database so
+    a DB blip doesn't cause the LB to kill every replica."""
+    return ("ok", 200, {"Content-Type": "text/plain"})
+
+
+@app.route("/readyz")
+@limiter.exempt
+def readyz():
+    """Readiness probe — returns 200 only when every dependency needed
+    to serve real traffic is wired up. Returns 503 with a JSON breakdown
+    otherwise so ops can see which subsystem is failing."""
+    checks: dict = {}
+    overall_ok = True
+
+    # 1. Database: single SELECT 1 — cheap and catches connection-pool issues.
+    try:
+        db.session.execute(text("SELECT 1"))
+        checks["database"] = {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        overall_ok = False
+        checks["database"] = {"ok": False, "error": str(exc)[:200]}
+
+    # 2. Billing-critical tables exist and have the v2 columns.
+    try:
+        db.session.execute(text(
+            "SELECT verified_at, verified_fingerprint FROM payment_credentials LIMIT 0"
+        ))
+        db.session.execute(text(
+            "SELECT 1 FROM webhook_events LIMIT 0"
+        ))
+        db.session.execute(text(
+            "SELECT 1 FROM aggregator_credentials LIMIT 0"
+        ))
+        db.session.execute(text(
+            "SELECT 1 FROM aggregator_orders LIMIT 0"
+        ))
+        checks["schema"] = {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        overall_ok = False
+        checks["schema"] = {"ok": False, "error": str(exc)[:200],
+                             "hint": "migrations may not have run — restart the app"}
+
+    # 3. Credential encryption: prove we can round-trip a Fernet token so
+    # a missing/rotated BILLING_ENCRYPTION_KEY surfaces before a customer
+    # hits the billing screen.
+    try:
+        probe = encrypt_secret("healthz-probe")
+        assert decrypt_secret(probe) == "healthz-probe"
+        checks["encryption"] = {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        overall_ok = False
+        checks["encryption"] = {"ok": False, "error": str(exc)[:200],
+                                 "hint": "check BILLING_ENCRYPTION_KEY / SECRET_KEY"}
+
+    # 4. Payment + aggregator provider modules loaded cleanly.
+    checks["providers"] = {"ok": True, "payments": list(SUPPORTED_PROVIDERS),
+                            "aggregators": list(SUPPORTED_PLATFORMS)}
+
+    status = 200 if overall_ok else 503
+    return jsonify(ok=overall_ok, checks=checks,
+                    version=APP_VERSION,
+                    uptime_seconds=int(time.time() - APP_START_TIME)), status
+
+
 @app.route("/version")
 @limiter.exempt
 def version_endpoint():
@@ -3892,12 +3980,17 @@ def _secret_fingerprint(secret: str) -> str:
 
 
 def _credential_view(cred: "PaymentProviderCredential") -> dict:
+    # Defensive: a deployment running against an older DB schema may not
+    # yet have verified_at / verified_fingerprint columns. getattr keeps
+    # the page alive; the migrations run at startup will backfill them.
     try:
         secret_plain = decrypt_secret(cred.secret_key_enc) if cred.secret_key_enc else ""
     except Exception:  # noqa: BLE001 — encryption-key rotation case
         secret_plain = ""
     current_fp = _secret_fingerprint(secret_plain)
-    is_verified = bool(cred.verified_at and cred.verified_fingerprint == current_fp and current_fp)
+    verified_at = getattr(cred, "verified_at", None)
+    verified_fp = getattr(cred, "verified_fingerprint", "") or ""
+    is_verified = bool(verified_at and verified_fp == current_fp and current_fp)
     guide = PROVIDER_GUIDES.get(cred.provider, {})
     return {
         "id": cred.id,
@@ -4273,7 +4366,9 @@ def _aggregator_credential_view(cred: "AggregatorPlatformCredential") -> dict:
     except Exception:  # noqa: BLE001
         secret_plain = ""
     current_fp = _secret_fingerprint(secret_plain)
-    is_verified = bool(cred.verified_at and cred.verified_fingerprint == current_fp and current_fp)
+    verified_at = getattr(cred, "verified_at", None)
+    verified_fp = getattr(cred, "verified_fingerprint", "") or ""
+    is_verified = bool(verified_at and verified_fp == current_fp and current_fp)
     return {
         "id": cred.id,
         "platform": cred.platform,
