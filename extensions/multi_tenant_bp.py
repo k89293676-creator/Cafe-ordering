@@ -218,13 +218,23 @@ def is_impersonating() -> bool:
 
 
 def begin_impersonation(superadmin_owner, target_owner) -> None:
+    """Switch the current session to act as ``target_owner`` while remembering
+    the original superadmin so the operator can stop impersonating later.
+
+    NOTE: ``superadmin_owner`` may be Flask-Login's ``current_user`` proxy,
+    which gets re-bound by ``login_user(target_owner)`` inside
+    :func:`_complete_login`.  We therefore snapshot the SA's id and username
+    into local primitives BEFORE re-binding so the impersonation marker we
+    write to the session points to the SA, not the target.
+    """
     from app import _complete_login
-    session[IMPERSONATION_KEY] = superadmin_owner.id
-    session["impersonator_username"] = superadmin_owner.username
+    sa_id = int(superadmin_owner.id)
+    sa_username = str(superadmin_owner.username)
     _complete_login(target_owner, remember_me=False)
-    # _complete_login() clears the session, so re-set the marker afterwards.
-    session[IMPERSONATION_KEY] = superadmin_owner.id
-    session["impersonator_username"] = superadmin_owner.username
+    # _complete_login() clears the session; set the marker afterwards from
+    # the snapshot so it isn't overwritten.
+    session[IMPERSONATION_KEY] = sa_id
+    session["impersonator_username"] = sa_username
 
 
 def end_impersonation() -> int | None:
@@ -443,10 +453,10 @@ def impersonate(owner_id: int):
         abort(404)
     if target.is_superadmin and target.id != sa.id:
         flash("Refusing to impersonate another superadmin.", "danger")
-        return redirect(url_for("admin.owners"))
+        return redirect(url_for("superadmin_dashboard"))
     if not target.is_active or (getattr(target, "approval_status", "active") or "active") != "active":
         flash("Cannot impersonate a non-active owner. Approve or reactivate first.", "danger")
-        return redirect(url_for("admin.owners"))
+        return redirect(url_for("superadmin_dashboard"))
 
     audit_log("IMPERSONATION_START", owner_id=target.id, actor_type="superadmin",
               actor_id=sa.id, actor_label=sa.username,
@@ -469,7 +479,7 @@ def stop_impersonating():
               actor_id=sa.id, actor_label=sa.username, ip=_ip())
     _complete_login(sa, remember_me=False)
     flash("Impersonation ended.", "success")
-    return redirect(url_for("admin.owners"))
+    return redirect(url_for("superadmin_dashboard"))
 
 
 # ---------------------------------------------------------------------------
@@ -556,12 +566,12 @@ def delete_owner(owner_id: int):
         abort(404)
     if owner.is_superadmin:
         flash("Refusing to delete a superadmin.", "danger")
-        return redirect(url_for("admin.owners"))
+        return redirect(url_for("superadmin_dashboard"))
 
     confirm = (request.form.get("confirm_username") or "").strip()
     if confirm != owner.username:
         flash("Confirmation username does not match.", "danger")
-        return redirect(url_for("admin.owners"))
+        return redirect(url_for("superadmin_dashboard"))
 
     sa = _current_sa()
     snapshot = _serialize_owner(owner)
@@ -584,7 +594,7 @@ def delete_owner(owner_id: int):
               actor_id=sa.id, actor_label=sa.username,
               meta={"deleted": snapshot}, ip=_ip())
     flash(f"Deleted @{owner.username} and all associated data.", "success")
-    return redirect(url_for("admin.owners"))
+    return redirect(url_for("superadmin_dashboard"))
 
 
 # ---------------------------------------------------------------------------
