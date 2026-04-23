@@ -17,6 +17,7 @@ def register_extensions(app: "Flask") -> None:
     """Register every extension blueprint and ensure new tables exist."""
     # Local imports keep startup fast and avoid circular imports with app.py.
     from . import models  # noqa: F401  (registers SQLAlchemy models)
+    from . import mt_models  # noqa: F401  (multi-tenant models: Invitation, AuditLog)
     from .service_calls_bp import bp as service_calls_bp
     from .sales_dashboard_bp import bp as sales_dashboard_bp
     from .menu_engineering_bp import bp as menu_engineering_bp
@@ -25,6 +26,7 @@ def register_extensions(app: "Flask") -> None:
     from .superadmin_extras_bp import bp as superadmin_extras_bp
     from .customers_bp import bp as customers_bp
     from .push_bp import bp as push_bp
+    from .multi_tenant_bp import bp as multi_tenant_bp
 
     for bp in (
         service_calls_bp,
@@ -35,6 +37,7 @@ def register_extensions(app: "Flask") -> None:
         superadmin_extras_bp,
         customers_bp,
         push_bp,
+        multi_tenant_bp,
     ):
         if bp.name not in app.blueprints:
             app.register_blueprint(bp)

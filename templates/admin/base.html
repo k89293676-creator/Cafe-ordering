@@ -58,6 +58,15 @@
       <a class="sidebar-link {% if request.endpoint == 'admin.owners' %}active{% endif %}" href="{{ url_for('admin.owners') }}">
         <i class="bi bi-people-fill"></i> Owners
       </a>
+      <a class="sidebar-link {% if request.endpoint == 'multi_tenant.pending_owners' %}active{% endif %}" href="{{ url_for('multi_tenant.pending_owners') }}">
+        <i class="bi bi-person-plus-fill"></i> Pending Approvals
+      </a>
+      <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('multi_tenant.invitations') %}active{% endif %}" href="{{ url_for('multi_tenant.invitations_list') }}">
+        <i class="bi bi-envelope-paper-fill"></i> Invitations
+      </a>
+      <a class="sidebar-link {% if request.endpoint == 'multi_tenant.global_audit' %}active{% endif %}" href="{{ url_for('multi_tenant.global_audit') }}">
+        <i class="bi bi-clock-history"></i> Audit Log
+      </a>
       <a class="sidebar-link {% if request.endpoint == 'admin.analytics' %}active{% endif %}" href="{{ url_for('admin.analytics') }}">
         <i class="bi bi-bar-chart-line-fill"></i> Analytics
       </a>
@@ -77,6 +86,15 @@
   </aside>
 
   <div class="admin-content">
+    {% if is_impersonating %}
+    <div style="background:#fbbf24;color:#7c2d12;padding:.6rem 1.5rem;font-size:.85rem;display:flex;justify-content:space-between;align-items:center;">
+      <span><i class="bi bi-eye-fill me-1"></i> You are signed in as <strong>{{ session.get('owner_username') }}</strong> (impersonated by <strong>{{ impersonator_username }}</strong>).</span>
+      <form method="post" action="{{ url_for('multi_tenant.stop_impersonating') }}" style="margin:0;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <button class="btn btn-sm btn-dark"><i class="bi bi-box-arrow-left"></i> End impersonation</button>
+      </form>
+    </div>
+    {% endif %}
     <div class="admin-topbar">
       <h5>{% block page_title %}Admin{% endblock %}</h5>
       <span class="text-muted" style="font-size:.82rem;"><i class="bi bi-clock me-1"></i>{{ now }}</span>

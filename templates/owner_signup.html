@@ -30,8 +30,28 @@
     {% endif %}
     {% endwith %}
 
+    {% if invitation %}
+      <div class="alert" style="background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;padding:.75rem;border-radius:.5rem;margin-bottom:1rem;">
+        <strong>Invitation accepted.</strong>
+        Your account will be created with the <code>{{ invitation.plan_tier }}</code> plan and activated immediately.
+      </div>
+    {% elif signup_mode == 'approval' %}
+      <div class="alert" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:.75rem;border-radius:.5rem;margin-bottom:1rem;">
+        <strong>Approval required.</strong>
+        New accounts are reviewed by an administrator before sign-in is enabled.
+        You will be notified once your account is approved.
+      </div>
+    {% elif signup_mode == 'invite_only' %}
+      <div class="alert alert-error">
+        Sign-ups are currently invite-only. Please use the invitation link sent to you.
+      </div>
+    {% endif %}
+
     <form method="post" autocomplete="on">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      {% if invite_token %}
+      <input type="hidden" name="invite" value="{{ invite_token }}" />
+      {% endif %}
       <div class="form-group">
         <label for="cafe_name">Cafe Name <span style="font-weight:300;color:var(--text-muted);">(optional)</span></label>
         <input id="cafe_name" name="cafe_name" placeholder="e.g. Cafe 11:11" autocomplete="organization" maxlength="200" />

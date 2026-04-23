@@ -291,6 +291,19 @@ class Owner(db.Model):
     totp_secret = db.Column(db.Text, nullable=True)
     totp_enabled = db.Column(db.Boolean, default=False, server_default="false")
     phone = db.Column(db.Text, default="")
+    # Multi-tenant onboarding & plan controls (managed via the multi_tenant
+    # blueprint).  ``approval_status`` is the single source of truth for
+    # whether an account may sign in: ``pending`` accounts are blocked, even
+    # if ``is_active`` is true.  Plan limits override the per-tier defaults
+    # in ``DEFAULT_PLAN_LIMITS`` when set; ``None`` means "use tier default";
+    # ``0`` means "unlimited".
+    approval_status = db.Column(db.Text, default="active", server_default="active", nullable=False)
+    plan_tier = db.Column(db.Text, default="free", server_default="free", nullable=False)
+    max_tables = db.Column(db.Integer, nullable=True)
+    max_menu_items = db.Column(db.Integer, nullable=True)
+    monthly_order_limit = db.Column(db.Integer, nullable=True)
+    trial_ends_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    notes = db.Column(db.Text, default="", server_default="")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
     @property
@@ -429,6 +442,14 @@ def _init_db() -> None:
         add_column_if_missing("owners", "cafe_id INTEGER", "cafe_id")
         add_column_if_missing("feedback", "order_id INTEGER", "order_id")
         add_column_if_missing("feedback", "cafe_id INTEGER", "cafe_id")
+        # Multi-tenant control columns -------------------------------------
+        add_column_if_missing("owners", "approval_status TEXT DEFAULT 'active'", "approval_status")
+        add_column_if_missing("owners", "plan_tier TEXT DEFAULT 'free'", "plan_tier")
+        add_column_if_missing("owners", "max_tables INTEGER", "max_tables")
+        add_column_if_missing("owners", "max_menu_items INTEGER", "max_menu_items")
+        add_column_if_missing("owners", "monthly_order_limit INTEGER", "monthly_order_limit")
+        add_column_if_missing("owners", "trial_ends_at TIMESTAMP", "trial_ends_at")
+        add_column_if_missing("owners", "notes TEXT DEFAULT ''", "notes")
         _seed_sqlalchemy_from_json()
     app.logger.info("DB schema ready: %s", app.config["SQLALCHEMY_DATABASE_URI"])
 
@@ -591,6 +612,13 @@ def _owner_dict(owner: Owner) -> dict:
         "isSuperadmin": bool(owner.is_superadmin),
         "totpEnabled": bool(owner.totp_enabled),
         "phone": owner.phone or "",
+        "approvalStatus": getattr(owner, "approval_status", "active") or "active",
+        "planTier": getattr(owner, "plan_tier", "free") or "free",
+        "maxTables": getattr(owner, "max_tables", None),
+        "maxMenuItems": getattr(owner, "max_menu_items", None),
+        "monthlyOrderLimit": getattr(owner, "monthly_order_limit", None),
+        "trialEndsAt": _iso(getattr(owner, "trial_ends_at", None)),
+        "notes": getattr(owner, "notes", "") or "",
         "createdAt": _iso(owner.created_at),
     }
 
@@ -855,6 +883,28 @@ def load_orders(owner_id: int | None = None, limit: int = 100, offset: int = 0) 
 
 
 def place_order_in_db(order: dict) -> dict:
+    # Enforce monthly order plan limit (silently skipped for orders that
+    # have no owner_id, e.g. legacy demo data).
+    owner_id = order.get("ownerId")
+    if owner_id:
+        from extensions.multi_tenant_bp import (
+            enforce_quota as _enforce_quota,
+            count_owner_orders_this_month,
+            QuotaExceeded,
+        )
+        owner_obj = db.session.get(Owner, owner_id)
+        if owner_obj is not None:
+            current = count_owner_orders_this_month(owner_id)
+            try:
+                _enforce_quota(owner_obj, "monthly_order_limit", current)
+            except QuotaExceeded as exc:
+                from werkzeug.exceptions import HTTPException
+
+                class _QuotaExceeded(HTTPException):
+                    code = 402
+                    description = exc.message
+                raise _QuotaExceeded()
+
     pickup_code = _generate_pickup_code()
     record = Order(
         owner_id=order.get("ownerId"),
@@ -1856,6 +1906,14 @@ def owner_login() -> str | Response:
                   "an access key, redeem it to reactivate your account.")
             return _no_store(app.make_response(render_template("owner_login.html")))
 
+        if owner:
+            from extensions.multi_tenant_bp import can_owner_login as _can_login
+            ok, reason = _can_login(owner)
+            if not ok:
+                flash(reason)
+                log_security("LOGIN_BLOCKED", f"user={owner.username!r} reason={reason!r}")
+                return _no_store(app.make_response(render_template("owner_login.html")))
+
         if owner and _password_matches(owner.password_hash, password):
             _clear_failed_logins(ip)
 
@@ -1887,6 +1945,19 @@ def _complete_login(owner: Owner, remember_me: bool = False) -> None:
     session["owner_id"] = owner.id
     session.permanent = True
     login_user(owner, remember=False)
+
+
+@app.context_processor
+def _inject_impersonation_state() -> dict:
+    """Expose an ``is_impersonating`` flag + the impersonator's username to
+    every template so layouts can render a persistent banner."""
+    try:
+        return {
+            "is_impersonating": bool(session.get("impersonator_owner_id")),
+            "impersonator_username": session.get("impersonator_username", ""),
+        }
+    except Exception:  # pragma: no cover
+        return {"is_impersonating": False, "impersonator_username": ""}
 
 
 @app.route("/owner/login/totp", methods=["GET", "POST"])
@@ -1970,6 +2041,27 @@ def owner_signup() -> str | Response:
     if logged_in_owner():
         return redirect(url_for("owner_dashboard"))
 
+    # Multi-tenant onboarding gate.  Three modes are supported:
+    #   open         -- legacy behaviour: anyone can sign up and log in
+    #   approval     -- account is created in 'pending' state and a superadmin
+    #                   must approve before the owner may sign in
+    #   invite_only  -- a valid invitation token is required to even submit
+    from extensions.multi_tenant_bp import (
+        signup_mode as _signup_mode,
+        find_valid_invitation,
+        consume_invitation,
+        audit_log as _audit_log,
+    )
+    mode = _signup_mode()
+    invite_token = (request.values.get("invite") or "").strip()
+    invitation = find_valid_invitation(invite_token) if invite_token else None
+
+    if mode == "invite_only" and not invitation:
+        flash("Sign-ups are invite-only. Please use the invitation link sent to you.")
+        return render_template("owner_signup.html",
+                               signup_mode=mode, invite_token="",
+                               invitation=None)
+
     if request.method == "POST":
         username = str(request.form.get("username", "")).strip()[:64]
         email = str(request.form.get("email", "")).strip()[:254] or None
@@ -1978,36 +2070,82 @@ def owner_signup() -> str | Response:
 
         if not username or not password:
             flash("Username and password are required.")
-            return render_template("owner_signup.html")
+            return render_template("owner_signup.html",
+                                   signup_mode=mode, invite_token=invite_token,
+                                   invitation=invitation)
 
         if not re.fullmatch(r"[a-zA-Z0-9_\-\.]{3,64}", username):
             flash("Username may only contain letters, digits, underscores, hyphens, and dots (3-64 chars).")
-            return render_template("owner_signup.html")
+            return render_template("owner_signup.html",
+                                   signup_mode=mode, invite_token=invite_token,
+                                   invitation=invitation)
 
         if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
             flash("Please enter a valid email address.")
-            return render_template("owner_signup.html")
+            return render_template("owner_signup.html",
+                                   signup_mode=mode, invite_token=invite_token,
+                                   invitation=invitation)
 
         if not _is_strong_password(password):
             flash("Password must be at least 8 characters with a letter and digit.")
-            return render_template("owner_signup.html")
+            return render_template("owner_signup.html",
+                                   signup_mode=mode, invite_token=invite_token,
+                                   invitation=invitation)
 
         if Owner.query.filter_by(username=username).first():
             flash("That username is already taken.")
-            return render_template("owner_signup.html")
+            return render_template("owner_signup.html",
+                                   signup_mode=mode, invite_token=invite_token,
+                                   invitation=invitation)
 
         if email and Owner.query.filter(Owner.email == email).first():
             flash("An account with that email already exists.")
-            return render_template("owner_signup.html")
+            return render_template("owner_signup.html",
+                                   signup_mode=mode, invite_token=invite_token,
+                                   invitation=invitation)
 
         password_hash = _make_password_hash(password)
         new_owner = create_owner_in_db(username, email, password_hash, cafe_name)
         owner_model = db.session.get(Owner, new_owner["id"])
+
+        # Apply onboarding policy.  Invitations always grant immediate access.
+        if invitation is not None:
+            owner_model.approval_status = "active"
+            owner_model.plan_tier = invitation.plan_tier or "free"
+            owner_model.cafe_id = invitation.cafe_id or owner_model.cafe_id
+            db.session.commit()
+            consume_invitation(invitation, owner_model)
+            _complete_login(owner_model)
+            log_security("SIGNUP_SUCCESS_INVITE", f"user={username!r}")
+            _audit_log("OWNER_SIGNUP", owner_id=owner_model.id, actor_type="owner",
+                       actor_id=owner_model.id, actor_label=username,
+                       meta={"via": "invitation", "invitation_id": invitation.id})
+            return redirect(url_for("owner_dashboard"))
+
+        if mode == "approval":
+            owner_model.approval_status = "pending"
+            owner_model.is_active = False
+            db.session.commit()
+            log_security("SIGNUP_PENDING", f"user={username!r}")
+            _audit_log("OWNER_SIGNUP", owner_id=owner_model.id, actor_type="owner",
+                       actor_id=owner_model.id, actor_label=username,
+                       meta={"via": "self_signup_pending"})
+            flash("Your account has been created and is awaiting administrator "
+                  "approval. You will be able to sign in once an administrator "
+                  "approves your account.")
+            return redirect(url_for("owner_login"))
+
+        # Open mode -- legacy behaviour.
         _complete_login(owner_model)
         log_security("SIGNUP_SUCCESS", f"user={username!r}")
+        _audit_log("OWNER_SIGNUP", owner_id=owner_model.id, actor_type="owner",
+                   actor_id=owner_model.id, actor_label=username,
+                   meta={"via": "open_signup"})
         return redirect(url_for("owner_dashboard"))
 
-    return render_template("owner_signup.html")
+    return render_template("owner_signup.html",
+                           signup_mode=mode, invite_token=invite_token,
+                           invitation=invitation)
 
 
 @app.route("/owner/logout")
@@ -2816,6 +2954,21 @@ def save_menu_item() -> Response:
     if category.get("ownerId") != owner_id:
         abort(403)
 
+    # Enforce per-tenant menu item quota when creating a brand new item.
+    if not item_id:
+        from extensions.multi_tenant_bp import (
+            enforce_quota as _enforce_quota,
+            count_owner_menu_items,
+            QuotaExceeded,
+        )
+        owner_obj = db.session.get(Owner, owner_id) if owner_id else None
+        if owner_obj is not None:
+            try:
+                _enforce_quota(owner_obj, "max_menu_items", count_owner_menu_items(owner_id))
+            except QuotaExceeded as exc:
+                flash(exc.message)
+                return redirect(url_for("owner_dashboard") + "#menu")
+
     if item_id:
         item = next((i for i in category["items"] if i["id"] == item_id), None)
         if item:
@@ -3071,6 +3224,19 @@ def create_table() -> Response:
     if not name:
         flash("Table name cannot be empty.")
         return redirect(url_for("owner_dashboard") + "#tables")
+    # Enforce per-tenant table quota.
+    from extensions.multi_tenant_bp import (
+        enforce_quota as _enforce_quota,
+        count_owner_tables,
+        QuotaExceeded,
+    )
+    owner_obj = db.session.get(Owner, owner_id) if owner_id else None
+    if owner_obj is not None:
+        try:
+            _enforce_quota(owner_obj, "max_tables", count_owner_tables(owner_id))
+        except QuotaExceeded as exc:
+            flash(exc.message)
+            return redirect(url_for("owner_dashboard") + "#tables")
     with _tables_lock:
         tables = load_tables()
         table_num = next_table_number(tables)

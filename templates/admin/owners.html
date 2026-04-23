@@ -18,6 +18,7 @@
             <th>Cafe / Owner</th>
             <th>Email</th>
             <th>Status</th>
+            <th>Plan</th>
             <th>Joined</th>
             <th class="text-end pe-3">Actions</th>
           </tr>
@@ -32,15 +33,57 @@
             </td>
             <td class="text-muted" style="font-size:.88rem;">{{ o.email or '—' }}</td>
             <td>
-              {% if o.get('isActive', True) %}
-              <span class="badge badge-active rounded-pill px-2 py-1">Active</span>
+              {% set status = o.get('approvalStatus', 'active') %}
+              {% if status == 'pending' %}
+                <span class="badge bg-warning text-dark rounded-pill px-2 py-1">Pending</span>
+              {% elif status == 'rejected' %}
+                <span class="badge bg-dark rounded-pill px-2 py-1">Rejected</span>
+              {% elif o.get('isActive', True) %}
+                <span class="badge badge-active rounded-pill px-2 py-1">Active</span>
               {% else %}
-              <span class="badge badge-inactive rounded-pill px-2 py-1">Inactive</span>
+                <span class="badge badge-inactive rounded-pill px-2 py-1">Inactive</span>
               {% endif %}
+            </td>
+            <td>
+              <span class="badge bg-secondary rounded-pill px-2 py-1">{{ o.get('planTier', 'free') }}</span>
             </td>
             <td class="text-muted" style="font-size:.82rem;">{{ (o.createdAt or '')[:10] or '—' }}</td>
             <td class="text-end pe-3">
-              <div class="d-flex gap-2 justify-content-end">
+              <div class="d-flex gap-2 justify-content-end flex-wrap">
+                <!-- Plan -->
+                <a href="{{ url_for('multi_tenant.edit_plan', owner_id=o.id) }}"
+                   class="btn btn-sm btn-outline-primary" title="Edit plan & quotas">
+                  <i class="bi bi-sliders"></i> Plan
+                </a>
+                <!-- Audit log -->
+                <a href="{{ url_for('multi_tenant.owner_audit', owner_id=o.id) }}"
+                   class="btn btn-sm btn-outline-secondary" title="View audit log">
+                  <i class="bi bi-clock-history"></i>
+                </a>
+                <!-- Export -->
+                <a href="{{ url_for('multi_tenant.export_owner', owner_id=o.id) }}"
+                   class="btn btn-sm btn-outline-secondary" title="Export tenant data">
+                  <i class="bi bi-download"></i>
+                </a>
+                {% if not o.get('isSuperadmin') %}
+                <!-- Impersonate -->
+                <form method="POST" action="{{ url_for('multi_tenant.impersonate', owner_id=o.id) }}"
+                      onsubmit="return confirm('View the app as @{{ o.username }}? All actions will be logged.')">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <button class="btn btn-sm btn-outline-info" title="Impersonate">
+                    <i class="bi bi-person-bounding-box"></i>
+                  </button>
+                </form>
+                <!-- Delete -->
+                <form method="POST" action="{{ url_for('multi_tenant.delete_owner', owner_id=o.id) }}"
+                      onsubmit="var name=prompt('To delete @{{ o.username }} and ALL associated data, type the username to confirm:'); if(!name)return false; this.confirm_username.value=name; return true;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <input type="hidden" name="confirm_username" value=""/>
+                  <button class="btn btn-sm btn-outline-danger" title="Delete owner">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                </form>
+                {% endif %}
                 <!-- Reset Password -->
                 <form method="POST" action="{{ url_for('admin.reset_password', owner_id=o.id) }}"
                       onsubmit="return confirm('Reset password for @{{ o.username }}? The new temporary password will be shown once.')">
