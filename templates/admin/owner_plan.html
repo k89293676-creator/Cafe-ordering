@@ -1,0 +1,93 @@
+{% extends "admin/base.html" %}
+{% block title %}Plan — @{{ owner.username }}{% endblock %}
+{% block topbar_title %}Plan & quotas — @{{ owner.username }}{% endblock %}
+{% block content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, m in messages %}<div class="alert alert-{{ cat }}">{{ m }}</div>{% endfor %}
+{% endwith %}
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="stat-card">
+      <div class="stat-label">Tables</div>
+      <div class="stat-value">{{ usage.tables }} / {{ limits.max_tables if limits.max_tables else '∞' }}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="stat-card">
+      <div class="stat-label">Menu items</div>
+      <div class="stat-value">{{ usage.menu_items }} / {{ limits.max_menu_items if limits.max_menu_items else '∞' }}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="stat-card">
+      <div class="stat-label">Orders this month</div>
+      <div class="stat-value">{{ usage.orders_this_month }} / {{ limits.monthly_order_limit if limits.monthly_order_limit else '∞' }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="card"><div class="card-body">
+<form method="post" class="row g-3">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <div class="col-md-3">
+    <label class="form-label">Plan tier</label>
+    <select name="plan_tier" class="form-select">
+      {% for t in plan_tiers %}
+        <option value="{{ t }}" {% if owner.plan_tier == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+    <small class="text-muted d-block mt-1">Defaults per tier:</small>
+    <small class="text-muted d-block">
+      {% for t, d in defaults.items() %}
+        <code>{{ t }}</code>: tables={{ d.max_tables or '∞' }}, items={{ d.max_menu_items or '∞' }}, orders/mo={{ d.monthly_order_limit or '∞' }}<br>
+      {% endfor %}
+    </small>
+  </div>
+
+  <div class="col-md-3">
+    <label class="form-label">Override max tables</label>
+    <input class="form-control" type="number" name="max_tables" min="0"
+           value="{{ owner.max_tables if owner.max_tables is not none else '' }}"
+           placeholder="(use plan default)">
+    <small class="text-muted">Blank = plan default · 0 = unlimited</small>
+
+    <label class="form-label mt-3">Override max menu items</label>
+    <input class="form-control" type="number" name="max_menu_items" min="0"
+           value="{{ owner.max_menu_items if owner.max_menu_items is not none else '' }}"
+           placeholder="(use plan default)">
+
+    <label class="form-label mt-3">Override monthly order limit</label>
+    <input class="form-control" type="number" name="monthly_order_limit" min="0"
+           value="{{ owner.monthly_order_limit if owner.monthly_order_limit is not none else '' }}"
+           placeholder="(use plan default)">
+  </div>
+
+  <div class="col-md-3">
+    <label class="form-label">Trial ends at</label>
+    <input class="form-control" type="date" name="trial_ends_at"
+           value="{{ owner.trial_ends_at.strftime('%Y-%m-%d') if owner.trial_ends_at else '' }}">
+    <small class="text-muted">After this date, owner cannot sign in.</small>
+  </div>
+
+  <div class="col-md-3">
+    <label class="form-label">Internal notes</label>
+    <textarea name="notes" class="form-control" rows="6" maxlength="2000">{{ owner.notes or '' }}</textarea>
+  </div>
+
+  <div class="col-12 d-flex justify-content-between">
+    <a href="{{ url_for('admin.owners') }}" class="btn btn-light">Back to owners</a>
+    <button class="btn btn-primary"><i class="bi bi-check-lg"></i> Save plan</button>
+  </div>
+</form>
+</div></div>
+
+<div class="mt-3">
+  <a href="{{ url_for('multi_tenant.owner_audit', owner_id=owner.id) }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-clock-history"></i> View audit log for this owner
+  </a>
+  <a href="{{ url_for('multi_tenant.export_owner', owner_id=owner.id) }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-download"></i> Export tenant data
+  </a>
+</div>
+{% endblock %}

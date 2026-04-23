@@ -1,0 +1,39 @@
+{% extends "admin/base.html" %}
+{% block title %}Audit log{% endblock %}
+{% block topbar_title %}
+  {% if owner %}Audit log — @{{ owner.username }}{% else %}Global audit log{% endif %}
+{% endblock %}
+{% block content %}
+{% if owner %}
+  <div class="mb-3">
+    <a href="{{ url_for('admin.owners') }}" class="btn btn-light btn-sm">← Back to owners</a>
+    <a href="{{ url_for('multi_tenant.global_audit') }}" class="btn btn-outline-secondary btn-sm">View global log</a>
+  </div>
+{% endif %}
+
+<div class="card"><div class="card-body p-0">
+<table class="table mb-0 small">
+  <thead><tr>
+    <th>When</th><th>Actor</th><th>Action</th><th>Owner</th><th>Target</th><th>IP</th><th>Meta</th>
+  </tr></thead>
+  <tbody>
+  {% for e in entries %}
+    <tr>
+      <td><small>{{ e.created_at.strftime('%Y-%m-%d %H:%M:%S') if e.created_at }}</small></td>
+      <td>
+        <span class="badge bg-secondary">{{ e.actor_type }}</span>
+        {{ e.actor_label or '' }}
+      </td>
+      <td><code>{{ e.action }}</code></td>
+      <td>{{ e.owner_id or '—' }}</td>
+      <td><small>{{ e.target or '—' }}</small></td>
+      <td><small class="text-muted">{{ e.ip or '' }}</small></td>
+      <td><small><code>{{ e.meta|tojson if e.meta else '' }}</code></small></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="text-center text-muted py-4">No audit entries.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div></div>
+{% endblock %}

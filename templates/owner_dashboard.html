@@ -14,6 +14,15 @@
   <link rel="stylesheet" href="/static/css/enhancements.css" />
 </head>
 <body>
+{% if is_impersonating %}
+<div style="background:#fbbf24;color:#7c2d12;padding:.55rem 1rem;font-size:.85rem;display:flex;justify-content:space-between;align-items:center;font-family:Inter,system-ui,sans-serif;">
+  <span>👁 You are signed in as <strong>{{ session.get('owner_username') }}</strong> via super-admin impersonation by <strong>{{ impersonator_username }}</strong>. All actions are audited.</span>
+  <form method="post" action="{{ url_for('multi_tenant.stop_impersonating') }}" style="margin:0;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+    <button style="background:#1f2937;color:#fff;border:0;padding:.3rem .7rem;border-radius:.35rem;cursor:pointer;">End impersonation</button>
+  </form>
+</div>
+{% endif %}
 <div class="dashboard-wrapper">
 
   <!-- Sidebar -->
