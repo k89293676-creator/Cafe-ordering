@@ -2357,12 +2357,61 @@ def err_rate_limit(e):
     return render_template("errors/429.html"), 429
 
 
+_LAST_ERRORS: list[dict] = []  # tiny in-process ring buffer for support
+_LAST_ERRORS_MAX = 20
+
+
+def _capture_last_error(where: str, exc: BaseException) -> None:
+    """Stash the most recent unexpected error so a superadmin can read it
+    via /superadmin/last-error without having to dig through deploy logs.
+    Process-local — fine for single-worker dynos, best-effort for many."""
+    import traceback as _tb
+    try:
+        _LAST_ERRORS.insert(0, {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "where": where,
+            "type": type(exc).__name__,
+            "message": str(exc)[:500],
+            "traceback": "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))[:8000],
+            "request_id": (request.environ.get("request_id")
+                           if request else None),
+            "path": (request.path if request else ""),
+            "ip": _client_ip() if request else "",
+        })
+        del _LAST_ERRORS[_LAST_ERRORS_MAX:]
+    except Exception:  # noqa: BLE001 — never let error capture itself crash
+        pass
+
+
 @app.errorhandler(500)
 def err_server(e):
     app.logger.exception("Internal server error: %s", e)
+    try:
+        original = getattr(e, "original_exception", None) or e
+        _capture_last_error(request.path if request else "?", original)
+    except Exception:  # noqa: BLE001
+        pass
     if _wants_json():
         return jsonify(description="An internal error occurred."), 500
     return render_template("errors/500.html"), 500
+
+
+@app.route("/superadmin/last-error")
+def superadmin_last_error():
+    """Read-only diagnostic endpoint for the last 20 unexpected errors.
+
+    Restricted to superadmin sessions so we can debug "why did this 500?"
+    without leaking traces in production. The buffer is process-local and
+    not persisted — perfectly disposable."""
+    try:
+        owner = logged_in_owner_obj()
+    except Exception:
+        owner = None
+    if not (owner and getattr(owner, "is_superadmin", False)
+            ) and not session.get("admin_authenticated"):
+        return ("forbidden", 403)
+    return jsonify({"errors": list(_LAST_ERRORS),
+                    "captured": len(_LAST_ERRORS)}), 200
 
 
 # ---------------------------------------------------------------------------
@@ -2971,52 +3020,70 @@ def owner_login() -> str | Response:
     ip = _client_ip()
 
     if request.method == "POST":
-        if _is_ip_locked_out(ip):
-            flash("Too many failed attempts. Please try again in 15 minutes.")
-            return _no_store(app.make_response(render_template("owner_login.html")))
-
-        identifier = str(request.form.get("identifier", "")).strip()[:128]
-        password = str(request.form.get("password", ""))[:256]
-        remember_me = request.form.get("remember_me") == "on"
-
-        owner = Owner.query.filter(
-            (Owner.username == identifier) | (Owner.email == identifier)
-        ).first()
-
-        if owner and not owner.is_active:
-            flash("This account is suspended. If your administrator gave you "
-                  "an access key, redeem it to reactivate your account.")
-            return _no_store(app.make_response(render_template("owner_login.html")))
-
-        if owner:
-            from extensions.multi_tenant_bp import can_owner_login as _can_login
-            ok, reason = _can_login(owner)
-            if not ok:
-                flash(reason)
-                log_security("LOGIN_BLOCKED", f"user={owner.username!r} reason={reason!r}")
+        # The whole POST handler is wrapped so an unexpected error (legacy
+        # DB column drift, a crashing extension, …) NEVER 500s the login
+        # page. Owners see a friendly retry message + the full traceback
+        # is captured for support by ``_capture_last_error`` so a
+        # superadmin can read it at /superadmin/last-error.
+        try:
+            if _is_ip_locked_out(ip):
+                flash("Too many failed attempts. Please try again in 15 minutes.")
                 return _no_store(app.make_response(render_template("owner_login.html")))
 
-        if owner and _password_matches(owner.password_hash, password):
-            _clear_failed_logins(ip)
+            identifier = str(request.form.get("identifier", "")).strip()[:128]
+            password = str(request.form.get("password", ""))[:256]
+            remember_me = request.form.get("remember_me") == "on"
 
-            if owner.totp_enabled:
-                session["pending_totp_owner_id"] = owner.id
-                session["pending_totp_remember"] = remember_me
-                return redirect(url_for("owner_login_totp_verify"))
+            owner = Owner.query.filter(
+                (Owner.username == identifier) | (Owner.email == identifier)
+            ).first()
 
-            _complete_login(owner, remember_me)
-            log_security("LOGIN_SUCCESS", f"user={owner.username!r}")
-            resp = redirect(url_for("owner_dashboard"))
-            if remember_me:
-                raw_token = create_remember_token(owner.id)
-                resp.set_cookie(_REMEMBER_COOKIE, raw_token,
-                                max_age=int(timedelta(days=_REMEMBER_DAYS).total_seconds()),
-                                httponly=True, secure=IS_PRODUCTION, samesite="Lax", path="/")
-            return resp
+            if owner and not owner.is_active:
+                flash("This account is suspended. If your administrator gave you "
+                      "an access key, redeem it to reactivate your account.")
+                return _no_store(app.make_response(render_template("owner_login.html")))
 
-        _record_failed_login(ip)
-        log_security("LOGIN_FAILURE", f"identifier={identifier!r}")
-        flash("Sign in failed. Check your credentials.")
+            if owner:
+                try:
+                    from extensions.multi_tenant_bp import can_owner_login as _can_login
+                    ok, reason = _can_login(owner)
+                except Exception as _exc:  # noqa: BLE001 — never block login on gate crash
+                    app.logger.warning("can_owner_login gate crashed: %s", _exc)
+                    ok, reason = True, ""
+                if not ok:
+                    flash(reason)
+                    log_security("LOGIN_BLOCKED",
+                                 f"user={owner.username!r} reason={reason!r}")
+                    return _no_store(app.make_response(render_template("owner_login.html")))
+
+            if owner and _password_matches(owner.password_hash, password):
+                _clear_failed_logins(ip)
+
+                if owner.totp_enabled:
+                    session["pending_totp_owner_id"] = owner.id
+                    session["pending_totp_remember"] = remember_me
+                    return redirect(url_for("owner_login_totp_verify"))
+
+                _complete_login(owner, remember_me)
+                log_security("LOGIN_SUCCESS", f"user={owner.username!r}")
+                resp = redirect(url_for("owner_dashboard"))
+                if remember_me:
+                    raw_token = create_remember_token(owner.id)
+                    resp.set_cookie(_REMEMBER_COOKIE, raw_token,
+                                    max_age=int(timedelta(days=_REMEMBER_DAYS).total_seconds()),
+                                    httponly=True, secure=IS_PRODUCTION,
+                                    samesite="Lax", path="/")
+                return resp
+
+            _record_failed_login(ip)
+            log_security("LOGIN_FAILURE", f"identifier={identifier!r}")
+            flash("Sign in failed. Check your credentials.")
+        except Exception as exc:  # noqa: BLE001 — defensive perimeter
+            app.logger.exception("owner_login crashed: %s", exc)
+            _capture_last_error("owner_login", exc)
+            flash("Something went wrong on our side while signing you in. "
+                  "Please try again — our team has been notified.")
+            return _no_store(app.make_response(render_template("owner_login.html")))
 
     return _no_store(app.make_response(render_template("owner_login.html")))
 
@@ -3394,6 +3461,23 @@ def owner_profile() -> str | Response:
 @app.route("/owner/dashboard")
 @login_required
 def owner_dashboard() -> Response:
+    try:
+        return _render_owner_dashboard()
+    except Exception as exc:  # noqa: BLE001 — defensive perimeter
+        app.logger.exception("owner_dashboard crashed: %s", exc)
+        _capture_last_error("owner_dashboard", exc)
+        # Fall back to a minimal "Dashboard temporarily unavailable" page so
+        # a partially-migrated DB doesn't lock owners out of their account.
+        try:
+            return _no_store(app.make_response(render_template(
+                "errors/500.html"))), 500
+        except Exception:  # noqa: BLE001
+            return ("Dashboard temporarily unavailable. Please try again "
+                    "in a moment — our team has been notified.", 503,
+                    {"Content-Type": "text/plain; charset=utf-8"})
+
+
+def _render_owner_dashboard() -> Response:
     owner_id = logged_in_owner_id()
     all_tables = load_tables()
     tables = [t for t in all_tables if t.get("ownerId") == owner_id]
