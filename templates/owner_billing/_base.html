@@ -82,6 +82,7 @@
     <a href="{{ url_for('owner_billing_open') }}" class="{{ 'active' if request.endpoint == 'owner_billing_open' }}">Open Tabs</a>
     <a href="{{ url_for('owner_billing_eod') }}" class="{{ 'active' if request.endpoint == 'owner_billing_eod' }}">End of Day</a>
     <a href="{{ url_for('owner_billing_logs') }}" class="{{ 'active' if request.endpoint == 'owner_billing_logs' }}">Audit Log</a>
+    <a href="{{ url_for('owner_billing_payment_methods') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('owner_billing_payment_methods') }}">Payment Methods</a>
     <a href="{{ url_for('owner_billing_settings') }}" class="{{ 'active' if request.endpoint == 'owner_billing_settings' }}">Settings</a>
   </nav>
   <div class="wrap">

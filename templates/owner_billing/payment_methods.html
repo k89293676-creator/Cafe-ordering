@@ -1,0 +1,169 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Payment Methods{% endblock %}
+{% block content %}
+<h1>Payment Methods</h1>
+<p class="muted" style="margin-top:-.75rem;max-width:760px;">
+  Connect your own Stripe or Razorpay account to accept online payments.
+  Secrets are encrypted at rest — only the last 4 characters of each key
+  are ever shown back to you.
+</p>
+
+<div class="grid" style="grid-template-columns:1fr; gap:1rem; max-width:900px;">
+  {% for cred in credentials %}
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
+        <div>
+          <h2 style="margin:0 0 .25rem;">
+            {{ cred.display_name }}
+            <span class="muted" style="font-weight:400;font-size:.85rem;">
+              · {{ cred.provider_label }}
+            </span>
+          </h2>
+          <div class="muted" style="font-size:.85rem;">
+            Key <span class="mono">{{ cred.public_key_masked or '—' }}</span>
+            · Mode
+            <strong style="color: {{ '#fbbf24' if cred.mode == 'live' else '#9a9a9a' }};">
+              {{ cred.mode.upper() }}
+            </strong>
+            {% if cred.is_default %}· <strong style="color:var(--ok);">DEFAULT</strong>{% endif %}
+            {% if not cred.is_active %}· <span style="color:var(--danger);">DISABLED</span>{% endif %}
+          </div>
+          {% if cred.last_tested_at %}
+            <div class="muted" style="font-size:.8rem;margin-top:.35rem;">
+              Last tested: {{ cred.last_tested_at.strftime('%Y-%m-%d %H:%M UTC') }} —
+              <span style="color: {{ 'var(--ok)' if cred.last_test_status == 'ok' else 'var(--danger)' }};">
+                {{ cred.last_test_message or cred.last_test_status }}
+              </span>
+            </div>
+          {% endif %}
+        </div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+          <form method="POST"
+                action="{{ url_for('owner_billing_payment_methods_test', cred_id=cred.id) }}"
+                style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button class="btn" type="submit">Test Connection</button>
+          </form>
+          <form method="POST"
+                action="{{ url_for('owner_billing_payment_methods_delete', cred_id=cred.id) }}"
+                style="display:inline;"
+                onsubmit="return confirm('Remove these credentials? Online charges using this provider will stop working.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button class="btn btn-danger" type="submit">Remove</button>
+          </form>
+        </div>
+      </div>
+
+      <details style="margin-top:1rem;">
+        <summary class="muted" style="cursor:pointer;">Edit / rotate keys</summary>
+        <form method="POST"
+              action="{{ url_for('owner_billing_payment_methods_save') }}"
+              style="margin-top:.75rem;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="provider" value="{{ cred.provider }}" />
+          <div class="row">
+            <div class="field"><label>Display Name</label>
+              <input type="text" name="display_name" maxlength="80"
+                     value="{{ cred.display_name }}" /></div>
+            <div class="field"><label>Mode</label>
+              <select name="mode">
+                <option value="test" {% if cred.mode == 'test' %}selected{% endif %}>Test</option>
+                <option value="live" {% if cred.mode == 'live' %}selected{% endif %}>Live</option>
+              </select>
+            </div>
+          </div>
+          <div class="field"><label>Key ID / Publishable Key</label>
+            <input type="text" name="public_key" value="{{ cred.public_key_masked }}"
+                   placeholder="Paste a new key id to replace, or leave masked value to keep" /></div>
+          <div class="field"><label>Secret Key (leave blank to keep current)</label>
+            <input type="password" name="secret_key" autocomplete="new-password"
+                   placeholder="{% if cred.has_secret %}•••••••• stored{% else %}Paste secret key{% endif %}" /></div>
+          <div class="field"><label>Webhook Signing Secret (leave blank to keep current)</label>
+            <input type="password" name="webhook_secret" autocomplete="new-password"
+                   placeholder="{% if cred.has_webhook %}•••••••• stored{% else %}Paste webhook secret{% endif %}" /></div>
+          <div class="field"><label style="display:flex;gap:.5rem;align-items:center;">
+            <input type="checkbox" name="is_active" {% if cred.is_active %}checked{% endif %} />
+            Accept payments through this provider</label></div>
+          <div class="field"><label style="display:flex;gap:.5rem;align-items:center;">
+            <input type="checkbox" name="is_default" {% if cred.is_default %}checked{% endif %} />
+            Use as the default provider for new charges</label></div>
+          <div class="field"><label>Webhook URL (paste this into your provider dashboard)</label>
+            <input type="text" readonly value="{{ cred.webhook_url }}" /></div>
+          <button class="btn btn-primary" type="submit">Save Changes</button>
+        </form>
+      </details>
+    </div>
+  {% else %}
+    <div class="panel empty">
+      No payment providers configured yet. Add one below to start accepting
+      online payments.
+    </div>
+  {% endfor %}
+</div>
+
+{% if available_providers %}
+  <h2 style="margin-top:2rem;">Add a New Provider</h2>
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(360px,1fr));max-width:900px;">
+    {% for slug, label in available_providers %}
+      <div class="panel">
+        <h3 style="margin:0 0 .5rem;">{{ label }}</h3>
+        <p class="muted" style="font-size:.85rem;margin-top:0;">
+          {% if slug == 'stripe' %}
+            Cards, Apple Pay, Google Pay. Get your keys from
+            <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noopener">dashboard.stripe.com/apikeys</a>.
+          {% elif slug == 'razorpay' %}
+            UPI, cards, netbanking, wallets. Get your keys from
+            <a href="https://dashboard.razorpay.com/app/website-app-settings/api-keys" target="_blank" rel="noopener">Razorpay Dashboard → Settings → API Keys</a>.
+          {% endif %}
+        </p>
+        <form method="POST" action="{{ url_for('owner_billing_payment_methods_save') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="provider" value="{{ slug }}" />
+          <div class="field"><label>Display Name (optional)</label>
+            <input type="text" name="display_name" maxlength="80" placeholder="{{ label }} – Live" /></div>
+          <div class="field"><label>
+            {% if slug == 'stripe' %}Publishable Key (pk_…){% else %}Key ID (rzp_…){% endif %}
+          </label>
+            <input type="text" name="public_key" required maxlength="200" /></div>
+          <div class="field"><label>
+            {% if slug == 'stripe' %}Secret Key (sk_…){% else %}Key Secret{% endif %}
+          </label>
+            <input type="password" name="secret_key" required autocomplete="new-password" /></div>
+          <div class="field"><label>Webhook Signing Secret (optional now, required for auto-settle)</label>
+            <input type="password" name="webhook_secret" autocomplete="new-password" /></div>
+          <div class="field"><label>Mode</label>
+            <select name="mode">
+              <option value="test" selected>Test</option>
+              <option value="live">Live</option>
+            </select></div>
+          <div class="field"><label style="display:flex;gap:.5rem;align-items:center;">
+            <input type="checkbox" name="is_active" checked /> Accept payments
+          </label></div>
+          <div class="field"><label style="display:flex;gap:.5rem;align-items:center;">
+            <input type="checkbox" name="is_default" /> Make default
+          </label></div>
+          <button class="btn btn-primary" type="submit">Connect {{ label }}</button>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<div class="panel" style="margin-top:2rem;max-width:900px;">
+  <h2 style="margin-top:0;">Webhook Setup</h2>
+  <p class="muted" style="margin-top:0;">
+    To auto-settle bills the moment a customer pays, register the URL shown
+    above in your provider's dashboard:
+  </p>
+  <ul class="muted" style="margin-top:.25rem;">
+    <li><strong>Stripe:</strong> Developers → Webhooks → Add endpoint. Subscribe to
+      <span class="mono">payment_intent.succeeded</span>,
+      <span class="mono">payment_intent.payment_failed</span>,
+      <span class="mono">charge.refunded</span>. Paste the signing secret back into the form above.</li>
+    <li><strong>Razorpay:</strong> Settings → Webhooks → Add. Subscribe to
+      <span class="mono">payment.captured</span>,
+      <span class="mono">payment.failed</span>,
+      <span class="mono">refund.processed</span>. Set the same secret you paste above.</li>
+  </ul>
+</div>
+{% endblock %}

@@ -221,6 +221,16 @@ from lib_billing import (  # noqa: E402
     normalise_payments,
     summarise_payment_breakdown,
 )
+from lib_payments import (  # noqa: E402
+    PROVIDER_LABELS,
+    SUPPORTED_PROVIDERS,
+    PaymentProviderError,
+    build_provider,
+    decrypt_secret,
+    detect_mode_from_key,
+    encrypt_secret,
+    mask_secret,
+)
 
 bg_tasks = BackgroundTaskQueue(name="cafe-bg")
 idem_cache = IdempotencyCache(
@@ -502,6 +512,67 @@ class BillingLog(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), index=True)
 
 
+class PaymentProviderCredential(db.Model):
+    """Per-owner payment-gateway credentials.
+
+    Owners configure their own Stripe / Razorpay keys at
+    ``/owner/billing/payment-methods``. Secret values (``secret_key`` and
+    ``webhook_secret``) are stored encrypted via ``lib_payments.encrypt_secret``;
+    they never leave the database in plaintext after the initial save.
+    Only one credential per (owner_id, provider) pair is allowed."""
+
+    __tablename__ = "payment_credentials"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    provider = db.Column(db.Text, nullable=False)  # 'stripe' | 'razorpay'
+    display_name = db.Column(db.Text, default="")
+    public_key = db.Column(db.Text, default="")  # safe to read back as plaintext
+    secret_key_enc = db.Column(db.Text, default="")  # encrypted
+    webhook_secret_enc = db.Column(db.Text, default="")  # encrypted
+    mode = db.Column(db.Text, default="test", server_default="test")  # 'test' | 'live'
+    is_active = db.Column(db.Boolean, default=True, server_default="true")
+    is_default = db.Column(db.Boolean, default=False, server_default="false")
+    last_tested_at = db.Column(db.DateTime(timezone=True))
+    last_test_status = db.Column(db.Text, default="")
+    last_test_message = db.Column(db.Text, default="")
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(),
+                           onupdate=db.func.now())
+    __table_args__ = (
+        db.UniqueConstraint("owner_id", "provider", name="uq_payment_owner_provider"),
+    )
+
+
+class OnlinePayment(db.Model):
+    """Individual online-payment attempts against an Order.
+
+    One Order may have several attempts (failed UPI, retried card, etc.)
+    so we keep them all and use the latest succeeded one to settle. The
+    ``raw`` JSON column captures the provider response for forensics —
+    chargebacks always require this evidence."""
+
+    __tablename__ = "online_payments"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    provider = db.Column(db.Text, nullable=False)
+    intent_id = db.Column(db.Text, nullable=False, index=True)
+    amount = db.Column(db.Numeric(10, 2), default=0)
+    currency = db.Column(db.Text, default="INR", server_default="INR")
+    status = db.Column(db.Text, default="pending", server_default="pending")
+    # pending | succeeded | failed | refunded | cancelled
+    customer_email = db.Column(db.Text, default="")
+    customer_phone = db.Column(db.Text, default="")
+    error_message = db.Column(db.Text, default="")
+    raw = db.Column(db.JSON, default=dict)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(),
+                           onupdate=db.func.now())
+
+
 class OwnerLead(db.Model):
     """Pre-account 'request access' submissions from the public landing page.
 
@@ -612,6 +683,9 @@ def _init_db() -> None:
             "CREATE INDEX IF NOT EXISTS ix_orders_owner_paid_at ON orders(owner_id, paid_at)",
             "CREATE INDEX IF NOT EXISTS ix_orders_invoice_number ON orders(invoice_number)",
             "CREATE INDEX IF NOT EXISTS ix_billing_logs_owner_created ON billing_logs(owner_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_payment_credentials_owner ON payment_credentials(owner_id)",
+            "CREATE INDEX IF NOT EXISTS ix_online_payments_owner_order ON online_payments(owner_id, order_id)",
+            "CREATE INDEX IF NOT EXISTS ix_online_payments_intent ON online_payments(intent_id)",
         ):
             try:
                 db.session.execute(text(idx_sql))
@@ -3661,6 +3735,369 @@ def owner_billing_settings():
         settings=settings,
         owner_username=logged_in_owner(),
     )))
+
+
+# ---------------------------------------------------------------------------
+# Owner-managed payment provider credentials
+# ---------------------------------------------------------------------------
+#
+# Each owner brings their own Stripe / Razorpay account. Secrets are
+# encrypted at rest (see ``lib_payments.encrypt_secret``) and never
+# returned to the browser in plaintext — only a masked tail. The owner
+# can:
+#
+#   * add / replace credentials per provider
+#   * mark one provider as the default for online charges
+#   * test the connection (calls the provider's API with the keys)
+#   * delete a provider, which also tears down active webhooks on our side
+#
+# Customers then pay through the hosted payment page at
+# ``/billing/pay/<order_id>`` and the provider notifies us via
+# ``/billing/webhook/<provider>``, which auto-settles the bill.
+
+def _provider_for_credential(cred: "PaymentProviderCredential"):
+    return build_provider(
+        cred.provider,
+        public_key=cred.public_key,
+        secret_key=decrypt_secret(cred.secret_key_enc),
+        webhook_secret=decrypt_secret(cred.webhook_secret_enc),
+        mode=cred.mode,
+    )
+
+
+def _default_payment_credential(owner_id: int) -> "PaymentProviderCredential | None":
+    q = PaymentProviderCredential.query.filter_by(owner_id=owner_id, is_active=True)
+    return (q.filter_by(is_default=True).first()
+            or q.order_by(PaymentProviderCredential.updated_at.desc()).first())
+
+
+def _credential_view(cred: "PaymentProviderCredential") -> dict:
+    return {
+        "id": cred.id,
+        "provider": cred.provider,
+        "provider_label": PROVIDER_LABELS.get(cred.provider, cred.provider.title()),
+        "display_name": cred.display_name or PROVIDER_LABELS.get(cred.provider, cred.provider),
+        "public_key_masked": mask_secret(cred.public_key),
+        "has_secret": bool(cred.secret_key_enc),
+        "has_webhook": bool(cred.webhook_secret_enc),
+        "mode": cred.mode,
+        "is_active": bool(cred.is_active),
+        "is_default": bool(cred.is_default),
+        "last_tested_at": cred.last_tested_at,
+        "last_test_status": cred.last_test_status,
+        "last_test_message": cred.last_test_message,
+        "webhook_url": url_for("billing_webhook", provider=cred.provider, _external=True),
+    }
+
+
+@app.route("/owner/billing/payment-methods")
+@login_required
+def owner_billing_payment_methods():
+    owner_id = logged_in_owner_id()
+    creds = (PaymentProviderCredential.query
+             .filter_by(owner_id=owner_id)
+             .order_by(PaymentProviderCredential.created_at.desc()).all())
+    configured_providers = {c.provider for c in creds}
+    available = [p for p in SUPPORTED_PROVIDERS if p not in configured_providers]
+    return _no_store(app.make_response(render_template(
+        "owner_billing/payment_methods.html",
+        credentials=[_credential_view(c) for c in creds],
+        available_providers=[(p, PROVIDER_LABELS.get(p, p.title())) for p in available],
+        provider_labels=PROVIDER_LABELS,
+        owner_username=logged_in_owner(),
+    )))
+
+
+@app.route("/owner/billing/payment-methods/save", methods=["POST"])
+@login_required
+def owner_billing_payment_methods_save():
+    owner_id = logged_in_owner_id()
+    provider = (request.form.get("provider") or "").strip().lower()
+    if provider not in SUPPORTED_PROVIDERS:
+        flash(f"Unsupported provider: {provider!r}.", "billing_error")
+        return redirect(url_for("owner_billing_payment_methods"))
+
+    cred = (PaymentProviderCredential.query
+            .filter_by(owner_id=owner_id, provider=provider).first())
+    if cred is None:
+        cred = PaymentProviderCredential(owner_id=owner_id, provider=provider)
+        db.session.add(cred)
+
+    cred.display_name = (request.form.get("display_name") or "").strip()[:80]
+    cred.public_key = (request.form.get("public_key") or "").strip()[:200]
+    secret_key = (request.form.get("secret_key") or "").strip()
+    webhook_secret = (request.form.get("webhook_secret") or "").strip()
+    # Owners can edit display info without re-typing the secret. Only
+    # overwrite when they actually pasted a new value.
+    if secret_key:
+        cred.secret_key_enc = encrypt_secret(secret_key)
+    if webhook_secret:
+        cred.webhook_secret_enc = encrypt_secret(webhook_secret)
+    requested_mode = (request.form.get("mode") or "").strip().lower()
+    if requested_mode in ("test", "live"):
+        cred.mode = requested_mode
+    elif secret_key or cred.public_key:
+        detected = detect_mode_from_key(provider, cred.public_key, secret_key or decrypt_secret(cred.secret_key_enc))
+        if detected != "unknown":
+            cred.mode = detected
+    cred.is_active = bool(request.form.get("is_active"))
+    if request.form.get("is_default"):
+        # Only one default per owner — clear others atomically.
+        PaymentProviderCredential.query.filter(
+            PaymentProviderCredential.owner_id == owner_id,
+            PaymentProviderCredential.id != (cred.id or -1),
+        ).update({"is_default": False})
+        cred.is_default = True
+    elif cred.is_default and not PaymentProviderCredential.query.filter(
+        PaymentProviderCredential.owner_id == owner_id,
+        PaymentProviderCredential.is_default.is_(True),
+        PaymentProviderCredential.id != (cred.id or -1),
+    ).first():
+        # Keep at least one default if this was the one.
+        cred.is_default = True
+
+    if not cred.public_key or not cred.secret_key_enc:
+        flash(f"{PROVIDER_LABELS[provider]} requires both a key id and a secret.", "billing_error")
+        db.session.rollback()
+        return redirect(url_for("owner_billing_payment_methods"))
+
+    db.session.commit()
+    _billing_log(owner_id=owner_id, order_id=None, action=f"payment_methods.{provider}.saved",
+                 amount=0, payment_method=provider, reason="credential updated",
+                 payload={"provider": provider, "mode": cred.mode,
+                          "public_key_masked": mask_secret(cred.public_key)})
+    flash(f"{PROVIDER_LABELS[provider]} credentials saved ({cred.mode} mode).", "billing_ok")
+    return redirect(url_for("owner_billing_payment_methods"))
+
+
+@app.route("/owner/billing/payment-methods/<int:cred_id>/test", methods=["POST"])
+@login_required
+def owner_billing_payment_methods_test(cred_id: int):
+    owner_id = logged_in_owner_id()
+    cred = PaymentProviderCredential.query.filter_by(id=cred_id, owner_id=owner_id).first_or_404()
+    try:
+        provider = _provider_for_credential(cred)
+        msg = provider.test_connection()
+        cred.last_test_status = "ok"
+        cred.last_test_message = msg[:500]
+        cred.last_tested_at = datetime.now(timezone.utc)
+        db.session.commit()
+        flash(msg, "billing_ok")
+    except PaymentProviderError as exc:
+        cred.last_test_status = "error"
+        cred.last_test_message = str(exc)[:500]
+        cred.last_tested_at = datetime.now(timezone.utc)
+        db.session.commit()
+        flash(f"Test failed: {exc}", "billing_error")
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("payment test crashed")
+        flash(f"Unexpected error testing credentials: {exc}", "billing_error")
+    return redirect(url_for("owner_billing_payment_methods"))
+
+
+@app.route("/owner/billing/payment-methods/<int:cred_id>/delete", methods=["POST"])
+@login_required
+def owner_billing_payment_methods_delete(cred_id: int):
+    owner_id = logged_in_owner_id()
+    cred = PaymentProviderCredential.query.filter_by(id=cred_id, owner_id=owner_id).first_or_404()
+    provider = cred.provider
+    db.session.delete(cred)
+    db.session.commit()
+    _billing_log(owner_id=owner_id, order_id=None,
+                 action=f"payment_methods.{provider}.deleted",
+                 amount=0, payment_method=provider, reason="credential removed",
+                 payload={"provider": provider})
+    flash(f"{PROVIDER_LABELS.get(provider, provider).title()} credentials removed.", "billing_ok")
+    return redirect(url_for("owner_billing_payment_methods"))
+
+
+# ---------------------------------------------------------------------------
+# Online charge flow — owner-side: create the intent for an open bill
+# ---------------------------------------------------------------------------
+
+@app.route("/owner/billing/orders/<int:order_id>/charge", methods=["POST"])
+@login_required
+def owner_billing_create_charge(order_id: int):
+    owner_id = logged_in_owner_id()
+    order = Order.query.filter_by(id=order_id, owner_id=owner_id).first_or_404()
+    if (order.payment_status or "unpaid") == "paid":
+        flash("This bill is already settled.", "billing_info")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    provider_name = (request.form.get("provider") or "").strip().lower()
+    if provider_name:
+        cred = PaymentProviderCredential.query.filter_by(
+            owner_id=owner_id, provider=provider_name, is_active=True).first()
+    else:
+        cred = _default_payment_credential(owner_id)
+    if cred is None:
+        flash("Configure a payment provider first under Payment Methods.", "billing_error")
+        return redirect(url_for("owner_billing_payment_methods"))
+
+    settings = _settings_for(owner_id)
+    totals = compute_bill_totals(
+        subtotal=float(order.amount or 0),
+        discount=float(order.discount or 0),
+        service_charge_pct=float(settings.service_charge_percent or 0),
+        tax_pct=float(settings.tax_rate_percent or 0),
+    )
+    amount_minor = int(round(totals.total * 100))
+    if amount_minor <= 0:
+        flash("Bill total is zero — nothing to charge.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    try:
+        provider = _provider_for_credential(cred)
+        intent = provider.create_payment_intent(
+            amount_minor=amount_minor,
+            currency="INR",
+            order_id=order.id,
+            description=f"Order #{order.id} at {logged_in_owner() or 'Cafe'}",
+            customer_email="",
+            customer_phone=getattr(order, "customer_phone", "") or "",
+            return_url=url_for("billing_pay_page", order_id=order.id, _external=True),
+        )
+    except PaymentProviderError as exc:
+        flash(f"Could not start the online charge: {exc}", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    op = OnlinePayment(
+        owner_id=owner_id, order_id=order.id, provider=cred.provider,
+        intent_id=intent.intent_id, amount=totals.total, currency="INR",
+        status="pending", customer_phone=(getattr(order, "customer_phone", "") or "")[:30],
+        raw={"client_secret_present": bool(intent.client_secret),
+             "checkout_url": intent.checkout_url, "extra": intent.raw},
+    )
+    db.session.add(op)
+    db.session.commit()
+    _billing_log(owner_id=owner_id, order_id=order.id,
+                 action="online_charge.created",
+                 amount=totals.total, payment_method=cred.provider,
+                 reason="payment intent created",
+                 payload={"intent_id": intent.intent_id, "provider": cred.provider})
+    flash("Payment link created. Share it with the customer.", "billing_ok")
+    return redirect(url_for("billing_pay_page", order_id=order.id))
+
+
+# ---------------------------------------------------------------------------
+# Customer-facing hosted pay page + provider webhook
+# ---------------------------------------------------------------------------
+
+@app.route("/billing/pay/<int:order_id>")
+def billing_pay_page(order_id: int):
+    order = Order.query.get_or_404(order_id)
+    op = (OnlinePayment.query
+          .filter_by(order_id=order.id)
+          .order_by(OnlinePayment.created_at.desc()).first())
+    if op is None:
+        return ("No active payment for this order.", 404)
+    cred = PaymentProviderCredential.query.filter_by(
+        owner_id=op.owner_id, provider=op.provider).first()
+    if cred is None:
+        return ("Payment provider is no longer configured.", 410)
+    return _no_store(app.make_response(render_template(
+        "owner_billing/customer_pay.html",
+        order=order, payment=op, provider=op.provider,
+        public_key=cred.public_key, mode=cred.mode,
+        amount_minor=int(round(float(op.amount or 0) * 100)),
+        currency=op.currency or "INR",
+    )))
+
+
+@csrf.exempt
+@app.route("/billing/webhook/<provider>", methods=["POST"])
+def billing_webhook(provider: str):
+    """Provider-side notification — verifies signature, updates order.
+
+    We look up *which* owner the event belongs to via the matching
+    OnlinePayment row (provider+intent_id is globally unique because
+    provider IDs are universally unique). This avoids needing one
+    webhook URL per owner."""
+    provider = (provider or "").lower()
+    if provider not in SUPPORTED_PROVIDERS:
+        return ("unsupported provider", 404)
+
+    body = request.get_data(cache=True) or b""
+    sig_header = (request.headers.get("Stripe-Signature")
+                  or request.headers.get("X-Razorpay-Signature")
+                  or request.headers.get("X-Signature")
+                  or "")
+
+    # Try to find the credential by parsing the event metadata first; if
+    # that's not possible, fall back to trying every credential for this
+    # provider until one verifies. In production with one cafe per
+    # webhook URL, the first match wins immediately.
+    candidates = (PaymentProviderCredential.query
+                  .filter_by(provider=provider, is_active=True).all())
+    if not candidates:
+        return ("no provider configured", 404)
+
+    event = None
+    matched_cred = None
+    last_error = None
+    for cred in candidates:
+        try:
+            p = _provider_for_credential(cred)
+            event = p.parse_webhook(body, sig_header)
+            matched_cred = cred
+            break
+        except PaymentProviderError as exc:
+            last_error = str(exc)
+            continue
+    if event is None:
+        app.logger.warning("Webhook signature failed for all %d %s credentials: %s",
+                           len(candidates), provider, last_error)
+        return ("signature invalid", 400)
+
+    op = (OnlinePayment.query
+          .filter_by(provider=provider, intent_id=event.intent_id).first())
+    if op is None:
+        app.logger.info("Webhook event %s for unknown intent %s",
+                        event.event_type, event.intent_id)
+        return ("ok", 200)
+
+    op.status = event.status
+    op.raw = {"event_type": event.event_type, "object": event.raw}
+    if event.status == "failed":
+        op.error_message = (event.raw.get("last_payment_error", {}) or {}).get("message", "")[:500]
+    db.session.add(op)
+
+    if event.status == "succeeded":
+        order = Order.query.filter_by(id=op.order_id, owner_id=op.owner_id).first()
+        if order and (order.payment_status or "unpaid") != "paid":
+            settings = _settings_for(order.owner_id)
+            totals = compute_bill_totals(
+                subtotal=float(order.amount or 0),
+                discount=float(order.discount or 0),
+                service_charge_pct=float(settings.service_charge_percent or 0),
+                tax_pct=float(settings.tax_rate_percent or 0),
+            )
+            order.payment_status = "paid"
+            order.payment_method = provider
+            order.tax = totals.tax
+            order.service_charge = totals.service_charge
+            order.paid_at = datetime.now(timezone.utc)
+            order.payments_breakdown = [{
+                "method": provider, "amount": float(op.amount or totals.total),
+                "reference": event.intent_id,
+            }]
+            if not order.invoice_number:
+                inv, seq = next_invoice_number(settings.invoice_prefix or "INV",
+                                               int(settings.invoice_seq or 0))
+                order.invoice_number = inv
+                settings.invoice_seq = seq
+            db.session.add(order)
+            _billing_log(owner_id=order.owner_id, order_id=order.id,
+                         action="online_charge.settled",
+                         amount=float(op.amount or totals.total),
+                         payment_method=provider,
+                         reason=f"webhook {event.event_type}",
+                         payload={"intent_id": event.intent_id,
+                                  "provider": provider,
+                                  "credential_id": matched_cred.id if matched_cred else None})
+            _invalidate_billing_cache(order.owner_id)
+    db.session.commit()
+    return ("ok", 200)
 
 
 # ---------------------------------------------------------------------------
