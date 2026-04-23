@@ -24,6 +24,7 @@ def register_extensions(app: "Flask") -> None:
     from .employees_bp import bp as employees_bp
     from .superadmin_extras_bp import bp as superadmin_extras_bp
     from .customers_bp import bp as customers_bp
+    from .push_bp import bp as push_bp
 
     for bp in (
         service_calls_bp,
@@ -33,6 +34,7 @@ def register_extensions(app: "Flask") -> None:
         employees_bp,
         superadmin_extras_bp,
         customers_bp,
+        push_bp,
     ):
         if bp.name not in app.blueprints:
             app.register_blueprint(bp)

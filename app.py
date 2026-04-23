@@ -1520,6 +1520,20 @@ _notify_owner_redis = _notify_owner
 _notify_order_status_redis = _notify_order_status
 
 
+def _push_new_order(owner_id: int, customer_name: str, total: float) -> None:
+    """Fire a Web Push notification to the owner for a new order (background thread)."""
+    try:
+        from extensions.push_bp import push_owner
+        push_owner(
+            owner_id,
+            title="🆕 New order",
+            body=f"{customer_name} — £{total:.2f}" if total else f"Order from {customer_name}",
+            data={"type": "new_order"},
+        )
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Error handlers
 # ---------------------------------------------------------------------------
@@ -2189,6 +2203,7 @@ def reorder_api(order_id: int):
     new_record = place_order_in_db(new_order_data)
     if owner_id:
         _notify_owner(owner_id, "new_order", {"id": new_record["id"], "customerName": new_record["customerName"], "total": new_record["total"], "status": "pending"})
+        _push_new_order(owner_id, new_record.get("customerName", "Guest"), new_record.get("total", 0))
     return jsonify(order=new_record), 201
 
 
@@ -3664,6 +3679,7 @@ def checkout() -> tuple[dict, int]:
             "status": "pending",
             "pickupCode": order_record["pickupCode"],
         })
+        _push_new_order(owner_id, customer_name, order_record.get("total", 0))
 
     log_security("ORDER_PLACED", f"table={table_id!r} total={order_record['total']}")
     _send_order_confirmation(order_record)

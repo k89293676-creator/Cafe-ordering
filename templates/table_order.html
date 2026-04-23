@@ -762,5 +762,15 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/static/js/sw.js').catch(() => {});
 }
 </script>
+{% if _ays_table_id %}
+<script src="/static/js/push-subscribe.js" defer></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  if (window.cafePush) {
+    cafePush.subscribeTable({{ _ays_table_id|tojson }}, window.location.href);
+  }
+});
+</script>
+{% endif %}
 </body>
 </html>

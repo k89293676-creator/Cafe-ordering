@@ -1720,5 +1720,11 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
   document.addEventListener('DOMContentLoaded', wireEmployeeAssign);
 })();
 </script>
+<script src="/static/js/push-subscribe.js" defer></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  if (window.cafePush) cafePush.subscribeOwner();
+});
+</script>
 </body>
 </html>

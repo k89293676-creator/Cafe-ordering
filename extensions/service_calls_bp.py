@@ -41,6 +41,29 @@ from .models import TableCall
 
 bp = Blueprint("service_calls", __name__)
 
+# Push helpers — imported lazily so push_bp circular-import is avoided at module load.
+def _push_owner_safe(owner_id, title, body, data=None):
+    try:
+        from .push_bp import push_owner
+        push_owner(owner_id, title, body, data)
+    except Exception:
+        pass
+
+def _push_table_safe(table_id, title, body, data=None):
+    try:
+        from .push_bp import push_table
+        push_table(table_id, title, body, data)
+    except Exception:
+        pass
+
+_REASON_LABELS = {
+    "service": "Call server",
+    "bill":    "Ask for the bill",
+    "water":   "Water refill",
+    "cutlery": "Cutlery",
+    "help":    "Need help",
+}
+
 _TABLE_ID_RE = re.compile(r"[a-zA-Z0-9\-]{1,64}")
 _VALID_REASONS = {"service", "bill", "water", "help", "cutlery"}
 _LIVE_STATUSES = ("open", "acknowledged")
@@ -127,6 +150,16 @@ def create_table_call(table_id: str):
         _notify_table_call(table_id, "table_call", _public_call_dict(call))
     except Exception:  # pragma: no cover
         pass
+
+    # Web Push to owner — fires in a background thread, non-blocking.
+    if owner_id:
+        reason_label = _REASON_LABELS.get(reason, reason)
+        _push_owner_safe(
+            owner_id,
+            title="🛎️ Table call",
+            body=f"{table_name} — {reason_label}",
+            data={"callId": call.id, "tableId": table_id},
+        )
 
     return jsonify({"ok": True, "call": _public_call_dict(call)}), 201
 
@@ -467,6 +500,23 @@ def _transition_call(call_id: int, target: str):
         _notify_table_call(call.table_id, "table_call_update", _public_call_dict(call))
     except Exception:  # pragma: no cover
         pass
+
+    # Web Push to customer based on what staff just did.
+    if target == "acknowledged":
+        _push_table_safe(
+            call.table_id,
+            title="✓ Staff on their way!",
+            body=f"Your server is coming to {call.table_name or call.table_id}.",
+            data={"callId": call.id, "status": "acknowledged"},
+        )
+    elif target == "resolved":
+        _push_table_safe(
+            call.table_id,
+            title="✅ Service complete",
+            body="Your request has been taken care of. Enjoy!",
+            data={"callId": call.id, "status": "resolved"},
+        )
+
     return jsonify({"ok": True, "call": _owner_call_dict(call)})
 
 

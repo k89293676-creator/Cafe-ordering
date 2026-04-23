@@ -1,11 +1,9 @@
 /* ============================================================
    Cafe 11:11 — Service Worker
-   Caches the menu page shell for offline resilience.
-   Menu data (API) is always fetched fresh; only static
-   assets are cached.
+   Handles offline caching AND Web Push notifications.
    ============================================================ */
 
-const CACHE_VERSION = "cafe-v1";
+const CACHE_VERSION = "cafe-v2";
 const STATIC_ASSETS = [
   "/static/css/styles.css",
   "/static/css/order.css",
@@ -36,12 +34,10 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Always bypass for API, POST, or non-GET requests
   if (request.method !== "GET" || url.pathname.startsWith("/api/")) {
     return;
   }
 
-  // Static assets: cache-first with network fallback
   if (
     url.pathname.startsWith("/static/") ||
     url.hostname === "fonts.googleapis.com" ||
@@ -62,7 +58,6 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // For HTML pages: network-first (fresh content), fall back to cache
   if (request.headers.get("accept")?.includes("text/html")) {
     event.respondWith(
       fetch(request)
@@ -74,4 +69,53 @@ self.addEventListener("fetch", (event) => {
         .catch(() => caches.match(request))
     );
   }
+});
+
+// ─── Push: display a notification ─────────────────────────────────────────
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? JSON.parse(event.data.text()) : {};
+  } catch (_) {}
+
+  const title = payload.title || "Cafe 11:11";
+  const body  = payload.body  || "You have a new notification.";
+  const data  = payload.data  || {};
+  const type  = payload.type  || "general";
+
+  const icon  = "/static/img/icon-192.png";
+  const badge = "/static/img/icon-badge.png";
+
+  const options = {
+    body,
+    icon,
+    badge,
+    data: { ...data, type, tableUrl: data.tableUrl || "/" },
+    // Collapse same-type notifications so the screen isn't spammed.
+    tag: type === "owner"
+      ? "cafe-owner-" + (data.callId || data.orderId || "notify")
+      : "cafe-table-" + (data.callId || "notify"),
+    renotify: true,
+    requireInteraction: type === "owner",
+    vibrate: [200, 100, 200],
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// ─── NotificationClick: focus or open the relevant page ───────────────────
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const type = data.type || "general";
+  const urlToOpen = type === "owner" ? "/owner/dashboard" : (data.tableUrl || "/");
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if (c.url.includes(urlToOpen) && "focus" in c) return c.focus();
+      }
+      if (clients.openWindow) return clients.openWindow(urlToOpen);
+    })
+  );
 });
