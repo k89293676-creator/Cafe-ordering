@@ -193,6 +193,8 @@ def logout():
     session.pop("admin_authenticated", None)
     session.pop("admin_owner_id", None)
     session.pop("admin_via_superadmin", None)
+    session.pop("superadmin_key_verified", None)
+    session.pop("superadmin_verify_next", None)
     return redirect(url_for("admin.login"))
 
 

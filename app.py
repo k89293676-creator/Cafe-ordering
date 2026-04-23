@@ -1230,13 +1230,37 @@ def login_required(view_func):
     return wrapper
 
 
+def _superadmin_key_configured() -> bool:
+    return bool(os.environ.get("SUPERADMIN_KEY", "").strip())
+
+
+def _superadmin_key_matches(provided: str) -> bool:
+    expected = os.environ.get("SUPERADMIN_KEY", "")
+    if not expected or not provided:
+        return False
+    import hmac as _hmac
+    return _hmac.compare_digest(expected.encode("utf-8"), provided.encode("utf-8"))
+
+
 def superadmin_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
         owner = logged_in_owner_obj()
-        if not owner or not getattr(owner, "is_superadmin", False):
-            abort(403)
-        return view_func(*args, **kwargs)
+        # Real superadmin owner — always allowed.
+        if owner and getattr(owner, "is_superadmin", False) and getattr(owner, "is_active", True):
+            return view_func(*args, **kwargs)
+        # Admin (legacy /admin login) elevated via SUPERADMIN_KEY for this session.
+        if (
+            session.get("admin_authenticated")
+            and session.get("superadmin_key_verified")
+            and _superadmin_key_configured()
+        ):
+            return view_func(*args, **kwargs)
+        # Admin but not yet verified — send to the verification page.
+        if session.get("admin_authenticated") and _superadmin_key_configured():
+            session["superadmin_verify_next"] = request.full_path or request.path
+            return redirect(url_for("superadmin_verify_key"))
+        abort(403)
     return wrapper
 
 
@@ -3683,6 +3707,41 @@ def owner_analytics():
 # ---------------------------------------------------------------------------
 # Superadmin dashboard
 # ---------------------------------------------------------------------------
+
+@app.route("/superadmin/verify-key", methods=["GET", "POST"])
+def superadmin_verify_key():
+    """Challenge an admin-authenticated session for the SUPERADMIN_KEY.
+
+    Real superadmin owners never reach this page (they're already allowed
+    by superadmin_required). Anyone else without an admin session is sent
+    to the owner login.
+    """
+    if not session.get("admin_authenticated"):
+        return redirect(url_for("owner_login"))
+    if not _superadmin_key_configured():
+        return render_template(
+            "admin/error.html",
+            message="SUPERADMIN_KEY is not configured on this server.",
+        ), 503
+    error = None
+    if request.method == "POST":
+        provided = str(request.form.get("key", ""))
+        if _superadmin_key_matches(provided):
+            session["superadmin_key_verified"] = True
+            log_security("SUPERADMIN_KEY_OK", f"admin_owner_id={session.get('admin_owner_id')}")
+            nxt = session.pop("superadmin_verify_next", "") or url_for("superadmin_dashboard")
+            return redirect(nxt)
+        error = "Invalid key. Please try again."
+        log_security("SUPERADMIN_KEY_FAIL", f"admin_owner_id={session.get('admin_owner_id')}")
+    return render_template("superadmin/verify_key.html", error=error), (200 if not error else 401)
+
+
+@app.route("/superadmin/verify-key/clear", methods=["POST"])
+def superadmin_verify_key_clear():
+    session.pop("superadmin_key_verified", None)
+    session.pop("superadmin_verify_next", None)
+    return redirect(url_for("admin.dashboard"))
+
 
 @app.route("/superadmin")
 @app.route("/superadmin/dashboard")
