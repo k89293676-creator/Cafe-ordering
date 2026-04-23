@@ -2749,8 +2749,14 @@ def save_menu_item() -> Response:
     if item_id:
         item = next((i for i in category["items"] if i["id"] == item_id), None)
         if item:
-            item.update({"name": name, "description": description, "price": price, "tags": tags,
-                         "dietary_tags": dietary_tags, "image_url": image_url, "prep_time": prep_time})
+            updates = {"name": name, "description": description, "price": price, "tags": tags,
+                       "dietary_tags": dietary_tags, "image_url": image_url, "prep_time": prep_time}
+            # When the owner overrides the image (URL, upload, or clears it),
+            # reset the AI seed so the next auto-image is fresh and the cache
+            # of any old AI image is invalidated.
+            if image_url != item.get("image_url", ""):
+                updates["image_seed"] = 0
+            item.update(updates)
             flash("Menu item updated.")
         else:
             flash("Menu item not found.")
@@ -2761,6 +2767,7 @@ def save_menu_item() -> Response:
             "id": new_item_id, "name": name, "description": description,
             "price": price, "tags": tags, "available": True,
             "dietary_tags": dietary_tags, "image_url": image_url, "prep_time": prep_time,
+            "image_seed": 0,
         })
         flash(f"'{name}' added to menu.")
 
@@ -2813,6 +2820,35 @@ def upload_menu_image() -> Response:
 
     public_url = url_for("static", filename=f"uploads/menu/{owner_id}/{filename}")
     return jsonify({"ok": True, "url": public_url})
+
+
+@app.route("/owner/menu/item/<item_id>/regen-image", methods=["POST"])
+@login_required
+@limiter.limit("60 per hour")
+def regen_menu_item_image(item_id: str) -> Response:
+    """Bump the item's ``image_seed`` so the auto-generated AI image rerolls.
+
+    Also clears any custom ``image_url`` so the AI image takes effect again.
+    Owners use this when they want a different AI picture for the same dish.
+    """
+    owner_id = logged_in_owner_id()
+    if not re.fullmatch(r"[a-zA-Z0-9_\-]{1,100}", item_id):
+        abort(400)
+    menu = load_menu()
+    for category in menu.get("categories", []):
+        if category.get("ownerId") != owner_id:
+            continue
+        item = next((i for i in category["items"] if i["id"] == item_id), None)
+        if item:
+            # Use seconds since epoch to guarantee a fresh seed each click,
+            # and clear image_url so the regenerated AI image is what shows.
+            item["image_seed"] = int(time.time())
+            item["image_url"] = ""
+            save_menu(menu)
+            flash(f"New AI image generated for '{item['name']}'.")
+            return redirect(url_for("owner_dashboard") + "#menu")
+    flash("Item not found.")
+    return redirect(url_for("owner_dashboard") + "#menu")
 
 
 @app.route("/owner/menu/item/<item_id>/delete", methods=["POST"])

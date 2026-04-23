@@ -70,14 +70,22 @@ function autoImageUrl(item) {
   const prompt = encodeURIComponent(
     `${item.name}, professional food photography, restaurant dish, natural light, close-up, appetizing, high detail`
   );
-  const seed = _hash(item.id || item.name) % 999983;
+  // image_seed lets owners "regenerate" the AI image — bumping it produces a
+  // brand-new picture for the same dish without changing the item's identity.
+  const seedBase = item.image_seed != null
+    ? Number(item.image_seed) || 0
+    : _hash(item.id || item.name);
+  const seed = Math.abs(seedBase) % 999983;
   return `https://image.pollinations.ai/prompt/${prompt}?width=400&height=250&nologo=true&nofeed=true&seed=${seed}`;
 }
 function autoImageUrlBackup(item) {
   // LoremFlickr serves real Flickr photos for keywords. Deterministic via lock.
   // Used as a second-tier fallback before the SVG placeholder.
   const kw = _slug(item.name).split("-").filter(Boolean).slice(0, 3).join(",") || "food";
-  const lock = _hash(item.id || item.name) % 9999;
+  const seedBase = item.image_seed != null
+    ? Number(item.image_seed) || 0
+    : _hash(item.id || item.name);
+  const lock = Math.abs(seedBase) % 9999;
   return `https://loremflickr.com/400/250/${encodeURIComponent(kw + ",food")}?lock=${lock}`;
 }
 function fallbackImageUrl(item) {
