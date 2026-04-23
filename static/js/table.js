@@ -268,16 +268,18 @@ function itemCard(item) {
          </div>`;
 
   const popularBadge = item.popular ? `<span class="o-popular-badge">🔥 Popular</span>` : "";
-  const imgSrc = item.image_url || autoImageUrl(item);
-  // Three-tier fallback: explicit/AI image → LoremFlickr photo → SVG placeholder.
-  // Each fallback step rebinds onerror so the chain always lands on the SVG,
-  // which is a data URI and can never fail.
-  const backupUrl = item.image_url ? "" : autoImageUrlBackup(item);
+  // PERFORMANCE: LoremFlickr is the primary source (real photos, ~200ms).
+  // Pollinations is only used when the owner has explicitly saved an AI url
+  // via image_url, since on-demand AI generation takes 5–15s and stalls the
+  // whole menu render. Final fallback is a data-URI SVG that can never fail.
+  const fastUrl   = item.image_url || autoImageUrlBackup(item); // LoremFlickr / explicit
+  const aiBackup  = item.image_url ? "" : autoImageUrl(item);   // Pollinations
   const finalUrl  = fallbackImageUrl(item);
-  const onerrAttr = backupUrl
-    ? `this.onerror=function(){this.onerror=null;this.src='${esc(finalUrl)}';};this.src='${esc(backupUrl)}';`
+  const onerrAttr = aiBackup
+    ? `this.onerror=function(){this.onerror=null;this.src='${esc(finalUrl)}';};this.src='${esc(aiBackup)}';`
     : `this.onerror=null;this.src='${esc(finalUrl)}';`;
-  const imgHtml = `<img class="o-item__img" src="${esc(imgSrc)}" alt="${esc(item.name)}" loading="lazy"
+  const imgHtml = `<img class="o-item__img" src="${esc(fastUrl)}" alt="${esc(item.name)}"
+                        loading="lazy" decoding="async" fetchpriority="low"
                         onerror="${onerrAttr}" />`;
 
   return `

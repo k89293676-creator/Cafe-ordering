@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Redeem Access Key — Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/enhancements.css" />
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-logo">
+    <div class="auth-logo-wordmark">11:11</div>
+    <h1>Cafe 11:11</h1>
+    <p>Redeem Access Key</p>
+  </div>
+
+  <div class="auth-card">
+    <h2>Activate your account</h2>
+    <p class="subtitle">Enter the access key your administrator sent you. This will reactivate your account so you can sign in and use the tool.</p>
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for message in messages %}
+      <div class="alert alert-error">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <form method="post" autocomplete="on">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="form-group">
+        <label for="identifier">Username or email</label>
+        <input id="identifier" name="identifier" autocomplete="username" required />
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <div class="input-with-toggle">
+          <input id="password" type="password" name="password" autocomplete="current-password" required />
+          <button type="button" class="password-toggle" aria-label="Toggle password visibility" onclick="togglePw(this,'password')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="access_key">Access key</label>
+        <input id="access_key" name="access_key" placeholder="Paste the key from your administrator" autocomplete="off" required spellcheck="false" />
+        <small style="color:var(--text-muted);font-size:0.8rem;display:block;margin-top:0.35rem;">
+          Single-use. After activation, sign in with your usual username and password.
+        </small>
+      </div>
+      <button class="btn btn-primary btn-full" type="submit" style="margin-top:0.75rem;">Activate Account</button>
+    </form>
+
+    <p class="auth-footer">
+      Back to <a href="{{ url_for('owner_login') }}">sign in</a>
+    </p>
+  </div>
+</div>
+<script>
+function togglePw(btn, id) {
+  const inp = document.getElementById(id);
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+  btn.style.opacity = inp.type === 'text' ? '0.4' : '1';
+}
+</script>
+</body>
+</html>

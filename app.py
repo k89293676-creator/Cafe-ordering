@@ -728,6 +728,30 @@ def find_admin_key_owner(plaintext: str) -> int | None:
     return None
 
 
+def consume_admin_key(plaintext: str) -> int | None:
+    """Single-use redeem: validate plaintext, remove it, return owner_id.
+
+    Used by the owner-facing redeem page so a key can never be replayed once
+    it has activated an account.
+    """
+    if not plaintext:
+        return None
+    keys = load_admin_keys()
+    for idx, record in enumerate(keys):
+        key_hash = record.get("key_hash", "")
+        if not key_hash:
+            continue
+        try:
+            if bcrypt.check_password_hash(key_hash, plaintext):
+                owner_id = int(record.get("owner_id"))
+                keys.pop(idx)
+                _save_admin_keys(keys)
+                return owner_id
+        except Exception:
+            continue
+    return None
+
+
 def load_cafes() -> list[dict]:
     return [_cafe_dict(c) for c in Cafe.query.order_by(Cafe.id).all()]
 
@@ -1828,7 +1852,8 @@ def owner_login() -> str | Response:
         ).first()
 
         if owner and not owner.is_active:
-            flash("This account has been suspended.")
+            flash("This account is suspended. If your administrator gave you "
+                  "an access key, redeem it to reactivate your account.")
             return _no_store(app.make_response(render_template("owner_login.html")))
 
         if owner and _password_matches(owner.password_hash, password):
@@ -1892,6 +1917,51 @@ def owner_login_totp_verify():
         flash("Invalid TOTP code. Please try again.")
 
     return render_template("owner_login_otp_verify.html")
+
+
+@app.route("/owner/redeem-key", methods=["GET", "POST"])
+@limiter.limit("10 per hour", methods=["POST"])
+def owner_redeem_key() -> str | Response:
+    """Owner self-service: redeem an admin-issued access key.
+
+    Activates the owner account that the key was generated for. Requires the
+    owner's username + password so a stolen key alone can't take over an
+    account, and consumes the key on success (single-use).
+    """
+    if request.method == "POST":
+        identifier = str(request.form.get("identifier", "")).strip()[:128]
+        password = str(request.form.get("password", ""))[:256]
+        access_key = str(request.form.get("access_key", "")).strip()[:128]
+
+        if not identifier or not password or not access_key:
+            flash("Username, password and access key are all required.")
+            return render_template("owner_redeem_key.html")
+
+        owner = Owner.query.filter(
+            (Owner.username == identifier) | (Owner.email == identifier)
+        ).first()
+        if not owner or not _password_matches(owner.password_hash, password):
+            log_security("REDEEM_KEY_BAD_CREDENTIALS", f"identifier={identifier!r}")
+            flash("Sign-in details didn't match. Try again.")
+            return render_template("owner_redeem_key.html")
+
+        # Validate first (non-destructive). Only consume on a perfect match
+        # to the same owner — prevents one owner using another's key.
+        target_owner_id = find_admin_key_owner(access_key)
+        if target_owner_id is None or int(target_owner_id) != int(owner.id):
+            log_security("REDEEM_KEY_MISMATCH", f"user={owner.username!r}")
+            flash("That access key is not valid for this account.")
+            return render_template("owner_redeem_key.html")
+
+        # Single-use consume so the key cannot be replayed.
+        consume_admin_key(access_key)
+        owner.is_active = True
+        db.session.commit()
+        log_security("REDEEM_KEY_SUCCESS", f"user={owner.username!r}")
+        flash("Access key accepted. Your account is now active — please sign in.")
+        return redirect(url_for("owner_login"))
+
+    return render_template("owner_redeem_key.html")
 
 
 @app.route("/owner/signup", methods=["GET", "POST"])
