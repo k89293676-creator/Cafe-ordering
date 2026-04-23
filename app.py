@@ -1242,25 +1242,93 @@ def _superadmin_key_matches(provided: str) -> bool:
     return _hmac.compare_digest(expected.encode("utf-8"), provided.encode("utf-8"))
 
 
+# Session verification expires after this many seconds. Destructive actions
+# also require a fresh per-request key from non-real-superadmin sessions.
+SUPERADMIN_VERIFY_TTL = int(os.environ.get("SUPERADMIN_VERIFY_TTL", "600"))
+
+
+def _superadmin_session_verified() -> bool:
+    if not session.get("superadmin_key_verified"):
+        return False
+    try:
+        ts = float(session.get("superadmin_key_verified_at", 0) or 0)
+    except (TypeError, ValueError):
+        ts = 0.0
+    if time.time() - ts > SUPERADMIN_VERIFY_TTL:
+        session.pop("superadmin_key_verified", None)
+        session.pop("superadmin_key_verified_at", None)
+        return False
+    return True
+
+
+def _is_real_superadmin(owner) -> bool:
+    return bool(
+        owner
+        and getattr(owner, "is_superadmin", False)
+        and getattr(owner, "is_active", True)
+    )
+
+
 def superadmin_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
         owner = logged_in_owner_obj()
-        # Real superadmin owner — always allowed.
-        if owner and getattr(owner, "is_superadmin", False) and getattr(owner, "is_active", True):
+        if _is_real_superadmin(owner):
             return view_func(*args, **kwargs)
-        # Admin (legacy /admin login) elevated via SUPERADMIN_KEY for this session.
         if (
             session.get("admin_authenticated")
-            and session.get("superadmin_key_verified")
+            and _superadmin_session_verified()
             and _superadmin_key_configured()
         ):
             return view_func(*args, **kwargs)
-        # Admin but not yet verified — send to the verification page.
         if session.get("admin_authenticated") and _superadmin_key_configured():
             session["superadmin_verify_next"] = request.full_path or request.path
             return redirect(url_for("superadmin_verify_key"))
         abort(403)
+    return wrapper
+
+
+def superadmin_destructive(view_func):
+    """Per-request re-verification for destructive superadmin actions.
+
+    Real superadmin owners pass through. Admin-elevated sessions must
+    submit ``superadmin_key`` matching SUPERADMIN_KEY on the same POST,
+    or they are sent to a confirmation page that re-submits the original
+    form once the key is provided.
+    """
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        owner = logged_in_owner_obj()
+        if _is_real_superadmin(owner):
+            return view_func(*args, **kwargs)
+        if not _superadmin_key_configured():
+            log_security("SUPERADMIN_DESTRUCTIVE_NO_KEY", f"action={request.endpoint}")
+            abort(503)
+        if request.method != "POST":
+            abort(405)
+        provided = str(request.form.get("superadmin_key", ""))
+        if _superadmin_key_matches(provided):
+            log_security(
+                "SUPERADMIN_DESTRUCTIVE_OK",
+                f"action={request.endpoint} admin_owner_id={session.get('admin_owner_id')}",
+            )
+            return view_func(*args, **kwargs)
+        if provided:
+            log_security(
+                "SUPERADMIN_DESTRUCTIVE_DENIED",
+                f"action={request.endpoint} admin_owner_id={session.get('admin_owner_id')}",
+            )
+        form_fields = [
+            (k, v) for k, v in request.form.items()
+            if k not in ("superadmin_key", "csrf_token")
+        ]
+        return render_template(
+            "superadmin/confirm_action.html",
+            action=request.endpoint or "this action",
+            target_url=request.path,
+            form_fields=form_fields,
+            error=("Invalid SUPERADMIN_KEY." if provided else None),
+        ), (401 if provided else 200)
     return wrapper
 
 
@@ -3709,6 +3777,7 @@ def owner_analytics():
 # ---------------------------------------------------------------------------
 
 @app.route("/superadmin/verify-key", methods=["GET", "POST"])
+@limiter.limit("5 per minute; 20 per hour", methods=["POST"])
 def superadmin_verify_key():
     """Challenge an admin-authenticated session for the SUPERADMIN_KEY.
 
@@ -3728,6 +3797,7 @@ def superadmin_verify_key():
         provided = str(request.form.get("key", ""))
         if _superadmin_key_matches(provided):
             session["superadmin_key_verified"] = True
+            session["superadmin_key_verified_at"] = time.time()
             log_security("SUPERADMIN_KEY_OK", f"admin_owner_id={session.get('admin_owner_id')}")
             nxt = session.pop("superadmin_verify_next", "") or url_for("superadmin_dashboard")
             return redirect(nxt)
@@ -3797,6 +3867,7 @@ def superadmin_dashboard():
 @app.route("/superadmin/cafes/create", methods=["POST"])
 @login_required
 @superadmin_required
+@superadmin_destructive
 def superadmin_create_cafe():
     name = str(request.form.get("name", "")).strip()[:200]
     if not name:
@@ -3813,6 +3884,7 @@ def superadmin_create_cafe():
 @app.route("/superadmin/cafes/<int:cafe_id>/toggle", methods=["POST"])
 @login_required
 @superadmin_required
+@superadmin_destructive
 def superadmin_toggle_cafe(cafe_id: int):
     cafe = db.session.get(Cafe, cafe_id)
     if not cafe:
@@ -3827,6 +3899,7 @@ def superadmin_toggle_cafe(cafe_id: int):
 @app.route("/superadmin/owners/create", methods=["POST"])
 @login_required
 @superadmin_required
+@superadmin_destructive
 def superadmin_create_owner():
     username = str(request.form.get("username", "")).strip()[:64]
     email = str(request.form.get("email", "")).strip()[:254] or None
@@ -3856,6 +3929,7 @@ def superadmin_create_owner():
 @app.route("/superadmin/owners/<int:owner_id>/toggle", methods=["POST"])
 @login_required
 @superadmin_required
+@superadmin_destructive
 def superadmin_toggle_owner(owner_id: int):
     owner = db.session.get(Owner, owner_id)
     if not owner:
@@ -3873,6 +3947,7 @@ def superadmin_toggle_owner(owner_id: int):
 @app.route("/superadmin/owners/<int:owner_id>/reset", methods=["POST"])
 @login_required
 @superadmin_required
+@superadmin_destructive
 def superadmin_reset_password(owner_id: int):
     owner = db.session.get(Owner, owner_id)
     if not owner:
@@ -3888,6 +3963,7 @@ def superadmin_reset_password(owner_id: int):
 @app.route("/superadmin/owners/<int:owner_id>/assign-cafe", methods=["POST"])
 @login_required
 @superadmin_required
+@superadmin_destructive
 def superadmin_assign_cafe(owner_id: int):
     owner = db.session.get(Owner, owner_id)
     if not owner:
@@ -3902,6 +3978,7 @@ def superadmin_assign_cafe(owner_id: int):
 @app.route("/superadmin/cafes/<int:cafe_id>/rename", methods=["POST"])
 @login_required
 @superadmin_required
+@superadmin_destructive
 def superadmin_rename_cafe(cafe_id: int):
     cafe = db.session.get(Cafe, cafe_id)
     if not cafe:
@@ -3919,6 +3996,7 @@ def superadmin_rename_cafe(cafe_id: int):
 @app.route("/superadmin/cafes/<int:cafe_id>/delete", methods=["POST"])
 @login_required
 @superadmin_required
+@superadmin_destructive
 def superadmin_delete_cafe(cafe_id: int):
     cafe = db.session.get(Cafe, cafe_id)
     if not cafe:
@@ -3936,6 +4014,7 @@ def superadmin_delete_cafe(cafe_id: int):
 @app.route("/superadmin/owners/<int:owner_id>/delete", methods=["POST"])
 @login_required
 @superadmin_required
+@superadmin_destructive
 def superadmin_delete_owner(owner_id: int):
     owner = db.session.get(Owner, owner_id)
     if not owner:
@@ -3986,6 +4065,7 @@ def superadmin_admin_keys():
 @app.route("/superadmin/admin-keys/generate", methods=["POST"])
 @login_required
 @superadmin_required
+@superadmin_destructive
 def superadmin_generate_admin_key():
     owner_id_raw = request.form.get("owner_id", "").strip()
     if not owner_id_raw.isdigit():
@@ -4013,6 +4093,7 @@ def superadmin_generate_admin_key():
 @app.route("/superadmin/admin-keys/revoke", methods=["POST"])
 @login_required
 @superadmin_required
+@superadmin_destructive
 def superadmin_revoke_admin_key():
     owner_id_raw = request.form.get("owner_id", "").strip()
     if not owner_id_raw.isdigit():
