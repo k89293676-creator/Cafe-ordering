@@ -3418,8 +3418,28 @@ def owner_dashboard() -> Response:
     ingredients = Ingredient.query.filter_by(owner_id=owner_id).all()
     low_stock = [i for i in ingredients if float(i.stock or 0) <= float(i.low_stock_threshold or 5)]
 
-    integration_health = _integration_health_summary(owner_id)
-    webhook_activity = _webhook_activity_summary(owner_id)
+    # The integration/webhook helpers touch optional billing tables that may
+    # not exist on legacy databases. They must NEVER 500 the dashboard —
+    # owners would interpret it as "I can't log in any more".
+    try:
+        integration_health = _integration_health_summary(owner_id)
+    except Exception as _exc:  # noqa: BLE001
+        app.logger.warning("integration_health helper crashed: %s", _exc)
+        integration_health = {
+            "items": [], "payments": [], "aggregators": [],
+            "counts": {"live": 0, "ready": 0, "unverified": 0,
+                       "failing": 0, "disabled": 0},
+            "configured": 0, "needs_attention": 0,
+        }
+    try:
+        webhook_activity = _webhook_activity_summary(owner_id)
+    except Exception as _exc:  # noqa: BLE001
+        app.logger.warning("webhook_activity helper crashed: %s", _exc)
+        webhook_activity = {
+            "items": [],
+            "counts": {"delivered_24h": 0, "pending_24h": 0,
+                       "signature_failures_24h": 0, "total_24h": 0},
+        }
 
     resp = app.make_response(render_template(
         "owner_dashboard.html",
