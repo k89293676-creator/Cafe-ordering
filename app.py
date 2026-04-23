@@ -2749,14 +2749,8 @@ def save_menu_item() -> Response:
     if item_id:
         item = next((i for i in category["items"] if i["id"] == item_id), None)
         if item:
-            updates = {"name": name, "description": description, "price": price, "tags": tags,
-                       "dietary_tags": dietary_tags, "image_url": image_url, "prep_time": prep_time}
-            # When the owner overrides the image (URL, upload, or clears it),
-            # reset the AI seed so the next auto-image is fresh and the cache
-            # of any old AI image is invalidated.
-            if image_url != item.get("image_url", ""):
-                updates["image_seed"] = 0
-            item.update(updates)
+            item.update({"name": name, "description": description, "price": price, "tags": tags,
+                         "dietary_tags": dietary_tags, "image_url": image_url, "prep_time": prep_time})
             flash("Menu item updated.")
         else:
             flash("Menu item not found.")
@@ -2767,7 +2761,6 @@ def save_menu_item() -> Response:
             "id": new_item_id, "name": name, "description": description,
             "price": price, "tags": tags, "available": True,
             "dietary_tags": dietary_tags, "image_url": image_url, "prep_time": prep_time,
-            "image_seed": 0,
         })
         flash(f"'{name}' added to menu.")
 
@@ -2820,35 +2813,6 @@ def upload_menu_image() -> Response:
 
     public_url = url_for("static", filename=f"uploads/menu/{owner_id}/{filename}")
     return jsonify({"ok": True, "url": public_url})
-
-
-@app.route("/owner/menu/item/<item_id>/regen-image", methods=["POST"])
-@login_required
-@limiter.limit("60 per hour")
-def regen_menu_item_image(item_id: str) -> Response:
-    """Bump the item's ``image_seed`` so the auto-generated AI image rerolls.
-
-    Also clears any custom ``image_url`` so the AI image takes effect again.
-    Owners use this when they want a different AI picture for the same dish.
-    """
-    owner_id = logged_in_owner_id()
-    if not re.fullmatch(r"[a-zA-Z0-9_\-]{1,100}", item_id):
-        abort(400)
-    menu = load_menu()
-    for category in menu.get("categories", []):
-        if category.get("ownerId") != owner_id:
-            continue
-        item = next((i for i in category["items"] if i["id"] == item_id), None)
-        if item:
-            # Use seconds since epoch to guarantee a fresh seed each click,
-            # and clear image_url so the regenerated AI image is what shows.
-            item["image_seed"] = int(time.time())
-            item["image_url"] = ""
-            save_menu(menu)
-            flash(f"New AI image generated for '{item['name']}'.")
-            return redirect(url_for("owner_dashboard") + "#menu")
-    flash("Item not found.")
-    return redirect(url_for("owner_dashboard") + "#menu")
 
 
 @app.route("/owner/menu/item/<item_id>/delete", methods=["POST"])
@@ -3056,187 +3020,9 @@ def rename_table(table_id: str) -> Response:
     return redirect(url_for("owner_dashboard") + "#tables")
 
 
-_QR_FONT_DIR = "/usr/share/fonts/truetype/dejavu"
-
-
-def _qr_font(size: int, bold: bool = False):
-    """Load DejaVu font at the requested size; fall back to PIL default."""
-    from PIL import ImageFont
-    path = f"{_QR_FONT_DIR}/DejaVuSans-Bold.ttf" if bold else f"{_QR_FONT_DIR}/DejaVuSans.ttf"
-    try:
-        return ImageFont.truetype(path, size)
-    except Exception:
-        return ImageFont.load_default()
-
-
-def _render_branded_table_qr(table_url: str, cafe_name: str, table_name: str,
-                             brand_color: str, logo_url: str) -> "Image.Image":
-    """Compose a branded, printable QR poster for a single table.
-
-    Layout (720x1000):
-      • Brand-coloured header with the cafe's logo/initial badge and name
-      • Large "Table {name}" heading
-      • High-error-correction QR code recoloured in the brand palette
-      • "Scan to Order" call to action and a small footer line
-
-    Falls back to safe defaults whenever a logo can't be loaded or the brand
-    colour is malformed, so a poster always renders.
-    """
-    from PIL import Image, ImageDraw, ImageColor
-
-    W, H = 720, 1000
-    bg = (250, 250, 252)
-    try:
-        brand = ImageColor.getrgb(brand_color or "#4f46e5")
-    except (ValueError, TypeError):
-        brand = (79, 70, 229)
-    # Pick legible foreground for the header band by luminance.
-    header_fg = (255, 255, 255) if (brand[0] * 0.299 + brand[1] * 0.587 + brand[2] * 0.114) < 160 \
-        else (20, 24, 40)
-
-    img = Image.new("RGB", (W, H), bg)
-    d = ImageDraw.Draw(img)
-
-    # Header band
-    d.rectangle([(0, 0), (W, 180)], fill=brand)
-
-    # Logo: try to load owner's uploaded logo; otherwise draw an initial badge.
-    badge_cx, badge_cy, badge_r = 100, 90, 56
-    logo_drawn = False
-    if logo_url and logo_url.startswith("/static/"):
-        try:
-            local_path = Path(app.root_path) / logo_url.lstrip("/")
-            if local_path.is_file():
-                logo_img = Image.open(local_path).convert("RGBA")
-                size = badge_r * 2
-                logo_img.thumbnail((size, size), Image.LANCZOS)
-                # Circular mask for a polished badge look
-                mask = Image.new("L", logo_img.size, 0)
-                ImageDraw.Draw(mask).ellipse((0, 0, *logo_img.size), fill=255)
-                circle_bg = Image.new("RGBA", (size, size), (255, 255, 255, 255))
-                offset = ((size - logo_img.size[0]) // 2, (size - logo_img.size[1]) // 2)
-                circle_bg.paste(logo_img, offset, logo_img)
-                img.paste(circle_bg, (badge_cx - badge_r, badge_cy - badge_r),
-                          mask.resize((size, size)))
-                logo_drawn = True
-        except Exception:
-            logo_drawn = False
-    if not logo_drawn:
-        d.ellipse([(badge_cx - badge_r, badge_cy - badge_r),
-                   (badge_cx + badge_r, badge_cy + badge_r)], fill=(255, 255, 255))
-        initial = (cafe_name or "C").strip()[:1].upper() or "C"
-        font_logo = _qr_font(64, bold=True)
-        bbox = d.textbbox((0, 0), initial, font=font_logo)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        d.text((badge_cx - tw // 2 - bbox[0],
-                badge_cy - th // 2 - bbox[1]),
-               initial, fill=brand, font=font_logo)
-
-    # Cafe name + tagline
-    title_x = badge_cx + badge_r + 28
-    name = (cafe_name or "Welcome").strip()[:28]
-    d.text((title_x, 50), name, fill=header_fg, font=_qr_font(38, bold=True))
-    d.text((title_x, 102), "Order at your table", fill=header_fg, font=_qr_font(20))
-
-    # Table heading
-    table_label = f"Table {table_name}".strip()
-    font_table = _qr_font(54, bold=True)
-    bbox = d.textbbox((0, 0), table_label, font=font_table)
-    d.text(((W - (bbox[2] - bbox[0])) // 2, 218), table_label,
-           fill=(20, 24, 40), font=font_table)
-
-    # QR code (high error correction so the brand colour overlay still scans)
-    qr = qrcode.QRCode(
-        error_correction=qrcode.constants.ERROR_CORRECT_H,
-        box_size=12,
-        border=2,
-    )
-    qr.add_data(table_url)
-    qr.make(fit=True)
-    qr_img = qr.make_image(fill_color=brand, back_color="white").convert("RGB")
-    qr_size = 480
-    qr_img = qr_img.resize((qr_size, qr_size), Image.NEAREST)
-    qx = (W - qr_size) // 2
-    qy = 310
-    pad = 22
-    # White panel + thin brand border behind the QR for printable contrast
-    d.rectangle([(qx - pad - 2, qy - pad - 2),
-                 (qx + qr_size + pad + 2, qy + qr_size + pad + 2)], fill=brand)
-    d.rectangle([(qx - pad, qy - pad),
-                 (qx + qr_size + pad, qy + qr_size + pad)], fill=(255, 255, 255))
-    img.paste(qr_img, (qx, qy))
-
-    # CTA + footer
-    cta = "Scan to Order"
-    font_cta = _qr_font(34, bold=True)
-    bbox = d.textbbox((0, 0), cta, font=font_cta)
-    d.text(((W - (bbox[2] - bbox[0])) // 2, qy + qr_size + 50), cta,
-           fill=brand, font=font_cta)
-
-    foot = "Point your phone camera at the code to view the menu"
-    font_foot = _qr_font(18)
-    bbox = d.textbbox((0, 0), foot, font=font_foot)
-    d.text(((W - (bbox[2] - bbox[0])) // 2, qy + qr_size + 100), foot,
-           fill=(110, 114, 130), font=font_foot)
-
-    return img
-
-
-@app.route("/owner/tables/qr-posters.zip")
-@login_required
-def download_all_table_qr_posters() -> Response:
-    """Bundle every owner table's branded QR poster into a single zip download.
-
-    Useful when an owner is setting up a new floor and wants to print all
-    posters at once instead of clicking each table individually.
-    """
-    import zipfile
-    owner_id = logged_in_owner_id()
-    tables = [t for t in load_tables() if t.get("ownerId") == owner_id]
-    if not tables:
-        flash("Add at least one table before downloading posters.")
-        return redirect(url_for("owner_dashboard") + "#tables")
-
-    owner = db.session.get(Owner, owner_id) if owner_id else None
-    cafe_name = (owner.cafe_name if owner else None) or "Welcome"
-    branding = load_settings(owner_id) if owner_id else {"logoUrl": "", "brandColor": "#4f46e5"}
-
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for table in tables:
-            table_url = url_for("table_order", table_id=table["id"], _external=True)
-            poster = _render_branded_table_qr(
-                table_url=table_url,
-                cafe_name=cafe_name,
-                table_name=table.get("name") or table["id"],
-                brand_color=branding.get("brandColor", "#4f46e5"),
-                logo_url=branding.get("logoUrl", ""),
-            )
-            png_buf = io.BytesIO()
-            poster.save(png_buf, format="PNG", optimize=True)
-            # Filenames keep the table id so they're unique even when names clash.
-            safe_name = re.sub(r"[^a-zA-Z0-9_\-]+", "_", str(table.get("name") or table["id"]))[:40] or table["id"]
-            zf.writestr(f"qr-{safe_name}-{table['id']}.png", png_buf.getvalue())
-    buf.seek(0)
-
-    safe_cafe = re.sub(r"[^a-zA-Z0-9_\-]+", "_", cafe_name)[:40] or "cafe"
-    return Response(
-        buf.read(),
-        mimetype="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{safe_cafe}-table-qr-posters.zip"'},
-    )
-
-
 @app.route("/owner/table/<table_id>/qr")
 @login_required
 def table_qr(table_id: str) -> Response:
-    """Return a branded PNG poster for a table QR.
-
-    The poster is sized for printing (720×1000) and reuses the cafe's logo,
-    name and brand colour so each table gets a personalised hand-out instead
-    of a bare QR square. Pass ``?plain=1`` to get the original raw QR PNG
-    (e.g. for embedding in third-party menus).
-    """
     owner_id = logged_in_owner_id()
     if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
         abort(400)
@@ -3245,29 +3031,11 @@ def table_qr(table_id: str) -> Response:
     if not table or table.get("ownerId") != owner_id:
         abort(403)
     table_url = url_for("table_order", table_id=table_id, _external=True)
-
-    if request.args.get("plain"):
-        qr_img = qrcode.make(table_url)
-        buf = io.BytesIO()
-        qr_img.save(buf, format="PNG")
-        buf.seek(0)
-        return Response(buf.read(), mimetype="image/png")
-
-    owner = db.session.get(Owner, owner_id) if owner_id else None
-    cafe_name = (owner.cafe_name if owner else None) or "Welcome"
-    branding = load_settings(owner_id) if owner_id else {"logoUrl": "", "brandColor": "#4f46e5"}
-    poster = _render_branded_table_qr(
-        table_url=table_url,
-        cafe_name=cafe_name,
-        table_name=table.get("name") or table_id,
-        brand_color=branding.get("brandColor", "#4f46e5"),
-        logo_url=branding.get("logoUrl", ""),
-    )
+    qr_img = qrcode.make(table_url)
     buf = io.BytesIO()
-    poster.save(buf, format="PNG", optimize=True)
+    qr_img.save(buf, format="PNG")
     buf.seek(0)
-    return Response(buf.read(), mimetype="image/png",
-                    headers={"Cache-Control": "private, max-age=60"})
+    return Response(buf.read(), mimetype="image/png")
 
 
 # ---------------------------------------------------------------------------

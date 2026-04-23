@@ -423,11 +423,6 @@
 
           <div>
             {% if tables %}
-            <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
-              <a href="{{ url_for('download_all_table_qr_posters') }}"
-                 class="btn btn-secondary btn-sm"
-                 download>Download all posters (.zip)</a>
-            </div>
             <div class="tables-grid">
               {% for table in tables %}
               <div class="table-item">
@@ -546,9 +541,6 @@
                                 <input type="file" accept="image/png,image/jpeg" class="js-image-upload" style="display:none;" />
                               </label>
                               <button type="button" class="btn btn-ghost btn-sm js-image-clear">✨ Use AI image</button>
-                              <button type="button" class="btn btn-ghost btn-sm js-image-regen"
-                                      data-regen-url="{{ url_for('regen_menu_item_image', item_id=item.id) }}"
-                                      title="Generate a new AI image for this item">🎲 Regenerate</button>
                               <span class="js-image-status" style="font-size:.72rem;color:#6b7280;"></span>
                             </div>
                           </div>
@@ -1088,25 +1080,6 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
     }
   }
   document.querySelectorAll('.js-image-upload').forEach(wire);
-
-  // Regenerate AI image: POSTs to the regen route, which bumps the item's
-  // image_seed and clears any custom image_url, then reloads to show the
-  // fresh picture. Done via a hidden form so the global CSRF token applies.
-  document.querySelectorAll('.js-image-regen').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const url = btn.getAttribute('data-regen-url');
-      if (!url) return;
-      if (!confirm('Generate a new AI image for this item? Any custom image URL will be cleared.')) return;
-      const f = document.createElement('form');
-      f.method = 'POST';
-      f.action = url;
-      const t = document.createElement('input');
-      t.type = 'hidden'; t.name = 'csrf_token'; t.value = csrf;
-      f.appendChild(t);
-      document.body.appendChild(f);
-      f.submit();
-    });
-  });
 })();
 
 // ─── Table Calls: drawer (peek), sidebar badge, and full tab panel ──────

@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "python-3.11"]
+modules = ["nodejs-24", "python-3.12"]
 
 [deployment]
 router = "application"
@@ -20,33 +20,17 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Push to GitHub"
-
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python start.py"
+args = "python wsgi.py"
 waitForPort = 5000
 
 [workflows.workflow.metadata]
 outputType = "webview"
-
-[[workflows.workflow]]
-name = "Push to GitHub"
-author = "agent"
-mode = "parallel"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "python .push_changes.py \"auto: snapshot from Replit workspace\""
-
-[workflows.workflow.metadata]
-outputType = "console"
 
 [agent]
 stack = "PNPM_WORKSPACE"
@@ -54,7 +38,7 @@ expertMode = true
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 20000
+timeoutMs = 180000
 
 [[ports]]
 localPort = 5000
@@ -63,10 +47,6 @@ externalPort = 5000
 [[ports]]
 localPort = 5173
 externalPort = 5173
-
-[[ports]]
-localPort = 8000
-externalPort = 8000
 
 [[ports]]
 localPort = 8080
@@ -79,8 +59,3 @@ externalPort = 80
 [nix]
 channel = "stable-25_05"
 packages = ["freetype", "glibcLocales", "lcms2", "libev", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "tcl", "tk", "zlib"]
-
-[userenv]
-
-[userenv.shared]
-PORT = "5000"
