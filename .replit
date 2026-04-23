@@ -20,6 +20,10 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Push to GitHub"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -31,6 +35,17 @@ outputType = "webview"
 task = "shell.exec"
 args = "python start.py"
 waitForPort = 5000
+
+[[workflows.workflow]]
+name = "Push to GitHub"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python .push_changes.py \"auto: snapshot from Replit workspace\""
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "PNPM_WORKSPACE"
