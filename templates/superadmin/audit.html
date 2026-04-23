@@ -60,6 +60,15 @@
           <a href="{{ url_for('superadmin_audit') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
         </div>
       </form>
+      <div class="d-flex gap-2 mt-3 pt-3 border-top">
+        <span class="small text-muted me-auto align-self-center">Export current filter:</span>
+        <a class="btn btn-sm btn-outline-success" href="{{ url_for('superadmin_audit_csv', q=q, event=event_filter) }}">
+          <i class="bi bi-filetype-csv me-1"></i> CSV
+        </a>
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('superadmin_audit_json', q=q, event=event_filter) }}">
+          <i class="bi bi-filetype-json me-1"></i> JSON
+        </a>
+      </div>
     </div>
 
     <div class="card-x">

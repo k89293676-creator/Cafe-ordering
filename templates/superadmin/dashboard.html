@@ -69,7 +69,13 @@
       <h5><i class="bi bi-shield-lock-fill me-2 text-primary"></i>Superadmin Dashboard</h5>
       <div class="d-flex align-items-center gap-3">
         <span class="text-muted small"><i class="bi bi-person-fill me-1"></i>{{ owner_username }}</span>
-        <span class="badge bg-danger rounded-pill">SA</span>
+        {% if session.get('superadmin_key_verified') %}
+          <span class="badge bg-success rounded-pill" title="Admin elevated via SUPERADMIN_KEY">
+            <i class="bi bi-shield-check"></i> Key-verified
+          </span>
+        {% else %}
+          <span class="badge bg-danger rounded-pill" title="Real superadmin owner">SA</span>
+        {% endif %}
       </div>
     </div>
 

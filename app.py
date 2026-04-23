@@ -491,6 +491,24 @@ def extra_security_headers(response: Response) -> Response:
     response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    # Defence-in-depth: clickjacking, MIME sniffing, referrer leaks.
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    # HSTS only when the request was HTTPS — never on plain HTTP, which
+    # would lock developers out of localhost.
+    is_https = (
+        request.is_secure
+        or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+    )
+    if is_https and (
+        os.environ.get("IS_PRODUCTION", "").lower() == "true"
+        or os.environ.get("RAILWAY_ENVIRONMENT")
+    ):
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        )
     return response
 
 
@@ -3886,6 +3904,68 @@ def superadmin_audit():
             if session.get("superadmin_key_verified") else None
         ),
     )
+
+
+def _filtered_audit_events(q: str, event_filter: str) -> list[dict]:
+    events = list(SECURITY_EVENT_BUFFER)
+    events.reverse()
+    if event_filter:
+        events = [e for e in events if e.get("event", "").startswith(event_filter)]
+    if q:
+        events = [
+            e for e in events
+            if q in (e.get("event", "") + " " + e.get("detail", "") + " " + str(e.get("ip", ""))).lower()
+        ]
+    return events
+
+
+@app.route("/superadmin/audit.json")
+@superadmin_required
+def superadmin_audit_json():
+    q = (request.args.get("q", "") or "").strip().lower()
+    event_filter = (request.args.get("event", "") or "").strip()
+    events = _filtered_audit_events(q, event_filter)
+    out = [
+        {
+            "ts": e.get("ts"),
+            "iso": datetime.fromtimestamp(float(e.get("ts", 0)), tz=timezone.utc).isoformat(),
+            "event": e.get("event", ""),
+            "ip": e.get("ip", ""),
+            "actor": e.get("actor"),
+            "detail": e.get("detail", ""),
+        }
+        for e in events
+    ]
+    log_security("SUPERADMIN_AUDIT_EXPORT", f"format=json count={len(out)}")
+    return jsonify(events=out, total=len(out))
+
+
+@app.route("/superadmin/audit.csv")
+@superadmin_required
+def superadmin_audit_csv():
+    import csv
+    import io
+    q = (request.args.get("q", "") or "").strip().lower()
+    event_filter = (request.args.get("event", "") or "").strip()
+    events = _filtered_audit_events(q, event_filter)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["timestamp_iso", "epoch", "event", "ip", "actor", "detail"])
+    for e in events:
+        ts = float(e.get("ts", 0) or 0)
+        writer.writerow([
+            datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(),
+            ts,
+            e.get("event", ""),
+            e.get("ip", ""),
+            e.get("actor") if e.get("actor") is not None else "",
+            e.get("detail", ""),
+        ])
+    log_security("SUPERADMIN_AUDIT_EXPORT", f"format=csv count={len(events)}")
+    fname = "security-audit-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + ".csv"
+    resp = Response(buf.getvalue(), mimetype="text/csv")
+    resp.headers["Content-Disposition"] = f'attachment; filename="{fname}"'
+    return resp
 
 
 @app.route("/superadmin/verify-key/clear", methods=["POST"])
