@@ -456,6 +456,38 @@ class Settings(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 
+class OwnerLead(db.Model):
+    """Pre-account 'request access' submissions from the public landing page.
+
+    A lead is *not* an Owner — it has no password, no login, and grants no
+    access. Superadmins review leads at ``/superadmin/leads`` and either
+    approve (which provisions an Owner with a one-time temp password and
+    emails it to the café owner) or reject (which marks the lead handled
+    without creating any account).
+
+    Kept deliberately separate from the existing ``approval_status='pending'``
+    flow on Owner so that low-quality / spam submissions never pollute the
+    real Owners table.
+    """
+
+    __tablename__ = "owner_leads"
+    id = db.Column(db.Integer, primary_key=True)
+    contact_name = db.Column(db.Text, nullable=False, default="")
+    cafe_name = db.Column(db.Text, nullable=False, default="")
+    email = db.Column(db.Text, nullable=False, default="")
+    phone = db.Column(db.Text, default="")
+    city = db.Column(db.Text, default="")
+    table_count = db.Column(db.Integer, default=0)
+    message = db.Column(db.Text, default="")
+    source = db.Column(db.Text, default="landing")
+    status = db.Column(db.Text, default="pending", server_default="pending", nullable=False)
+    handled_by = db.Column(db.Integer, db.ForeignKey("owners.id"), nullable=True)
+    handled_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    submitted_ip = db.Column(db.Text, default="")
+    submitted_ua = db.Column(db.Text, default="")
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+
 class SystemFlag(db.Model):
     """Global, single-row key/value flags for cross-tenant runtime toggles.
 
@@ -2225,6 +2257,95 @@ def security_txt():
 # ---------------------------------------------------------------------------
 # Public routes
 # ---------------------------------------------------------------------------
+
+@app.route("/welcome")
+@app.route("/for-owners")
+@limiter.limit("60 per minute")
+def owner_landing() -> str:
+    """Public marketing page for café owners. Explains every feature of the
+    tool and ends in a 'Request Access' form. Linked from the home page nav
+    and from the email/WhatsApp template you send to prospects."""
+    return render_template("landing.html")
+
+
+@app.route("/welcome/request-access", methods=["POST"])
+@limiter.limit("5 per hour; 30 per day")
+def owner_lead_submit() -> Response:
+    """Accept a 'request access' submission from the landing page.
+    Lightly validated; heavy lifting (approval, account creation) is done
+    later by a superadmin from /superadmin/leads."""
+    contact_name = str(request.form.get("contact_name", "")).strip()[:120]
+    cafe_name = str(request.form.get("cafe_name", "")).strip()[:200]
+    email = str(request.form.get("email", "")).strip()[:254]
+    phone = str(request.form.get("phone", "")).strip()[:30]
+    city = str(request.form.get("city", "")).strip()[:120]
+    table_count_raw = str(request.form.get("table_count", "")).strip()[:6]
+    message = str(request.form.get("message", "")).strip()[:1000]
+    # Honeypot field — any bot that auto-fills every input fails here
+    # because real users never see/touch it.
+    if str(request.form.get("website", "")).strip():
+        return redirect(url_for("owner_landing") + "#thanks")
+
+    if not contact_name or not cafe_name or not email:
+        flash("Please share your name, café name and email so we can reach you.", "lead_error")
+        return redirect(url_for("owner_landing") + "#request-access")
+
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        flash("That email address doesn't look right — please double-check.", "lead_error")
+        return redirect(url_for("owner_landing") + "#request-access")
+
+    try:
+        table_count = int(table_count_raw) if table_count_raw.isdigit() else 0
+        table_count = max(0, min(table_count, 9999))
+    except ValueError:
+        table_count = 0
+
+    lead = OwnerLead(
+        contact_name=contact_name,
+        cafe_name=cafe_name,
+        email=email.lower(),
+        phone=phone,
+        city=city,
+        table_count=table_count,
+        message=message,
+        source="landing",
+        submitted_ip=_client_ip()[:64],
+        submitted_ua=(request.headers.get("User-Agent") or "")[:255],
+    )
+    db.session.add(lead)
+    db.session.commit()
+    log_security("OWNER_LEAD_SUBMITTED",
+                 f"lead_id={lead.id} email={email!r} cafe={cafe_name!r}")
+
+    # Fire-and-forget acknowledgement email (non-blocking — won't delay
+    # the form response if SMTP is slow or unconfigured).
+    def _send_lead_ack(to_addr: str, name: str, cafe: str) -> None:
+        if not _mail_enabled():
+            return
+        try:
+            mail.send(Message(
+                subject=f"We got your request, {name} ☕",
+                recipients=[to_addr],
+                body=(
+                    f"Hi {name},\n\n"
+                    f"Thanks for requesting access for {cafe}. "
+                    "Our team reviews new café applications within 1–2 business days "
+                    "and will reach out at this address with your login link and a "
+                    "short onboarding call.\n\n"
+                    "If you'd like to fast-track approval, reply to this email with "
+                    "your menu (PDF / photo / handwritten — anything works) and your "
+                    "café's logo.\n\n"
+                    "Talk soon,\n"
+                    "The Cafe Ordering team"
+                ),
+            ))
+        except Exception as exc:  # pragma: no cover
+            app.logger.warning("Lead ack email failed: %s", exc)
+
+    bg_tasks.submit(_send_lead_ack, email, contact_name, cafe_name,
+                    _name="send_lead_ack")
+    return redirect(url_for("owner_landing") + "#thanks")
+
 
 @app.route("/")
 def home() -> str:
@@ -4608,6 +4729,112 @@ def superadmin_dashboard():
         recent_security=recent_security,
         health=health,
     )
+
+
+@app.route("/superadmin/leads")
+@superadmin_required
+def superadmin_leads():
+    """Review queue for owner-access requests submitted via /welcome.
+    Pending leads first; then handled (approved/rejected) for audit."""
+    status_filter = (request.args.get("status") or "pending").strip().lower()
+    if status_filter not in {"pending", "approved", "rejected", "all"}:
+        status_filter = "pending"
+    q = OwnerLead.query
+    if status_filter != "all":
+        q = q.filter(OwnerLead.status == status_filter)
+    leads = q.order_by(OwnerLead.created_at.desc()).limit(500).all()
+    counts = {
+        "pending": OwnerLead.query.filter_by(status="pending").count(),
+        "approved": OwnerLead.query.filter_by(status="approved").count(),
+        "rejected": OwnerLead.query.filter_by(status="rejected").count(),
+    }
+    return render_template("superadmin/leads.html",
+                           leads=leads, counts=counts,
+                           status_filter=status_filter)
+
+
+@app.route("/superadmin/leads/<int:lead_id>/approve", methods=["POST"])
+@superadmin_required
+@superadmin_destructive
+def superadmin_lead_approve(lead_id: int):
+    """Approve a lead → provision an Owner with a one-time temp password
+    and email it to the café owner. The lead row is kept for audit."""
+    lead = db.session.get(OwnerLead, lead_id)
+    if not lead or lead.status != "pending":
+        abort(404)
+    # Derive a sensible default username from the cafe name; superadmin can
+    # rename later from the dashboard if needed.
+    base = re.sub(r"[^a-z0-9]+", "_", (lead.cafe_name or "owner").lower()).strip("_")[:48] or "owner"
+    candidate = base
+    suffix = 1
+    while Owner.query.filter_by(username=candidate).first():
+        suffix += 1
+        candidate = f"{base}_{suffix}"[:64]
+    if Owner.query.filter_by(email=lead.email).first():
+        flash(f"An owner with email {lead.email} already exists — link them manually instead.",
+              "lead_error")
+        return redirect(url_for("superadmin_leads"))
+
+    tmp_password = secrets.token_urlsafe(12)
+    create_owner_in_db(
+        username=candidate,
+        email=lead.email,
+        password_hash=_make_password_hash(tmp_password),
+        cafe_name=lead.cafe_name,
+    )
+    lead.status = "approved"
+    lead.handled_by = session.get("owner_id")
+    lead.handled_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    login_url = url_for("owner_login", _external=True)
+
+    def _send_invite(to_addr: str, name: str, cafe: str, uname: str, pw: str, url: str) -> None:
+        if not _mail_enabled():
+            return
+        try:
+            mail.send(Message(
+                subject=f"Welcome aboard — {cafe} is ready ☕",
+                recipients=[to_addr],
+                body=(
+                    f"Hi {name},\n\n"
+                    f"Your café '{cafe}' has been approved. Here are your login details:\n\n"
+                    f"Login URL : {url}\n"
+                    f"Username  : {uname}\n"
+                    f"Password  : {pw}\n\n"
+                    "Please change this password the first time you sign in "
+                    "(My Profile → Change Password) and turn on two-factor "
+                    "authentication for extra safety.\n\n"
+                    "Need help getting started? Just reply to this email.\n\n"
+                    "Cheers,\n"
+                    "The Cafe Ordering team"
+                ),
+            ))
+        except Exception as exc:  # pragma: no cover
+            app.logger.warning("Invite email failed: %s", exc)
+
+    bg_tasks.submit(_send_invite, lead.email, lead.contact_name, lead.cafe_name,
+                    candidate, tmp_password, login_url, _name="send_owner_invite")
+    log_security("OWNER_LEAD_APPROVED", f"lead_id={lead.id} username={candidate!r}")
+    flash(f"Approved. Owner '{candidate}' created. Temp password (also emailed): {tmp_password}",
+          "lead_credentials")
+    return redirect(url_for("superadmin_leads"))
+
+
+@app.route("/superadmin/leads/<int:lead_id>/reject", methods=["POST"])
+@superadmin_required
+@superadmin_destructive
+def superadmin_lead_reject(lead_id: int):
+    lead = db.session.get(OwnerLead, lead_id)
+    if not lead or lead.status != "pending":
+        abort(404)
+    lead.status = "rejected"
+    lead.handled_by = session.get("owner_id")
+    lead.handled_at = datetime.now(timezone.utc)
+    db.session.commit()
+    log_security("OWNER_LEAD_REJECTED", f"lead_id={lead.id}")
+    flash(f"Lead from {lead.email} marked as rejected.", "lead_info")
+    return redirect(url_for("superadmin_leads"))
 
 
 @app.route("/superadmin/cafes/create", methods=["POST"])

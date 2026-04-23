@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Owner Leads — Superadmin</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" />
+  <style>
+    body { background:#0a0a0a; color:#f5f5f5; font-family:'Inter',system-ui,sans-serif; }
+    .wrap { max-width:1200px; margin:0 auto; padding:2rem 1.5rem; }
+    h1 { font-family:'Playfair Display',serif; }
+    .filters { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1.5rem; }
+    .filters a { padding:.5rem 1rem; background:#141414; border:1px solid #2a2a2a; border-radius:8px; color:#a0a0a0; text-decoration:none; font-size:.9rem; }
+    .filters a.active { background:#f59e0b; color:#0a0a0a; border-color:#f59e0b; font-weight:600; }
+    .filters a .badge { background:rgba(0,0,0,.18); color:inherit; margin-left:.4rem; }
+    .lead-card { background:#141414; border:1px solid #2a2a2a; border-radius:12px; padding:1.25rem 1.5rem; margin-bottom:1rem; }
+    .lead-head { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem; }
+    .lead-meta { color:#a0a0a0; font-size:.88rem; margin-top:.25rem; }
+    .lead-body { margin-top:.75rem; display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:.75rem; font-size:.92rem; }
+    .lead-body .k { color:#a0a0a0; font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; }
+    .lead-msg { background:#1c1c1c; padding:.75rem 1rem; border-radius:8px; margin-top:.75rem; color:#d0d0d0; font-size:.92rem; white-space:pre-wrap; }
+    .lead-actions { margin-top:1rem; display:flex; gap:.5rem; flex-wrap:wrap; }
+    .lead-actions form { display:inline; }
+    .status-pill { display:inline-block; padding:.25rem .65rem; border-radius:99px; font-size:.78rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+    .status-pending { background:rgba(245,158,11,.18); color:#fcd34d; }
+    .status-approved { background:rgba(34,197,94,.18); color:#86efac; }
+    .status-rejected { background:rgba(239,68,68,.18); color:#fca5a5; }
+    .empty { text-align:center; padding:4rem 1rem; color:#a0a0a0; }
+    .alert { padding:.85rem 1rem; border-radius:8px; margin-bottom:1rem; font-size:.92rem; }
+    .alert-error { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.3); color:#fca5a5; }
+    .alert-ok { background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.3); color:#86efac; }
+    .alert-cred { background:rgba(245,158,11,.14); border:1px solid rgba(245,158,11,.4); color:#fcd34d; font-family:monospace; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:2rem; }
+    .topbar a { color:#a0a0a0; text-decoration:none; font-size:.9rem; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a href="{{ url_for('superadmin_dashboard') }}"><i class="bi bi-arrow-left"></i> Back to Dashboard</a>
+    <a href="/welcome" target="_blank">View public landing page <i class="bi bi-box-arrow-up-right"></i></a>
+  </div>
+  <h1>Owner access requests</h1>
+  <p class="text-muted">Review submissions from <code>/welcome</code>. Approving creates an Owner account and emails the login details.</p>
+
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in msgs %}
+      {% if cat == "lead_error" %}<div class="alert alert-error">{{ msg }}</div>
+      {% elif cat == "lead_info" %}<div class="alert alert-ok">{{ msg }}</div>
+      {% elif cat == "lead_credentials" %}<div class="alert alert-cred">{{ msg }}</div>
+      {% endif %}
+    {% endfor %}
+  {% endwith %}
+
+  <div class="filters">
+    <a href="?status=pending"   class="{{ 'active' if status_filter=='pending' }}">Pending <span class="badge">{{ counts.pending }}</span></a>
+    <a href="?status=approved"  class="{{ 'active' if status_filter=='approved' }}">Approved <span class="badge">{{ counts.approved }}</span></a>
+    <a href="?status=rejected"  class="{{ 'active' if status_filter=='rejected' }}">Rejected <span class="badge">{{ counts.rejected }}</span></a>
+    <a href="?status=all"       class="{{ 'active' if status_filter=='all' }}">All</a>
+  </div>
+
+  {% if not leads %}
+    <div class="empty"><i class="bi bi-inbox" style="font-size:2.5rem;"></i><p class="mt-3">No {{ status_filter }} leads right now.</p></div>
+  {% else %}
+    {% for lead in leads %}
+      <div class="lead-card">
+        <div class="lead-head">
+          <div>
+            <strong style="font-size:1.1rem;">{{ lead.cafe_name }}</strong>
+            <span class="status-pill status-{{ lead.status }}">{{ lead.status }}</span>
+            <div class="lead-meta">
+              <i class="bi bi-person"></i> {{ lead.contact_name }} ·
+              <i class="bi bi-envelope"></i> <a href="mailto:{{ lead.email }}">{{ lead.email }}</a>
+              {% if lead.phone %} · <i class="bi bi-telephone"></i> {{ lead.phone }}{% endif %}
+            </div>
+          </div>
+          <div class="text-end lead-meta">
+            <div>Submitted {{ lead.created_at.strftime('%Y-%m-%d %H:%M UTC') if lead.created_at else '—' }}</div>
+            {% if lead.handled_at %}
+              <div>Handled {{ lead.handled_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="lead-body">
+          <div><div class="k">City</div>{{ lead.city or '—' }}</div>
+          <div><div class="k">Tables</div>{{ lead.table_count or '—' }}</div>
+          <div><div class="k">Source</div>{{ lead.source }}</div>
+          <div><div class="k">From IP</div><code style="font-size:.78rem;">{{ lead.submitted_ip or '—' }}</code></div>
+        </div>
+
+        {% if lead.message %}
+          <div class="lead-msg">{{ lead.message }}</div>
+        {% endif %}
+
+        {% if lead.status == 'pending' %}
+        <div class="lead-actions">
+          <form method="POST" action="{{ url_for('superadmin_lead_approve', lead_id=lead.id) }}"
+                onsubmit="return confirm('Approve {{ lead.cafe_name|e }} and create an owner account? A temp password will be emailed to {{ lead.email|e }}.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-circle"></i> Approve &amp; Create Account</button>
+          </form>
+          <form method="POST" action="{{ url_for('superadmin_lead_reject', lead_id=lead.id) }}"
+                onsubmit="return confirm('Mark this lead as rejected? This cannot be undone.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button type="submit" class="btn btn-outline-danger btn-sm"><i class="bi bi-x-circle"></i> Reject</button>
+          </form>
+          <a href="mailto:{{ lead.email }}?subject=About your Cafe 11:11 request" class="btn btn-outline-secondary btn-sm"><i class="bi bi-reply"></i> Email Back</a>
+        </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>
+</body>
+</html>

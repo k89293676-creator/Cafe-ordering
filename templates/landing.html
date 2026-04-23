@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>For Café Owners — Cafe 11:11 Ordering Platform</title>
+  <meta name="description" content="A complete QR-code ordering, kitchen, and analytics platform for cafés. No app downloads, no hardware. Request access in 2 minutes." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <style>
+    :root { --bg:#0a0a0a; --panel:#141414; --panel-2:#1c1c1c; --line:#2a2a2a; --text:#f5f5f5; --muted:#a0a0a0; --primary:#f59e0b; --accent:#4f46e5; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:'Inter',system-ui,-apple-system,sans-serif; line-height:1.6; }
+    a { color:var(--primary); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+
+    .nav { position:sticky; top:0; z-index:50; backdrop-filter:blur(10px); background:rgba(10,10,10,.85); border-bottom:1px solid var(--line); }
+    .nav-inner { max-width:1100px; margin:0 auto; padding:1rem 1.5rem; display:flex; align-items:center; justify-content:space-between; }
+    .nav-brand { font-family:'Playfair Display',serif; font-weight:700; font-size:1.25rem; color:var(--text); }
+    .nav-links { display:flex; gap:1.25rem; align-items:center; }
+    .nav-links a { color:var(--muted); font-size:.95rem; }
+    .nav-links a:hover { color:var(--text); }
+    .nav-cta { background:var(--primary); color:#0a0a0a !important; padding:.55rem 1.1rem; border-radius:8px; font-weight:600; }
+    .nav-cta:hover { text-decoration:none; opacity:.92; }
+
+    .hero { padding:5rem 1.5rem 4rem; text-align:center; background:radial-gradient(ellipse at 60% 40%, rgba(245,158,11,.18) 0%, transparent 60%), radial-gradient(ellipse at 20% 80%, rgba(79,70,229,.14) 0%, transparent 50%), var(--bg); }
+    .hero h1 { font-family:'Playfair Display',serif; font-size:clamp(2.2rem,5vw,3.5rem); margin:0 0 1rem; line-height:1.15; }
+    .hero h1 span { color:var(--primary); }
+    .hero p { max-width:680px; margin:0 auto 2rem; font-size:1.15rem; color:var(--muted); }
+    .hero-cta { display:inline-flex; gap:.75rem; flex-wrap:wrap; justify-content:center; }
+    .btn { display:inline-block; padding:.85rem 1.6rem; border-radius:10px; font-weight:600; font-size:1rem; border:none; cursor:pointer; transition:transform .15s, opacity .15s; text-decoration:none; }
+    .btn:hover { transform:translateY(-1px); text-decoration:none; }
+    .btn-primary { background:var(--primary); color:#0a0a0a; }
+    .btn-ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+    .hero-meta { margin-top:1.75rem; font-size:.9rem; color:var(--muted); }
+    .hero-meta strong { color:var(--text); font-weight:600; }
+
+    .section { max-width:1100px; margin:0 auto; padding:4rem 1.5rem; }
+    .section h2 { font-family:'Playfair Display',serif; font-size:clamp(1.75rem,3vw,2.4rem); margin:0 0 .5rem; text-align:center; }
+    .section .lede { text-align:center; color:var(--muted); max-width:640px; margin:0 auto 2.5rem; }
+
+    .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:1.25rem; max-width:900px; margin:2rem auto 0; }
+    .stat { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:1.5rem; text-align:center; }
+    .stat-num { font-size:2rem; font-weight:700; color:var(--primary); }
+    .stat-label { color:var(--muted); font-size:.9rem; margin-top:.25rem; }
+
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:1.25rem; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:1.5rem; transition:transform .2s, border-color .2s; }
+    .card:hover { transform:translateY(-2px); border-color:var(--primary); }
+    .card .icon { width:42px; height:42px; border-radius:10px; background:rgba(245,158,11,.14); display:flex; align-items:center; justify-content:center; font-size:1.4rem; margin-bottom:1rem; }
+    .card h3 { margin:0 0 .5rem; font-size:1.1rem; }
+    .card p { margin:0; color:var(--muted); font-size:.95rem; }
+    .card ul { margin:.6rem 0 0; padding-left:1.1rem; color:var(--muted); font-size:.92rem; }
+    .card ul li { margin:.3rem 0; }
+
+    .compare { background:var(--panel); border:1px solid var(--line); border-radius:14px; overflow:hidden; max-width:800px; margin:2rem auto 0; }
+    .compare table { width:100%; border-collapse:collapse; }
+    .compare th, .compare td { padding:1rem; text-align:left; border-bottom:1px solid var(--line); font-size:.95rem; }
+    .compare th { background:var(--panel-2); font-weight:600; }
+    .compare td:first-child { color:var(--muted); }
+    .check { color:#22c55e; font-weight:700; }
+    .cross { color:#ef4444; font-weight:700; }
+
+    .how { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1.25rem; counter-reset:step; }
+    .how-step { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:1.5rem; position:relative; }
+    .how-step::before { counter-increment:step; content:counter(step); position:absolute; top:-14px; left:1.5rem; background:var(--primary); color:#0a0a0a; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; }
+    .how-step h3 { margin:.5rem 0 .5rem; font-size:1.05rem; }
+    .how-step p { margin:0; color:var(--muted); font-size:.92rem; }
+
+    .faq details { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1rem 1.25rem; margin-bottom:.75rem; }
+    .faq summary { cursor:pointer; font-weight:500; color:var(--text); }
+    .faq summary:hover { color:var(--primary); }
+    .faq details[open] { background:var(--panel-2); }
+    .faq p { color:var(--muted); margin:.75rem 0 0; font-size:.95rem; }
+
+    .form-section { background:linear-gradient(180deg, var(--bg), var(--panel)); border-top:1px solid var(--line); }
+    .form-card { max-width:640px; margin:0 auto; background:var(--panel-2); border:1px solid var(--line); border-radius:16px; padding:2.5rem; }
+    .form-card h2 { text-align:left; margin-top:0; }
+    .form-card .lede { text-align:left; margin-left:0; }
+    .form-row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem; }
+    @media (max-width:600px) { .form-row { grid-template-columns:1fr; } }
+    .field { display:flex; flex-direction:column; gap:.4rem; }
+    .field label { font-size:.88rem; color:var(--muted); font-weight:500; }
+    .field input, .field textarea { background:var(--panel); border:1px solid var(--line); color:var(--text); padding:.7rem .9rem; border-radius:8px; font:inherit; transition:border-color .15s; }
+    .field input:focus, .field textarea:focus { outline:none; border-color:var(--primary); }
+    .field-full { grid-column:1 / -1; }
+    .honeypot { position:absolute; left:-9999px; width:1px; height:1px; opacity:0; }
+    .form-card button { width:100%; margin-top:.5rem; }
+    .form-foot { text-align:center; margin-top:1rem; color:var(--muted); font-size:.85rem; }
+
+    .alert { padding:.85rem 1rem; border-radius:8px; margin-bottom:1rem; font-size:.92rem; }
+    .alert-error { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.3); color:#fca5a5; }
+    .alert-ok { background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.3); color:#86efac; }
+
+    footer { padding:2.5rem 1.5rem; text-align:center; color:var(--muted); border-top:1px solid var(--line); font-size:.9rem; }
+    footer a { color:var(--muted); margin:0 .5rem; }
+  </style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="nav-brand" href="/welcome">☕ Cafe 11:11</a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#faq">FAQ</a>
+      <a class="nav-cta" href="#request-access">Request Access</a>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <h1>Run your café <span>without the chaos.</span></h1>
+  <p>QR-code ordering, live kitchen dashboard, stock control, sales analytics, and customer notifications — all in one platform. No app for your customers to download. No hardware to buy.</p>
+  <div class="hero-cta">
+    <a class="btn btn-primary" href="#request-access">Request Free Access</a>
+    <a class="btn btn-ghost" href="#features">See Everything It Does</a>
+  </div>
+  <div class="hero-meta">Free 30-day trial · Personal onboarding · No credit card required</div>
+  <div class="stats">
+    <div class="stat"><div class="stat-num">~30%</div><div class="stat-label">faster table turnover</div></div>
+    <div class="stat"><div class="stat-num">~20%</div><div class="stat-label">higher avg. order value</div></div>
+    <div class="stat"><div class="stat-num">0</div><div class="stat-label">paper chits or wrong orders</div></div>
+    <div class="stat"><div class="stat-num">2 min</div><div class="stat-label">to request access</div></div>
+  </div>
+</section>
+
+<section class="section" id="features">
+  <h2>Everything your café needs, in one place</h2>
+  <p class="lede">Every feature below is included in your account from day one. No add-ons, no upsells.</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="icon">📱</div>
+      <h3>Scan-to-order from any table</h3>
+      <p>Customers scan a QR code on their table and order from your menu in their own browser.</p>
+      <ul>
+        <li>Works on any phone — no app install</li>
+        <li>Beautiful menu with photos, categories, prices</li>
+        <li>"Out of stock" tags update in real time</li>
+        <li>Notes per item ("less spicy", "no onions")</li>
+        <li>Optional tip and pickup code</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="icon">👨‍🍳</div>
+      <h3>Live kitchen dashboard</h3>
+      <p>Every new order pops up instantly with sound and a browser push notification.</p>
+      <ul>
+        <li>One-tap status: pending → preparing → ready → served</li>
+        <li>Filters by table, time, or order type</li>
+        <li>Audio + visual alerts you can't miss</li>
+        <li>Works on phone, tablet, or counter screen</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="icon">🪑</div>
+      <h3>Smart table management</h3>
+      <p>Real-time view of every table, who's seated, and what they've ordered.</p>
+      <ul>
+        <li>Transfer orders between tables in one tap</li>
+        <li>Mark tables as "needs cleaning" / "available"</li>
+        <li>Customer "Call waiter" and "Request bill" buttons</li>
+        <li>7-day occupancy and turnover stats per table</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="icon">📦</div>
+      <h3>Stock & inventory</h3>
+      <p>Items auto-disable when you run out, and re-enable when you restock.</p>
+      <ul>
+        <li>Per-ingredient stock tracking</li>
+        <li>Low-stock alerts on your dashboard</li>
+        <li>Recipe-aware: a sold dish deducts ingredients automatically</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="icon">📊</div>
+      <h3>Built-in analytics</h3>
+      <p>Know your business at a glance — no spreadsheet exports needed.</p>
+      <ul>
+        <li>Daily, 7-day, and monthly sales</li>
+        <li>Top-selling items and slow movers</li>
+        <li>Busiest hours and best days of the week</li>
+        <li>Per-staff performance (if you use multi-login)</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="icon">👥</div>
+      <h3>Customer accounts &amp; loyalty</h3>
+      <p>Customers can register, see past orders, and reorder favourites in one tap.</p>
+      <ul>
+        <li>Email confirmations on every order</li>
+        <li>Reorder previous order with one click</li>
+        <li>Feedback collection per order</li>
+        <li>Customer database you actually own</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="icon">🔐</div>
+      <h3>Secure by default</h3>
+      <p>Bank-grade security so you sleep at night.</p>
+      <ul>
+        <li>Encrypted passwords, login lockout</li>
+        <li>Optional two-factor authentication</li>
+        <li>Session hijack protection</li>
+        <li>Per-IP rate limiting on every form</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="icon">⚙️</div>
+      <h3>Branded for your café</h3>
+      <p>Make it yours — your logo, colours, and contact details.</p>
+      <ul>
+        <li>Custom logo and brand colour</li>
+        <li>Your café's name on every email and receipt</li>
+        <li>Custom QR codes per table</li>
+        <li>Multiple staff logins with role-based access</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="icon">⚡</div>
+      <h3>Fast, always-on infrastructure</h3>
+      <p>Hosted on Railway with 24/7 monitoring and automatic backups.</p>
+      <ul>
+        <li>Sub-second page loads (Brotli + caching)</li>
+        <li>Automatic error alerts to our team</li>
+        <li>No-duplicate order safeguards even on flaky Wi-Fi</li>
+        <li>Daily database backups</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="how">
+  <h2>How it works</h2>
+  <p class="lede">From "I'm interested" to "first order placed" in under a week.</p>
+  <div class="how">
+    <div class="how-step">
+      <h3>Submit your details</h3>
+      <p>Fill the form below — name, café, email. Takes 2 minutes.</p>
+    </div>
+    <div class="how-step">
+      <h3>Quick review</h3>
+      <p>We approve your café within 1–2 business days and email your login link.</p>
+    </div>
+    <div class="how-step">
+      <h3>15-min onboarding call</h3>
+      <p>We help you upload your menu, brand the portal, and print your QR codes.</p>
+    </div>
+    <div class="how-step">
+      <h3>Start taking orders</h3>
+      <p>Place your QR codes on tables and watch orders roll in. Free for 30 days.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <h2>Why café owners choose us</h2>
+  <p class="lede">Compared to paper menus, point-of-sale terminals, or generic delivery apps.</p>
+  <div class="compare">
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Paper menus</th>
+          <th>POS terminal</th>
+          <th>Cafe 11:11</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Customer needs to download an app</td><td class="cross">N/A</td><td class="cross">N/A</td><td class="check">No</td></tr>
+        <tr><td>Hardware required</td><td class="check">No</td><td class="cross">Yes (₹30k+)</td><td class="check">No</td></tr>
+        <tr><td>Live kitchen dashboard</td><td class="cross">No</td><td class="check">Yes</td><td class="check">Yes</td></tr>
+        <tr><td>Auto-disables out-of-stock items</td><td class="cross">No</td><td class="cross">Manual</td><td class="check">Yes</td></tr>
+        <tr><td>Customer reorder &amp; loyalty</td><td class="cross">No</td><td class="cross">No</td><td class="check">Yes</td></tr>
+        <tr><td>Sales analytics built in</td><td class="cross">No</td><td class="check">Limited</td><td class="check">Yes</td></tr>
+        <tr><td>You own your customer data</td><td class="check">N/A</td><td class="check">Yes</td><td class="check">Yes</td></tr>
+        <tr><td>Setup cost</td><td>Print fees</td><td>₹30k–₹80k</td><td class="check">₹0</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section faq" id="faq">
+  <h2>Common questions</h2>
+  <p class="lede">If your question isn't here, mention it in the request form below.</p>
+
+  <details>
+    <summary>Do my customers have to download anything?</summary>
+    <p>No. They scan the QR code on their table with their phone's camera, and the menu opens in their browser. That's it.</p>
+  </details>
+
+  <details>
+    <summary>Do I need any hardware or new equipment?</summary>
+    <p>No. Any phone, tablet, or laptop with a browser works for your kitchen / counter screen. We help you print waterproof QR code cards for each table.</p>
+  </details>
+
+  <details>
+    <summary>What does it cost?</summary>
+    <p>Free for the first 30 days. After that, pricing depends on your café's size and table count — typically a small monthly fee well below what a single missed order costs you. We discuss this on the onboarding call before you commit.</p>
+  </details>
+
+  <details>
+    <summary>Can I customise the look and feel?</summary>
+    <p>Yes. Your café's name, logo, and brand colour appear on the customer-facing menu, the receipts, and confirmation emails.</p>
+  </details>
+
+  <details>
+    <summary>Is my customer data safe?</summary>
+    <p>Yes. Passwords are encrypted, logins are protected by lockout and optional two-factor authentication, and every form is rate-limited. We're transparent about our security at <a href="/.well-known/security.txt">/.well-known/security.txt</a>.</p>
+  </details>
+
+  <details>
+    <summary>Can multiple staff use the system at once?</summary>
+    <p>Yes. You can create separate logins for managers, kitchen staff, and counter staff, each with their own access level. Every action is logged for audit.</p>
+  </details>
+
+  <details>
+    <summary>What happens if my Wi-Fi goes down mid-order?</summary>
+    <p>Our checkout endpoint protects against duplicate orders even if the customer's phone retries the request. Once their device reconnects, the order goes through cleanly — no duplicates, no missed orders.</p>
+  </details>
+
+  <details>
+    <summary>How long does onboarding take?</summary>
+    <p>Typically 2–4 days from approval. We handle digitising your menu (PDF, photo, or even handwritten — anything works) and printing QR codes; you only need to give us 15 minutes for the walk-through.</p>
+  </details>
+</section>
+
+<section class="section form-section" id="request-access">
+  <div class="form-card">
+    <h2>Request access for your café</h2>
+    <p class="lede">Fill this in and we'll email your login details within 1–2 business days. No credit card needed.</p>
+
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in msgs %}
+        {% if cat == "lead_error" %}<div class="alert alert-error">{{ msg }}</div>
+        {% elif cat == "lead_info" %}<div class="alert alert-ok">{{ msg }}</div>
+        {% endif %}
+      {% endfor %}
+    {% endwith %}
+
+    {% if request.args.get('thanks') is not none or '#thanks' in request.full_path %}
+      <div class="alert alert-ok" id="thanks">Thanks — we got your request and emailed you a confirmation. We'll be in touch within 1–2 business days.</div>
+    {% endif %}
+
+    <form method="POST" action="/welcome/request-access" autocomplete="on" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="form-row">
+        <div class="field">
+          <label for="contact_name">Your name *</label>
+          <input id="contact_name" name="contact_name" type="text" required maxlength="120" placeholder="Priya Sharma" />
+        </div>
+        <div class="field">
+          <label for="cafe_name">Café name *</label>
+          <input id="cafe_name" name="cafe_name" type="text" required maxlength="200" placeholder="Brewhouse Coffee" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="email">Email *</label>
+          <input id="email" name="email" type="email" required maxlength="254" placeholder="you@example.com" />
+        </div>
+        <div class="field">
+          <label for="phone">Phone (optional)</label>
+          <input id="phone" name="phone" type="tel" maxlength="30" placeholder="+91 90000 00000" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="city">City</label>
+          <input id="city" name="city" type="text" maxlength="120" placeholder="Bengaluru" />
+        </div>
+        <div class="field">
+          <label for="table_count">How many tables?</label>
+          <input id="table_count" name="table_count" type="number" min="0" max="9999" placeholder="12" />
+        </div>
+      </div>
+      <div class="field field-full">
+        <label for="message">Anything we should know? (optional)</label>
+        <textarea id="message" name="message" rows="3" maxlength="1000" placeholder="Best time to call, current pain points, special requests…"></textarea>
+      </div>
+
+      <div class="honeypot">
+        <label>Website (leave empty)<input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
+      </div>
+
+      <button type="submit" class="btn btn-primary">Send My Request</button>
+      <p class="form-foot">By submitting, you agree we may contact you about onboarding. We never share your details with third parties.</p>
+    </form>
+  </div>
+</section>
+
+<footer>
+  <div>© Cafe 11:11 · <a href="/owner/login">Owner login</a> · <a href="/.well-known/security.txt">Security</a> · <a href="/welcome">Top</a></div>
+</footer>
+
+<script>
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', e => {
+      const id = a.getAttribute('href').slice(1);
+      const el = document.getElementById(id);
+      if (el) { e.preventDefault(); el.scrollIntoView({behavior:'smooth', block:'start'}); history.replaceState(null,'','#'+id); }
+    });
+  });
+</script>
+</body>
+</html>
