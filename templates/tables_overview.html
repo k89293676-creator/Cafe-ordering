@@ -17,6 +17,7 @@
       --occupied: #b45309;
       --ready: #1d4ed8;
       --attention: #dc2626;
+      --cleaning: #7c3aed;
       --shadow: 0 8px 28px -18px rgba(31,20,8,.35);
     }
     * { box-sizing: border-box; }
@@ -49,6 +50,7 @@
     .summary-card.occupied .value  { color: var(--occupied); }
     .summary-card.ready .value     { color: var(--ready); }
     .summary-card.attention .value { color: var(--attention); }
+    .summary-card.cleaning .value  { color: var(--cleaning); }
 
     .toolbar { display:flex; align-items:center; gap: 10px; margin-bottom: 14px;
       flex-wrap: wrap; }
@@ -73,6 +75,8 @@
     .badge.occupied  { background: #fef3c7; color: var(--occupied); }
     .badge.ready_to_serve { background: #dbeafe; color: var(--ready); animation: pulse 1.6s ease-in-out infinite; }
     .badge.needs_attention { background: #fee2e2; color: var(--attention); animation: pulse 1.1s ease-in-out infinite; }
+    .badge.cleaning  { background: #ede9fe; color: var(--cleaning); }
+    .card.cleaning-on { border-color: #ddd6fe; background: #faf5ff; }
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
 
     .row { display:flex; justify-content: space-between; align-items: center;
@@ -137,6 +141,7 @@
       <div class="summary-card occupied"><div class="label">Occupied</div><div class="value" id="sum-occupied">—</div></div>
       <div class="summary-card ready"><div class="label">Ready to serve</div><div class="value" id="sum-ready">—</div></div>
       <div class="summary-card attention"><div class="label">Needs attention</div><div class="value" id="sum-attn">—</div></div>
+      <div class="summary-card cleaning"><div class="label">Cleaning</div><div class="value" id="sum-clean">—</div></div>
     </div>
 
     <div class="toolbar">
@@ -144,6 +149,7 @@
       <button class="filter-pill" data-filter="needs_attention">Needs attention</button>
       <button class="filter-pill" data-filter="ready_to_serve">Ready</button>
       <button class="filter-pill" data-filter="occupied">Occupied</button>
+      <button class="filter-pill" data-filter="cleaning">Cleaning</button>
       <button class="filter-pill" data-filter="free">Free</button>
       <input type="search" class="search" id="search" placeholder="Search tables…" />
     </div>
@@ -163,6 +169,15 @@
         <button class="btn btn-primary" id="note-save" style="margin-top:.4rem;">Save note</button>
       </section>
       <section>
+        <h3>Last 7 days</h3>
+        <div id="stats7d" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:.85rem;">
+          <div><div style="color:var(--muted);font-size:.7rem;text-transform:uppercase;">Orders</div><div id="s7-orders" style="font-weight:700;">—</div></div>
+          <div><div style="color:var(--muted);font-size:.7rem;text-transform:uppercase;">Revenue</div><div id="s7-rev"    style="font-weight:700;">—</div></div>
+          <div><div style="color:var(--muted);font-size:.7rem;text-transform:uppercase;">Avg ticket</div><div id="s7-avg" style="font-weight:700;">—</div></div>
+          <div><div style="color:var(--muted);font-size:.7rem;text-transform:uppercase;">Avg dwell</div><div id="s7-dwell" style="font-weight:700;">—</div></div>
+        </div>
+      </section>
+      <section>
         <h3>Recent orders</h3>
         <ul id="recent-orders"><li>Loading…</li></ul>
       </section>
@@ -170,6 +185,24 @@
         <h3>Recent service calls</h3>
         <ul id="recent-calls"><li>Loading…</li></ul>
       </section>
+    </div>
+  </div>
+
+  <!-- Transfer modal -->
+  <div class="modal-bg" id="transfer-bg">
+    <div class="modal" style="max-width:380px;">
+      <span class="close" id="transfer-close">✕</span>
+      <h2>Transfer order</h2>
+      <p style="font-size:.85rem;color:var(--muted);margin:.25rem 0 .8rem;">
+        Move the open order from <b id="transfer-from-name"></b> to another table.
+      </p>
+      <label style="font-size:.8rem;color:var(--muted);">Target table</label>
+      <select id="transfer-target" style="width:100%;padding:.5rem;border:1px solid var(--line);border-radius:8px;margin-top:.3rem;"></select>
+      <div id="transfer-error" style="color:var(--attention);font-size:.82rem;margin-top:.5rem;display:none;"></div>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.9rem;">
+        <button class="btn" id="transfer-cancel">Cancel</button>
+        <button class="btn btn-primary" id="transfer-confirm">Transfer</button>
+      </div>
     </div>
   </div>
 
@@ -208,6 +241,7 @@
     document.getElementById('sum-occupied').textContent = lastData.summary.occupied || 0;
     document.getElementById('sum-ready').textContent    = lastData.summary.ready_to_serve || 0;
     document.getElementById('sum-attn').textContent     = lastData.summary.needs_attention || 0;
+    document.getElementById('sum-clean').textContent    = lastData.summary.cleaning || 0;
     meta.textContent = `${lastData.summary.total} tables · updated ${new Date(lastData.fetchedAt).toLocaleTimeString()}`;
 
     const q = (search.value || '').toLowerCase().trim();
@@ -235,8 +269,9 @@
       const noteHtml = t.note ? `<div class="note">📝 ${escapeHtml(t.note)}</div>` : '';
       const occupiedHtml = t.occupiedSinceSeconds
         ? `<div class="row"><span class="k">Occupied</span><span>${fmtAge(t.occupiedSinceSeconds)}</span></div>` : '';
+      const cleanBtnLabel = t.cleaning ? 'Mark clean' : 'Cleaning';
       return `
-        <div class="card" data-id="${t.id}">
+        <div class="card${t.cleaning ? ' cleaning-on' : ''}" data-id="${t.id}" data-name="${escapeHtml(t.name)}">
           <div class="head">
             <div>
               <div class="name">${escapeHtml(t.name)}</div>
@@ -251,7 +286,10 @@
           ${noteHtml}
           <div class="actions-row">
             <button class="btn" data-act="detail">Details</button>
-            ${calls.count ? '<button class="btn btn-primary" data-act="clear">Clear calls</button>' : ''}
+            ${order ? '<button class="btn btn-primary" data-act="close" title="Complete the open order and resolve calls">Close table</button>' : ''}
+            ${order ? '<button class="btn" data-act="transfer">Transfer</button>' : ''}
+            ${calls.count ? '<button class="btn" data-act="clear">Clear calls</button>' : ''}
+            <button class="btn" data-act="cleaning">${cleanBtnLabel}</button>
             ${order ? `<a class="btn" href="/owner/order/${order.id}/receipt" target="_blank" rel="noopener">Receipt</a>` : ''}
             <a class="btn" href="/t/${t.id}" target="_blank" rel="noopener">Menu</a>
           </div>
@@ -289,23 +327,83 @@
   });
   search.addEventListener('input', render);
 
+  async function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    });
+  }
+
   // Card actions (event delegation)
   grid.addEventListener('click', async (ev) => {
     const card = ev.target.closest('.card'); if (!card) return;
     const id = card.dataset.id;
     const act = ev.target.dataset.act;
+    if (!act) return;
+    const tableData = (lastData && lastData.tables.find(x => x.id === id)) || null;
     if (act === 'clear') {
       ev.target.disabled = true;
-      try {
-        await fetch(`/api/owner/tables/${encodeURIComponent(id)}/clear`, {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/json' }, body: '{}'
-        });
-        await load();
-      } finally { ev.target.disabled = false; }
+      try { await postJson(`/api/owner/tables/${encodeURIComponent(id)}/clear`); await load(); }
+      finally { ev.target.disabled = false; }
+    } else if (act === 'close') {
+      if (!confirm(`Close ${card.dataset.name}? This completes the open order and resolves any calls.`)) return;
+      ev.target.disabled = true;
+      try { await postJson(`/api/owner/tables/${encodeURIComponent(id)}/close`); await load(); }
+      finally { ev.target.disabled = false; }
+    } else if (act === 'transfer') {
+      openTransfer(id, card.dataset.name);
+    } else if (act === 'cleaning') {
+      const on = !(tableData && tableData.cleaning);
+      ev.target.disabled = true;
+      try { await postJson(`/api/owner/tables/${encodeURIComponent(id)}/cleaning`, { on }); await load(); }
+      finally { ev.target.disabled = false; }
     } else if (act === 'detail') {
       openDetail(id);
     }
+  });
+
+  // Transfer modal
+  const transferBg = document.getElementById('transfer-bg');
+  const transferTarget = document.getElementById('transfer-target');
+  const transferError = document.getElementById('transfer-error');
+  let transferFromId = null;
+  document.getElementById('transfer-close').addEventListener('click', () => transferBg.classList.remove('show'));
+  document.getElementById('transfer-cancel').addEventListener('click', () => transferBg.classList.remove('show'));
+  transferBg.addEventListener('click', (e) => { if (e.target === transferBg) transferBg.classList.remove('show'); });
+
+  function openTransfer(fromId, fromName) {
+    transferFromId = fromId;
+    document.getElementById('transfer-from-name').textContent = fromName;
+    transferError.style.display = 'none';
+    // Populate select with sibling tables that don't have an open order.
+    const opts = (lastData ? lastData.tables : [])
+      .filter(t => t.id !== fromId && !t.openOrder)
+      .map(t => `<option value="${t.id}">${escapeHtml(t.name)}${t.cleaning ? ' (cleaning)' : ''}</option>`);
+    if (!opts.length) {
+      transferTarget.innerHTML = '<option value="">No free tables available</option>';
+    } else {
+      transferTarget.innerHTML = opts.join('');
+    }
+    transferBg.classList.add('show');
+  }
+
+  document.getElementById('transfer-confirm').addEventListener('click', async (ev) => {
+    const targetId = transferTarget.value;
+    if (!targetId || !transferFromId) return;
+    ev.target.disabled = true;
+    try {
+      const r = await postJson(`/api/owner/tables/${encodeURIComponent(transferFromId)}/transfer`,
+                               { targetTableId: targetId });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) {
+        transferError.textContent = j.error || ('Transfer failed (' + r.status + ').');
+        transferError.style.display = 'block';
+        return;
+      }
+      transferBg.classList.remove('show');
+      await load();
+    } finally { ev.target.disabled = false; }
   });
 
   // Detail modal
@@ -336,6 +434,11 @@
       const d = await r.json();
       document.getElementById('modal-title').textContent = d.table.name;
       document.getElementById('note-input').value = d.note || '';
+      const s = d.stats7d || {};
+      document.getElementById('s7-orders').textContent = s.orders || 0;
+      document.getElementById('s7-rev').textContent    = money(s.revenue || 0);
+      document.getElementById('s7-avg').textContent    = money(s.avgTicket || 0);
+      document.getElementById('s7-dwell').textContent  = s.avgDwellSeconds ? fmtAge(s.avgDwellSeconds) : '—';
       document.getElementById('recent-orders').innerHTML = (d.recentOrders.length
         ? d.recentOrders.map(o => `<li>#${o.id} · ${o.status} · ${money(o.total)} · ${fmtAge(o.ageSeconds)} ago${o.customerName ? ' · ' + escapeHtml(o.customerName) : ''}</li>`).join('')
         : '<li style="color:var(--muted)">No orders yet.</li>');

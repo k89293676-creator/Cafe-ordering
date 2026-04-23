@@ -37,6 +37,9 @@ from app import (
     login_required,
     logged_in_owner,
     logged_in_owner_id,
+    _db_update_order_status,
+    _notify_owner,
+    _notify_order_status,
 )
 from .models import TableCall
 
@@ -61,6 +64,33 @@ CALL_ESCALATION_SECONDS = 5 * 60
 _NOTE_TTL_SECONDS = 30 * 60
 _notes_lock = Lock()
 _notes: dict[tuple[int, str], tuple[str, float]] = {}
+
+# Owner-toggled "needs cleaning" flag — same ephemeral semantics as notes
+# (per-process, auto-clears so the next shift starts fresh). A separate
+# concept from customer-initiated service calls so a busser can mark a
+# table after a guest leaves without spamming the calls queue.
+_CLEANING_TTL_SECONDS = 2 * 60 * 60
+_cleaning_lock = Lock()
+_cleaning: dict[tuple[int, str], float] = {}
+
+
+def _is_cleaning(owner_id: int, table_id: str) -> bool:
+    with _cleaning_lock:
+        ts = _cleaning.get((owner_id, table_id))
+        if not ts:
+            return False
+        if (time.time() - ts) > _CLEANING_TTL_SECONDS:
+            _cleaning.pop((owner_id, table_id), None)
+            return False
+        return True
+
+
+def _set_cleaning(owner_id: int, table_id: str, on: bool) -> None:
+    with _cleaning_lock:
+        if on:
+            _cleaning[(owner_id, table_id)] = time.time()
+        else:
+            _cleaning.pop((owner_id, table_id), None)
 
 
 def _get_note(owner_id: int, table_id: str) -> str:
@@ -125,7 +155,8 @@ def _items_count(items) -> int:
     return 0
 
 
-def _classify(open_order, open_calls: list[TableCall], now: datetime) -> str:
+def _classify(open_order, open_calls: list[TableCall], now: datetime,
+              cleaning: bool = False) -> str:
     """Single-source-of-truth status badge for a table card."""
     # Any escalated / "bill" call is the loudest signal.
     for c in open_calls:
@@ -137,6 +168,8 @@ def _classify(open_order, open_calls: list[TableCall], now: datetime) -> str:
         return "ready_to_serve"
     if open_order or open_calls:
         return "occupied"
+    if cleaning:
+        return "cleaning"
     return "free"
 
 
@@ -224,11 +257,12 @@ def api_overview():
 
     # --- shape payload ---------------------------------------------------
     out = []
-    counts = {"free": 0, "occupied": 0, "ready_to_serve": 0, "needs_attention": 0}
+    counts = {"free": 0, "occupied": 0, "ready_to_serve": 0, "needs_attention": 0, "cleaning": 0}
     for t in tables:
         order = orders_by_table.get(t.id)
         calls = calls_by_table.get(t.id, [])
-        status = _classify(order, calls, now)
+        cleaning = _is_cleaning(owner_id, t.id)
+        status = _classify(order, calls, now, cleaning=cleaning)
         counts[status] = counts.get(status, 0) + 1
 
         order_payload = None
@@ -267,6 +301,7 @@ def api_overview():
             "lastActivityAt": _iso(last_activity),
             "occupiedSinceSeconds": _age_seconds(occupied_since, now) if occupied_since else 0,
             "note": _get_note(owner_id, t.id),
+            "cleaning": cleaning,
         })
 
     return jsonify({
@@ -304,9 +339,42 @@ def api_detail(table_id: str):
                     .limit(10)
                     .all())
 
+    # 7-day rolling stats — single aggregate query.
+    week_start = now - timedelta(days=7)
+    stats_row = (db.session.query(
+                     func.count(Order.id),
+                     func.coalesce(func.sum(Order.total), 0),
+                     func.coalesce(func.avg(Order.total), 0))
+                 .filter(Order.owner_id == owner_id,
+                         Order.table_id == table_id,
+                         Order.created_at >= week_start,
+                         Order.status != "cancelled")
+                 .first())
+    week_orders = int(stats_row[0] or 0)
+    week_revenue = float(stats_row[1] or 0)
+    week_avg_ticket = float(stats_row[2] or 0)
+
+    # Average dwell — created_at to updated_at on completed orders this week.
+    dwell_row = (db.session.query(
+                     func.avg(
+                         func.extract("epoch", Order.updated_at) -
+                         func.extract("epoch", Order.created_at)))
+                 .filter(Order.owner_id == owner_id,
+                         Order.table_id == table_id,
+                         Order.status == "completed",
+                         Order.created_at >= week_start)
+                 .first())
+    avg_dwell_seconds = int(dwell_row[0] or 0) if dwell_row else 0
+
     return jsonify({
         "ok": True,
         "table": {"id": table.id, "name": table.name},
+        "stats7d": {
+            "orders": week_orders,
+            "revenue": week_revenue,
+            "avgTicket": week_avg_ticket,
+            "avgDwellSeconds": max(0, avg_dwell_seconds),
+        },
         "recentOrders": [{
             "id": o.id,
             "status": o.status,
@@ -325,6 +393,7 @@ def api_detail(table_id: str):
             "resolvedAt": _iso(c.resolved_at),
         } for c in recent_calls],
         "note": _get_note(owner_id, table_id),
+        "cleaning": _is_cleaning(owner_id, table_id),
     })
 
 
@@ -378,3 +447,169 @@ def api_note(table_id: str):
     text = str(payload.get("note", "")).strip()
     _set_note(owner_id, table_id, text)
     return jsonify({"ok": True, "note": _get_note(owner_id, table_id)})
+
+
+@bp.route("/api/owner/tables/<table_id>/close", methods=["POST"], endpoint="api_close")
+@login_required
+def api_close(table_id: str):
+    """Mark a table as fully done: complete its oldest open order and
+    resolve every outstanding call.
+
+    This is the single button the owner taps after a guest pays and walks
+    out. Inventory was already deducted at order time, so completing here
+    has no inventory side-effect — it just moves the order out of the
+    active set so the kitchen and the grid both clear it.
+    """
+    owner_id = logged_in_owner_id()
+    table = CafeTable.query.filter_by(id=table_id, owner_id=owner_id).first()
+    if not table:
+        abort(404)
+    now = datetime.now(timezone.utc)
+
+    # Complete the oldest open order on this table (if any).
+    completed_order_id = None
+    open_order = (Order.query
+                  .filter(Order.owner_id == owner_id,
+                          Order.table_id == table_id,
+                          Order.status.in_(ACTIVE_ORDER_STATUSES))
+                  .order_by(Order.created_at.asc())
+                  .first())
+    if open_order:
+        try:
+            _db_update_order_status(open_order.id, "completed")
+            completed_order_id = open_order.id
+            try:
+                _notify_owner(owner_id, "order_updated",
+                              {"id": open_order.id, "status": "completed"})
+                _notify_order_status(open_order.id, "completed")
+            except Exception:
+                pass
+        except Exception:
+            db.session.rollback()
+
+    # Resolve any outstanding calls on this table.
+    calls = (TableCall.query
+             .filter(TableCall.owner_id == owner_id,
+                     TableCall.table_id == table_id,
+                     TableCall.status.in_(("open", "acknowledged")))
+             .all())
+    resolved_ids = []
+    for c in calls:
+        if c.status == "open":
+            c.acknowledged_at = c.acknowledged_at or now
+        c.status = "resolved"
+        c.resolved_at = now
+        resolved_ids.append(c.id)
+    if resolved_ids:
+        db.session.commit()
+
+    # Reset the table state — fresh slate for the next guest.
+    _set_note(owner_id, table_id, "")
+    _set_cleaning(owner_id, table_id, True)  # auto-mark cleaning after close
+
+    # Nudge any other connected dashboards / grids to refresh.
+    try:
+        _notify_owner(owner_id, "table_call_update",
+                      {"tableId": table_id, "kind": "table_closed"})
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "completedOrderId": completed_order_id,
+        "resolvedCallIds": resolved_ids,
+    })
+
+
+@bp.route("/api/owner/tables/<table_id>/transfer", methods=["POST"], endpoint="api_transfer")
+@login_required
+def api_transfer(table_id: str):
+    """Move the oldest open order from one table to another.
+
+    Used when a party swaps tables mid-meal (e.g. moving outside, or
+    combining two tables). The order id is preserved so the kitchen
+    ticket isn't disrupted — only ``table_id`` and ``table_name`` change.
+
+    Body: ``{"targetTableId": "<id>"}``. Both tables must belong to the
+    caller. Refuses to overwrite an existing open order on the target.
+    """
+    owner_id = logged_in_owner_id()
+    src = CafeTable.query.filter_by(id=table_id, owner_id=owner_id).first()
+    if not src:
+        abort(404)
+    payload = request.get_json(silent=True) or request.form or {}
+    target_id = str(payload.get("targetTableId", "")).strip()
+    if not target_id or target_id == table_id:
+        return jsonify({"ok": False, "error": "Invalid target table."}), 400
+    target = CafeTable.query.filter_by(id=target_id, owner_id=owner_id).first()
+    if not target:
+        return jsonify({"ok": False, "error": "Target table not found."}), 404
+
+    open_order = (Order.query
+                  .filter(Order.owner_id == owner_id,
+                          Order.table_id == table_id,
+                          Order.status.in_(ACTIVE_ORDER_STATUSES))
+                  .order_by(Order.created_at.asc())
+                  .first())
+    if not open_order:
+        return jsonify({"ok": False, "error": "No open order on this table."}), 400
+
+    # Refuse to clobber: if the target already has an open order, the
+    # caller should merge manually rather than silently overwrite.
+    target_busy = (db.session.query(Order.id)
+                   .filter(Order.owner_id == owner_id,
+                           Order.table_id == target_id,
+                           Order.status.in_(ACTIVE_ORDER_STATUSES))
+                   .first())
+    if target_busy:
+        return jsonify({"ok": False,
+                        "error": "Target table already has an open order. Close it first."}), 409
+
+    open_order.table_id = target.id
+    open_order.table_name = target.name
+    open_order.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    # Inherit the sticky note + clear source's cleaning flag (party left).
+    note = _get_note(owner_id, table_id)
+    if note:
+        _set_note(owner_id, target_id, note)
+        _set_note(owner_id, table_id, "")
+
+    try:
+        _notify_owner(owner_id, "order_updated",
+                      {"id": open_order.id, "status": open_order.status,
+                       "tableId": target.id})
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "orderId": open_order.id,
+        "fromTableId": table_id,
+        "toTableId": target.id,
+    })
+
+
+@bp.route("/api/owner/tables/<table_id>/cleaning", methods=["POST"], endpoint="api_cleaning")
+@login_required
+def api_cleaning(table_id: str):
+    """Toggle the owner-side 'needs cleaning' flag for a table.
+
+    Body: ``{"on": true|false}``. Distinct from customer service-calls so
+    a busser can flag a freshly-vacated table without polluting the call
+    queue. Auto-clears after 2 hours.
+    """
+    owner_id = logged_in_owner_id()
+    table = CafeTable.query.filter_by(id=table_id, owner_id=owner_id).first()
+    if not table:
+        abort(404)
+    payload = request.get_json(silent=True) or request.form or {}
+    on = str(payload.get("on", "")).strip().lower() in {"1", "true", "yes", "on"}
+    _set_cleaning(owner_id, table_id, on)
+    try:
+        _notify_owner(owner_id, "table_call_update",
+                      {"tableId": table_id, "kind": "cleaning", "on": on})
+    except Exception:
+        pass
+    return jsonify({"ok": True, "cleaning": _is_cleaning(owner_id, table_id)})
