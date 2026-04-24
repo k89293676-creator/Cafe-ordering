@@ -3327,8 +3327,21 @@ def owner_signup() -> str | Response:
                            invitation=invitation)
 
 
-@app.route("/owner/logout")
+@app.route("/owner/logout", methods=["GET", "POST"])
 def owner_logout() -> Response:
+    """Sign out the current owner and wipe browser-side residue.
+
+    GET is preserved for backwards compatibility (simple <a href> links);
+    POST is preferred when called from forms because Flask-WTF's CSRF
+    middleware will then guard against cross-site logout-CSRF.
+
+    Beyond clearing the server-side session, the response carries
+    ``Clear-Site-Data: "cache", "cookies", "storage"`` so that on
+    HTTPS the browser drops any cached HTML / IndexedDB / localStorage
+    leftovers. Without this, an attacker with brief physical access
+    to the unlocked machine could press the Back button and still see
+    cached owner pages.
+    """
     username = logged_in_owner()
     logout_user()
     raw_token = request.cookies.get(_REMEMBER_COOKIE)
@@ -3342,6 +3355,9 @@ def owner_logout() -> Response:
         log_security("LOGOUT", f"user={username!r}")
     resp = redirect(url_for("home"))
     resp.delete_cookie(_REMEMBER_COOKIE, path="/")
+    # Browsers only honor Clear-Site-Data on a secure context. Setting it
+    # unconditionally is safe (it's silently ignored over plain HTTP).
+    resp.headers["Clear-Site-Data"] = '"cache", "cookies", "storage"'
     return resp
 
 
@@ -3493,26 +3509,94 @@ def owner_dashboard() -> Response:
 
 
 def _render_owner_dashboard() -> Response:
-    owner_id = logged_in_owner_id()
-    all_tables = load_tables()
-    tables = [t for t in all_tables if t.get("ownerId") == owner_id]
-    all_orders = sorted(load_orders(), key=lambda o: o.get("createdAt", ""), reverse=True)
-    orders = [o for o in all_orders if o.get("ownerId") == owner_id]
-    orders = [_resolve_order_table_labels(o, tables) for o in orders]
-    all_menu = load_menu()
-    menu = {"categories": [c for c in all_menu.get("categories", []) if c.get("ownerId") == owner_id]}
-    pending_orders = [o for o in orders if o.get("status") not in ("completed", "cancelled")]
-    completed_orders = [o for o in orders if o.get("status") == "completed"]
-    total_items = sum(len(cat.get("items", [])) for cat in menu.get("categories", []))
-    total_revenue = round(sum(float(o.get("total") or 0) for o in completed_orders), 2)
+    """Render the owner dashboard with queries scoped to the current owner.
 
+    Earlier versions called the global ``load_tables()`` / ``load_orders()`` /
+    ``load_menu()`` / ``load_feedback()`` helpers and filtered in Python. That
+    approach silently broke once the database held >100 rows from other
+    owners — ``load_orders()`` defaults to ``LIMIT 100`` (across *all*
+    tenants), so an owner whose orders sat past row 100 saw an empty
+    dashboard.
+
+    This version queries directly against indexed owner-scoped predicates and
+    uses SQL aggregates (``COUNT`` / ``SUM``) for the all-time KPIs so the
+    headline numbers stay accurate as the database grows. List variables are
+    capped at the most-recent 200 rows to keep render time bounded under
+    real load (kanban + recent-orders blocks display the trailing window).
+    """
+    owner_id = logged_in_owner_id()
     owner = db.session.get(Owner, owner_id)
 
-    all_feedback = load_feedback()
-    owner_feedback = [f for f in all_feedback if f.get("ownerId") == owner_id]
-    avg_rating = 0.0
-    if owner_feedback:
-        avg_rating = round(sum(f["rating"] for f in owner_feedback) / len(owner_feedback), 1)
+    # ── Tables: owner-scoped, indexed by ix_cafe_tables_owner ────────────
+    table_rows = (CafeTable.query
+                  .filter_by(owner_id=owner_id)
+                  .order_by(CafeTable.created_at).all())
+    tables = [
+        {"id": t.id, "name": t.name, "ownerId": t.owner_id,
+         "cafeId": t.cafe_id, "createdAt": _iso(t.created_at)}
+        for t in table_rows
+    ]
+
+    # ── Menu: load only this owner's Menu row (indexed PK) ───────────────
+    own_menu_row = db.session.get(Menu, owner_id)
+    if own_menu_row and isinstance(own_menu_row.data, dict):
+        own_categories = []
+        for cat in (own_menu_row.data or {}).get("categories", []):
+            cat_copy = dict(cat)
+            cat_copy["ownerId"] = owner_id
+            cat_copy["cafeId"] = own_menu_row.cafe_id
+            own_categories.append(cat_copy)
+        menu = {"categories": own_categories}
+    else:
+        menu = {"categories": []}
+    total_items = sum(len(cat.get("items", [])) for cat in menu["categories"])
+
+    # ── Orders: owner-scoped, capped to the most recent 200 across statuses
+    # (kanban + recent-orders preview only show small trailing windows).
+    # ``ix_orders_owner_status_created`` (migration 003) makes this O(log N).
+    DASHBOARD_ORDER_WINDOW = 200
+    recent_rows = (Order.query
+                   .filter(Order.owner_id == owner_id)
+                   .order_by(Order.created_at.desc())
+                   .limit(DASHBOARD_ORDER_WINDOW).all())
+    orders = [_resolve_order_table_labels(_order_dict(o), tables) for o in recent_rows]
+    pending_orders = [o for o in orders if o.get("status") not in ("completed", "cancelled")]
+    completed_orders = [o for o in orders if o.get("status") == "completed"]
+
+    # ── All-time revenue / completed count via SQL aggregates so the
+    # headline KPIs stay correct even when the dashboard window only
+    # shows a subset of orders.
+    try:
+        revenue_row = (db.session.query(
+            db.func.coalesce(db.func.sum(Order.total), 0),
+            db.func.count(Order.id),
+        ).filter(Order.owner_id == owner_id, Order.status == "completed").one())
+        total_revenue = round(float(revenue_row[0] or 0), 2)
+        total_completed_all_time = int(revenue_row[1] or 0)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.warning("dashboard revenue aggregate failed: %s", exc)
+        total_revenue = round(sum(float(o.get("total") or 0) for o in completed_orders), 2)
+        total_completed_all_time = len(completed_orders)
+
+    # ── Feedback: owner-scoped, last 50 reviews + true average over all rows
+    feedback_rows = (Feedback.query
+                     .filter_by(owner_id=owner_id)
+                     .order_by(Feedback.created_at.desc())
+                     .limit(50).all())
+    owner_feedback = [
+        {"id": f.id, "ownerId": f.owner_id, "rating": int(f.rating or 0),
+         "comment": f.comment or "", "customerName": f.customer_name or "",
+         "createdAt": _iso(f.created_at)}
+        for f in feedback_rows
+    ]
+    try:
+        avg_rating_row = (db.session.query(db.func.avg(Feedback.rating))
+                          .filter(Feedback.owner_id == owner_id).scalar())
+        avg_rating = round(float(avg_rating_row), 1) if avg_rating_row is not None else 0.0
+    except Exception as exc:  # noqa: BLE001
+        app.logger.warning("dashboard rating aggregate failed: %s", exc)
+        avg_rating = (round(sum(f["rating"] for f in owner_feedback) / len(owner_feedback), 1)
+                      if owner_feedback else 0.0)
 
     ingredients = Ingredient.query.filter_by(owner_id=owner_id).all()
     low_stock = [i for i in ingredients if float(i.stock or 0) <= float(i.low_stock_threshold or 5)]
@@ -3553,6 +3637,7 @@ def _render_owner_dashboard() -> Response:
         completed_orders=completed_orders,
         total_items=total_items,
         total_revenue=total_revenue,
+        total_completed=total_completed_all_time,
         owner_feedback=owner_feedback[:10],
         avg_rating=avg_rating,
         total_feedback=len(owner_feedback),

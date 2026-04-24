@@ -299,17 +299,19 @@
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
           <div class="stat-info">
-            <div class="stat-value">{{ completed_orders | length }}</div>
+            {# total_completed is the all-time SQL COUNT; falls back to the trailing-window list length on legacy DBs. #}
+            <div class="stat-value">{{ '{:,}'.format(total_completed if total_completed is defined else (completed_orders | length)) }}</div>
             <div class="stat-label">Completed</div>
           </div>
         </div>
         <div class="stat-card stat-card--revenue">
           <div class="stat-icon emerald">₹</div>
           <div class="stat-info">
-            <div class="stat-value stat-value--revenue">{{ '%.0f' | format(total_revenue) }}</div>
+            <div class="stat-value stat-value--revenue">{{ '{:,.0f}'.format(total_revenue) }}</div>
             <div class="stat-label">Total Revenue</div>
-            {% if completed_orders | length > 0 %}
-            <div class="stat-avg">avg ₹{{ '%.0f' | format(total_revenue / (completed_orders | length)) }} / order</div>
+            {% set _completed_for_avg = (total_completed if total_completed is defined else (completed_orders | length)) %}
+            {% if _completed_for_avg > 0 %}
+            <div class="stat-avg">avg ₹{{ '%.0f' | format(total_revenue / _completed_for_avg) }} / order</div>
             {% endif %}
           </div>
         </div>
