@@ -7300,16 +7300,20 @@ def superadmin_devops_aggregators():
                      .count())
 
     # Signature failures from webhook log (last 24h).
+    # NOTE: the column is `received_at`, not `created_at` — the model uses
+    # `received_at` to make the timestamp's meaning unambiguous (= the
+    # moment the inbound webhook hit our edge, not when a row was inserted
+    # into some downstream table).
     yday = datetime.now(timezone.utc) - timedelta(hours=24)
     sig_failures = (WebhookEventLog.query
                     .filter(WebhookEventLog.provider.like("agg:%"))
                     .filter(WebhookEventLog.event_type == "signature_invalid")
-                    .filter(WebhookEventLog.created_at >= yday).count())
+                    .filter(WebhookEventLog.received_at >= yday).count())
 
     # Recent webhook events processed for aggregators.
     recent_events = (WebhookEventLog.query
                      .filter(WebhookEventLog.provider.like("agg:%"))
-                     .order_by(WebhookEventLog.created_at.desc())
+                     .order_by(WebhookEventLog.received_at.desc())
                      .limit(20).all())
 
     return render_template(
