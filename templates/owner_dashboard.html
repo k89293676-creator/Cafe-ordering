@@ -80,13 +80,17 @@
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="14" x2="10" y2="14"/></svg>
         Billing
       </a>
+
+      <div class="sidebar-section-label" style="margin-top:1rem;">Integrations &amp; Setup</div>
       <a class="sidebar-link" href="{{ url_for('owner_billing_payment_methods') }}">
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><circle cx="7" cy="15" r="1.2" fill="currentColor"/><line x1="11" y1="15" x2="18" y2="15"/></svg>
         Payment Methods
+        {% if integration_health and integration_health.payments_configured == 0 %}<span class="link-badge" style="background:#f59e0b;">Setup</span>{% endif %}
       </a>
       <a class="sidebar-link" href="{{ url_for('owner_aggregators') }}">
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h13l4 5v5h-2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M3 7v10h2"/><path d="M9 17h6"/></svg>
-        Food Delivery
+        Food Delivery (Swiggy / Zomato)
+        {% if integration_health and integration_health.aggregators_configured == 0 %}<span class="link-badge" style="background:#f59e0b;">Setup</span>{% endif %}
       </a>
       <a class="sidebar-link" href="{{ url_for('reorder_view') }}">
         <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
@@ -211,6 +215,52 @@
         </span>
         {% endfor %}
         <a href="{{ url_for('inventory_view') }}" style="margin-left:auto;color:#dc2626;font-weight:600;text-decoration:none;">Manage →</a>
+      </div>
+      {% endif %}
+
+      {# ── Integration setup banner — shown until at least one payment AND one aggregator are live ── #}
+      {% if integration_health and (integration_health.payments_live == 0 or integration_health.aggregators_live == 0) %}
+      <div id="integration-setup-banner"
+           style="display:flex;flex-wrap:wrap;align-items:center;gap:1rem;
+                  margin-bottom:1rem;padding:1rem 1.2rem;border-radius:.75rem;
+                  border:1px solid #fbbf24;background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%);
+                  color:#78350f;">
+        <div style="flex-shrink:0;width:42px;height:42px;border-radius:50%;
+                    background:#f59e0b;display:flex;align-items:center;justify-content:center;color:#fff;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 9v4"/><path d="M12 17h.01"/>
+            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+          </svg>
+        </div>
+        <div style="flex:1 1 320px;min-width:240px;">
+          <div style="font-weight:700;font-size:1.05rem;margin-bottom:.15rem;">
+            Finish setting up your café
+          </div>
+          <div style="font-size:.88rem;line-height:1.45;color:#92400e;">
+            {% if integration_health.payments_live == 0 and integration_health.aggregators_live == 0 %}
+              Connect a payment provider so customers can pay online, and link Swiggy / Zomato so delivery orders flow into your kitchen automatically.
+            {% elif integration_health.payments_live == 0 %}
+              Connect a payment provider (Stripe, Razorpay or Cashfree) so customers can pay online from the bill page.
+            {% else %}
+              Link Swiggy / Zomato / Uber Eats so delivery orders flow into your kitchen automatically.
+            {% endif %}
+          </div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:.5rem;">
+          {% if integration_health.payments_live == 0 %}
+          <a class="btn btn-sm btn-primary" href="{{ url_for('owner_billing_payment_methods') }}"
+             style="background:#f59e0b;border-color:#f59e0b;font-weight:600;">
+            Set up Payments →
+          </a>
+          {% endif %}
+          {% if integration_health.aggregators_live == 0 %}
+          <a class="btn btn-sm btn-secondary" href="{{ url_for('owner_aggregators') }}"
+             style="background:#fff;border:1px solid #f59e0b;color:#92400e;font-weight:600;">
+            Connect Swiggy / Zomato →
+          </a>
+          {% endif %}
+        </div>
       </div>
       {% endif %}
 

@@ -3529,6 +3529,8 @@ def _render_owner_dashboard() -> Response:
             "counts": {"live": 0, "ready": 0, "unverified": 0,
                        "failing": 0, "disabled": 0},
             "configured": 0, "needs_attention": 0,
+            "payments_configured": 0, "aggregators_configured": 0,
+            "payments_live": 0, "aggregators_live": 0,
         }
     try:
         webhook_activity = _webhook_activity_summary(owner_id)
@@ -3632,6 +3634,10 @@ def _integration_health_summary(owner_id: int) -> dict:
         "aggregators": aggregator_items,
         "counts": counts,
         "configured": len(items),
+        "payments_configured": len(payment_items),
+        "aggregators_configured": len(aggregator_items),
+        "payments_live": sum(1 for p in payment_items if p["state"] == "live"),
+        "aggregators_live": sum(1 for a in aggregator_items if a["state"] == "live"),
         "needs_attention": counts["failing"] + counts["unverified"],
     }
 
