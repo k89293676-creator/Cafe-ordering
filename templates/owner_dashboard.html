@@ -315,7 +315,7 @@
               </div>
             {% else %}
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:.6rem;">
-                {% for it in integration_health.items %}
+                {% for it in integration_health['items'] %}
                   {% set palette = {
                     'live':       ('#16a34a', '#dcfce7', 'Live'),
                     'ready':      ('#2563eb', '#dbeafe', 'Test ready'),
@@ -371,7 +371,7 @@
             </div>
           </div>
           <div class="card-body">
-            {% if not webhook_activity.items %}
+            {% if not webhook_activity['items'] %}
               <div style="font-size:.85rem;color:#6b7280;">
                 Once payments or food-delivery orders flow in, every inbound webhook will be logged here. Signature failures and unprocessed retries surface in red so you can react before customers notice.
               </div>
@@ -388,7 +388,7 @@
                     </tr>
                   </thead>
                   <tbody>
-                    {% for ev in webhook_activity.items %}
+                    {% for ev in webhook_activity['items'] %}
                     <tr style="border-bottom:1px solid #f3f4f6;">
                       <td style="padding:.4rem .5rem;color:#6b7280;white-space:nowrap;">
                         {{ ev.received_at.strftime('%b %d %H:%M') if ev.received_at else '—' }}

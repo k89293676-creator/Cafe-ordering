@@ -171,7 +171,7 @@
               <span class="status-badge status-{{ order.status }}">{{ order.status|upper }}</span>
             </div>
             <div class="mb-3">
-              {% for item in order.items %}
+              {% for item in order['items'] %}
               <div class="order-item-row d-flex justify-content-between">
                 <span class="fw-bold text-white">{{ item.quantity }}× {{ item.name }}</span>
                 <span class="text-muted small">₹{{ "%.0f"|format(item.lineTotal) }}</span>

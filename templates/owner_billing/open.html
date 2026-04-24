@@ -22,7 +22,7 @@
             <td class="mono">#{{ o.id }}</td>
             <td><strong>{{ o.tableName or '—' }}</strong></td>
             <td>{{ o.customerName }}</td>
-            <td class="muted">{{ o.items|length }} item{{ '' if o.items|length == 1 else 's' }}</td>
+            <td class="muted">{{ o['items']|length }} item{{ '' if o['items']|length == 1 else 's' }}</td>
             <td class="right mono">₹{{ '%.2f'|format(o.subtotal) }}</td>
             <td class="right mono"><strong>₹{{ '%.2f'|format(o.total) }}</strong></td>
             <td class="muted mono">{{ o.createdAt[:19] if o.createdAt else '—' }}</td>

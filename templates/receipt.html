@@ -56,7 +56,7 @@
     <div class="pickup">📦 {{ order.pickupCode }}</div>
     {% endif %}
 
-    {% for it in order.items %}
+    {% for it in order['items'] %}
     <div class="item-row">
       <span class="item-name">{{ it.quantity }}× {{ it.name }}{% if it.size %} <small>({{ it.size }})</small>{% endif %}</span>
       <span>₹{{ "%.2f"|format(it.lineTotal or 0) }}</span>

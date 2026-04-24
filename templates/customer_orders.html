@@ -72,9 +72,9 @@
         </span>
       </div>
 
-      {% if order.items %}
+      {% if order['items'] %}
       <div class="order-items">
-        {% for item in order.items %}
+        {% for item in order['items'] %}
         <div class="order-item-row">
           <span>{{ item.name | default('Item') }} × {{ item.quantity | default(1) }}</span>
           <span>₹{{ '%.2f' | format((item.lineTotal or 0) | float) }}</span>

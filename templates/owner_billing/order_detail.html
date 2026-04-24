@@ -23,7 +23,7 @@
       <table>
         <thead><tr><th>Item</th><th class="right">Qty</th><th class="right">Price</th><th class="right">Line Total</th></tr></thead>
         <tbody>
-          {% for item in order.items %}
+          {% for item in order['items'] %}
             <tr>
               <td>{{ item.name }}{% if item.notes %} <span class="muted">— {{ item.notes }}</span>{% endif %}</td>
               <td class="right mono">{{ item.quantity or 1 }}</td>

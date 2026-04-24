@@ -76,7 +76,7 @@
   <table>
     <thead><tr><th>#</th><th>Item</th><th class="right">Qty</th><th class="right">Rate</th><th class="right">Amount</th></tr></thead>
     <tbody>
-      {% for item in order.items %}
+      {% for item in order['items'] %}
         <tr>
           <td>{{ loop.index }}</td>
           <td>{{ item.name }}{% if item.notes %}<br/><small style="color:#888;">{{ item.notes }}</small>{% endif %}</td>
