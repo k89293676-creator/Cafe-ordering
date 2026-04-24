@@ -58,6 +58,8 @@ without editing code:
 | Variable | Purpose | Notes |
 | --- | --- | --- |
 | `SENTRY_DSN` | Enables Sentry error + performance monitoring. | Leave unset to disable. The Sentry SDK is loaded lazily so it costs nothing when off. |
+| `OPS_HEALTH_TOKEN` | Bearer token for the per-section operational health endpoint at `GET /api/ops/health`. | **Closed by default.** If the variable is unset the endpoint returns `401`. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Set the same value in the GitHub Actions secret `OPS_HEALTH_TOKEN` so the post-deploy check can probe it. |
+| `RAILWAY_APP_URL` | (GitHub-Actions secret, **not** an app env var.) The public base URL of your Railway deployment, e.g. `https://cafe.up.railway.app`. | Used by `.github/workflows/post-deploy-healthcheck.yml`. Without it the workflow exits early with a warning instead of failing CI. |
 | `SENTRY_TRACES_SAMPLE_RATE` | Fraction of requests to sample for performance tracing (0.0–1.0). | Defaults to `0.0`. Start small (e.g. `0.05`) on production. |
 | `SENTRY_PROFILES_SAMPLE_RATE` | Fraction of sampled traces to profile. | Defaults to `0.0`. |
 | `APP_VERSION` | Build identifier surfaced at `/version`, `/health`, and as the Sentry release tag. | Falls back to the first 12 chars of `RAILWAY_GIT_COMMIT_SHA`. |
@@ -65,6 +67,13 @@ without editing code:
 | `SECURITY_CONTACT` | Email/URL surfaced at `/.well-known/security.txt` for vuln disclosure. | Default: `mailto:security@example.com` — change before going live. |
 | `IDEMPOTENCY_TTL_SECONDS` | TTL of the in-process idempotency cache used by `POST /api/checkout`. | Default: `86400` (24h). Clients pass `Idempotency-Key: <uuid>` in the request header to opt in. |
 | `FEATURE_<NAME>` | Generic feature-flag pattern. Set to `on` / `1` / `true` to enable a flag at runtime; anything else (or unset) disables. | Read in code via `feature_enabled("name")`. Lets you dark-launch risky changes without a redeploy. |
+
+## Export limits & rate-limiting
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `EXPORTS_MAX_ROWS` | `50000` | Hard cap on how many rows any single CSV export may emit. Stops a runaway date range from exhausting the dyno's memory. The CSV is truncated with a clearly-marked sentinel row instead of being silently cut off. Applies to `/owner/export/orders` and the new `/owner/exports/*` blueprint. |
+| `EXPORTS_RATE_LIMIT` | `30/hour` | Per-owner rate limit applied to the secure export blueprint (`/owner/exports/*`). The legacy `/owner/export/orders` route uses its own decorator (`30/hour`). |
 
 ## Health-check endpoints
 
@@ -76,6 +85,7 @@ without editing code:
 | `/metrics` | JSON runtime metrics (orders today, active orders, version). |
 | `/metrics/prom` | Prometheus text-format exposition for `cafe_*` gauges. |
 | `/version` | Build identifier (commit, branch, deployedAt). Useful for post-deploy smoke tests. |
+| `/api/ops/health` | **Token-protected** per-section health (inventory, billing, payment_methods, food_delivery, reorder, analytics, sales_dashboard, menu_engineering, customer_ltv, employees, tables_overview, table_calls, customers, exports). Requires `Authorization: Bearer $OPS_HEALTH_TOKEN`. Each section returns `{ok, latency_ms, detail}` so a paging alert can point at the broken page. |
 
 ## Quick checklist for production
 

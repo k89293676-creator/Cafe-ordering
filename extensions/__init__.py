@@ -28,6 +28,7 @@ def register_extensions(app: "Flask") -> None:
     from .push_bp import bp as push_bp
     from .multi_tenant_bp import bp as multi_tenant_bp
     from .tables_overview_bp import bp as tables_overview_bp
+    from .exports_bp import bp as exports_bp
 
     for bp in (
         service_calls_bp,
@@ -40,6 +41,7 @@ def register_extensions(app: "Flask") -> None:
         push_bp,
         multi_tenant_bp,
         tables_overview_bp,
+        exports_bp,
     ):
         if bp.name not in app.blueprints:
             app.register_blueprint(bp)

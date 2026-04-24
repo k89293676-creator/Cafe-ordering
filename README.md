@@ -112,6 +112,49 @@ flask --app app db upgrade
 
 Set `ADMIN_SECRET_KEY`, then use `/admin/login` with that key to access operational dashboards.
 
+## Operational health & post-deploy verification
+
+The app exposes a token-protected operational health endpoint that returns
+a per-section breakdown — one entry per sidebar page (inventory, billing,
+payment methods, food delivery, reorder, analytics, sales dashboard, menu
+engineering, customer LTV, employees, tables overview, table calls,
+customers, exports). Each entry reports `{ok, latency_ms, detail}` so a
+paging alert points straight at the broken page.
+
+```bash
+curl -H "Authorization: Bearer $OPS_HEALTH_TOKEN" \
+     https://your-app.up.railway.app/api/ops/health
+```
+
+The endpoint is **closed by default** — if `OPS_HEALTH_TOKEN` is not set
+in the environment it returns `401` to every caller. Generate one with:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+A GitHub Actions workflow (`.github/workflows/post-deploy-healthcheck.yml`)
+runs on every push to `main`. It waits for Railway to roll the new image,
+then probes `/healthz`, `/readyz`, `/version` (commit SHA match), and
+`/api/ops/health` (per-section). Add two repository secrets to enable it:
+
+- `RAILWAY_APP_URL` — public base URL, e.g. `https://cafe.up.railway.app`
+- `OPS_HEALTH_TOKEN` — the same value set in Railway env vars
+
+## Reorder suggestions & secure exports
+
+- `GET /owner/inventory/reorder-suggestions` (auth required) — returns
+  ranked restock recommendations based on the last 30 days of completed
+  orders. Append `?format=csv` for a procurement spreadsheet.
+- `GET /owner/exports/sales-dashboard|menu-engineering|ltv|employees-performance`
+  (auth required) — hardened CSV exports with CSV-injection guard,
+  no-store cache headers, a `EXPORTS_MAX_ROWS` row cap, safe filenames,
+  and a `EXPORTS_RATE_LIMIT` per-owner limiter.
+- `GET /owner/export/orders` and `GET /owner/report/daily` carry the same
+  hardening (rate-limited, no-store, CSV-injection-safe).
+
+See `ENV_CONFIG.md` for the full list of related variables.
+
 ## Notes
 
 Legacy JSON files are imported into the SQLAlchemy database on first startup if the owners table is empty. After migration, database storage is the source of truth.

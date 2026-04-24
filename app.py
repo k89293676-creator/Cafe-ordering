@@ -6864,6 +6864,135 @@ def restock_ingredient(ing_id: int):
     return redirect(url_for("inventory_view"))
 
 
+@app.route("/owner/inventory/reorder-suggestions")
+@login_required
+def inventory_reorder_suggestions():
+    """Suggest restock quantities based on the last 30 days of orders.
+
+    Algorithm (intentionally simple — owners need to trust it):
+
+    1. For each ingredient with a ``menu_item_id`` link, count how many
+       times that menu item appears in completed orders in the last 30
+       days, multiply by ``qty_per_order`` to get **30-day usage**.
+    2. ``daily_usage = usage_30d / 30`` and ``days_left = stock /
+       daily_usage`` (``∞`` if usage is zero — flagged as "stale").
+    3. ``suggest_order = max(threshold * 4 - stock, 0)`` so a single
+       restock covers ~4 weeks of buffer above the alert threshold.
+
+    Returns JSON for the dashboard widget and an opt-in CSV download
+    via ``?format=csv`` for procurement spreadsheets.
+    """
+    owner_id = logged_in_owner_id()
+    if not owner_id:
+        abort(401)
+
+    ingredients = (
+        Ingredient.query.filter_by(owner_id=owner_id)
+        .order_by(Ingredient.name).all()
+    )
+
+    # 30-day completed-order window, scoped to this owner.
+    window_start = datetime.now(timezone.utc) - timedelta(days=30)
+    completed = (
+        Order.query.filter(
+            Order.owner_id == owner_id,
+            Order.status == "completed",
+            Order.created_at >= window_start,
+        ).all()
+    )
+
+    # menu_item_id → cumulative quantity sold across the window.
+    sold: dict[str, int] = {}
+    for o in completed:
+        items = o.items if isinstance(o.items, list) else []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            mid = str(it.get("id") or it.get("menu_item_id") or "")
+            if not mid:
+                continue
+            qty = int(it.get("quantity", it.get("qty", 1)) or 1)
+            sold[mid] = sold.get(mid, 0) + qty
+
+    suggestions = []
+    for ing in ingredients:
+        stock = float(ing.stock or 0)
+        threshold = float(ing.low_stock_threshold or 5)
+        qty_per = float(ing.qty_per_order or 1)
+        cost = float(ing.cost_per_unit or 0)
+        sales_qty = sold.get(ing.menu_item_id or "", 0)
+        usage_30d = sales_qty * qty_per
+        daily_usage = usage_30d / 30.0
+        if daily_usage > 0:
+            days_left = round(stock / daily_usage, 1)
+        else:
+            days_left = None  # no recent sales — owner judgement
+        # Reorder enough to refill ~4 weeks of buffer above threshold.
+        target_buffer = threshold * 4
+        suggest_qty = round(max(target_buffer - stock, 0.0), 2)
+        suggest_cost = round(suggest_qty * cost, 2) if cost else 0
+        priority = (
+            "critical" if stock <= 0 and daily_usage > 0
+            else "high" if stock <= threshold
+            else "low" if daily_usage == 0
+            else "ok"
+        )
+        suggestions.append({
+            "id": ing.id,
+            "name": ing.name,
+            "unit": ing.unit or "unit",
+            "stock": round(stock, 3),
+            "lowStockThreshold": round(threshold, 3),
+            "usage30d": round(usage_30d, 3),
+            "dailyUsage": round(daily_usage, 3),
+            "daysLeft": days_left,
+            "suggestOrderQty": suggest_qty,
+            "suggestOrderCost": suggest_cost,
+            "priority": priority,
+        })
+
+    suggestions.sort(key=lambda s: (
+        {"critical": 0, "high": 1, "ok": 2, "low": 3}.get(s["priority"], 4),
+        -(s["usage30d"] or 0),
+    ))
+
+    if (request.args.get("format") or "").lower() == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output, lineterminator="\n")
+        writer.writerow(["name", "unit", "stock", "low_stock_threshold",
+                          "usage_30d", "daily_usage", "days_left",
+                          "suggest_order_qty", "suggest_order_cost",
+                          "priority"])
+        for s in suggestions:
+            writer.writerow([
+                s["name"], s["unit"], s["stock"], s["lowStockThreshold"],
+                s["usage30d"], s["dailyUsage"], s["daysLeft"] or "",
+                s["suggestOrderQty"], s["suggestOrderCost"], s["priority"],
+            ])
+        return Response(
+            output.getvalue(),
+            mimetype="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": (
+                    f"attachment; filename=reorder-suggestions_{datetime.now().strftime('%Y%m%d')}.csv"
+                ),
+                "Cache-Control": "no-store, private, max-age=0",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    return jsonify({
+        "windowDays": 30,
+        "totalIngredients": len(suggestions),
+        "criticalCount": sum(1 for s in suggestions if s["priority"] == "critical"),
+        "highCount": sum(1 for s in suggestions if s["priority"] == "high"),
+        "estimatedReorderCost": round(
+            sum(s["suggestOrderCost"] for s in suggestions), 2
+        ),
+        "suggestions": suggestions,
+    })
+
+
 @app.route("/owner/inventory/export")
 @login_required
 def export_inventory_csv():
@@ -7078,6 +7207,7 @@ def mark_order_paid(order_id: int):
 
 @app.route("/owner/export/orders")
 @login_required
+@limiter.limit("30 per hour")
 def export_orders_csv():
     owner_id = logged_in_owner_id()
     date_from = request.args.get("date_from") or request.args.get("from") or ""
@@ -7101,31 +7231,61 @@ def export_orders_csv():
     if status_filter and status_filter in {"pending", "confirmed", "preparing", "ready", "completed", "cancelled"}:
         query = query.filter(Order.status == status_filter)
 
-    orders = query.order_by(Order.created_at.asc()).all()
+    # Hard cap so a misconfigured date range can't OOM a free-tier dyno.
+    max_rows = int(os.environ.get("EXPORTS_MAX_ROWS", "50000"))
+    orders = query.order_by(Order.created_at.asc()).limit(max_rows + 1).all()
+    truncated = len(orders) > max_rows
+    if truncated:
+        orders = orders[:max_rows]
+
+    # CSV-injection guard — Excel/Numbers/LibreOffice will execute any cell
+    # that begins with =, +, -, @, tab, or CR. Prefix with a single quote
+    # to neutralise without losing the value.
+    _formula_prefixes = ("=", "+", "-", "@", "\t", "\r")
+
+    def _safe(value):
+        if value is None:
+            return ""
+        s = str(value)
+        if s and s[0] in _formula_prefixes:
+            s = "'" + s
+        return s
 
     output = io.StringIO()
-    writer = csv.writer(output)
+    writer = csv.writer(output, lineterminator="\n")
     writer.writerow([
         "id", "status", "pickup_code", "table_name", "customer_name",
         "customer_email", "customer_phone", "subtotal", "tip", "total",
         "items_count", "origin", "created_at"
     ])
     for o in orders:
-        writer.writerow([
+        writer.writerow([_safe(c) for c in [
             o.id, o.status, o.pickup_code or "",
             o.table_name or "", o.customer_name or "Guest",
             o.customer_email or "", o.customer_phone or "",
             float(o.subtotal or 0), float(o.tip or 0), float(o.total or 0),
             len(o.items) if isinstance(o.items, list) else 0,
             o.origin or "", _iso(o.created_at),
-        ])
+        ]])
+    if truncated:
+        writer.writerow(["…", f"truncated at {max_rows} rows; refine date range",
+                         "", "", "", "", "", "", "", "", "", "", ""])
 
     output.seek(0)
-    filename = f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    # Slug-safe filename: only [A-Za-z0-9._-] makes it through.
+    cafe = db.session.get(Owner, owner_id) if owner_id else None
+    cafe_slug = re.sub(r"[^a-z0-9]+", "-",
+                       (getattr(cafe, "cafe_name", None) or "cafe").lower()).strip("-") or "cafe"
+    filename = f"orders_{cafe_slug[:40]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     return Response(
         output.getvalue(),
-        mimetype="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+        },
     )
 
 
@@ -7135,6 +7295,7 @@ def export_orders_csv():
 
 @app.route("/owner/report/daily")
 @login_required
+@limiter.limit("20 per hour")
 def daily_report_pdf():
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -9524,6 +9685,13 @@ try:
     register_extensions(app)
 except Exception as _ext_exc:  # pragma: no cover - never block startup on extras
     app.logger.warning("extensions: failed to register: %s", _ext_exc)
+
+# Operational health check (token-protected, per-section signal).
+try:
+    from lib_ops_health import register as _register_ops_health
+    _register_ops_health(app)
+except Exception as _oh_exc:  # pragma: no cover - never block startup on extras
+    app.logger.warning("ops-health: failed to register: %s", _oh_exc)
 
 
 # ---------------------------------------------------------------------------

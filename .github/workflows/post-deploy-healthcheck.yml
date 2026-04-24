@@ -1,0 +1,187 @@
+name: Post-Deploy Health Check
+
+# Verifies the deployed app is healthy after Railway redeploys following a
+# push to ``main``. Runs the same probes a real uptime monitor would so a
+# bad deploy is caught within minutes — not when a customer reports it.
+#
+# What it checks:
+#   1. Liveness    — ``GET /healthz``  (must be 200 plain "ok")
+#   2. Readiness   — ``GET /readyz``   (must be 200 with ``ok=true``)
+#   3. Version     — ``GET /version``  (commit must match the SHA we pushed)
+#   4. Operational — ``GET /api/ops/health`` with bearer token (per-section)
+#
+# Required GitHub secrets:
+#   - RAILWAY_APP_URL    — public base URL, e.g. ``https://cafe.up.railway.app``
+#   - OPS_HEALTH_TOKEN   — same value set in Railway env vars
+#
+# The job will pass even if the optional secrets are missing — only liveness
+# is mandatory. This is so the workflow doesn't go red on first run before
+# the operator has a chance to add the secrets.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Override RAILWAY_APP_URL (optional)"
+        required: false
+        type: string
+
+concurrency:
+  group: post-deploy-healthcheck-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  healthcheck:
+    name: Verify production health
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_URL: ${{ github.event.inputs.base_url || secrets.RAILWAY_APP_URL }}
+      OPS_HEALTH_TOKEN: ${{ secrets.OPS_HEALTH_TOKEN }}
+      EXPECTED_SHA: ${{ github.sha }}
+      # Wait for Railway to roll the new image before we start probing.
+      WAIT_SECONDS: "90"
+      MAX_ATTEMPTS: "20"
+      RETRY_DELAY: "15"
+
+    steps:
+      - name: Skip when no app URL is configured
+        if: env.BASE_URL == ''
+        run: |
+          echo "::warning ::RAILWAY_APP_URL secret not set — skipping post-deploy check."
+          echo "Add it under Settings → Secrets → Actions to enable production verification."
+          exit 0
+
+      - name: Wait for Railway redeploy to roll
+        if: env.BASE_URL != ''
+        run: |
+          echo "Sleeping ${WAIT_SECONDS}s so Railway can pick up commit ${EXPECTED_SHA:0:8}…"
+          sleep "${WAIT_SECONDS}"
+
+      - name: Probe /healthz (liveness)
+        if: env.BASE_URL != ''
+        run: |
+          set -eo pipefail
+          for i in $(seq 1 "${MAX_ATTEMPTS}"); do
+            code=$(curl -sS -o /tmp/healthz.txt -w "%{http_code}" \
+              --max-time 10 "${BASE_URL%/}/healthz" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "✅ /healthz OK on attempt $i"
+              cat /tmp/healthz.txt
+              echo
+              exit 0
+            fi
+            echo "Attempt $i: /healthz returned $code — retrying in ${RETRY_DELAY}s"
+            sleep "${RETRY_DELAY}"
+          done
+          echo "::error ::/healthz never returned 200 after ${MAX_ATTEMPTS} attempts"
+          exit 1
+
+      - name: Probe /readyz (readiness)
+        if: env.BASE_URL != ''
+        run: |
+          set -eo pipefail
+          code=$(curl -sS -o /tmp/readyz.json -w "%{http_code}" \
+            --max-time 15 "${BASE_URL%/}/readyz")
+          echo "HTTP ${code}"
+          cat /tmp/readyz.json | head -c 4000
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error ::/readyz returned $code (expected 200)"
+            exit 1
+          fi
+          # The body is JSON like {"ok": true, ...}. We use `python -c` instead
+          # of jq so we don't need to install it.
+          python3 -c '
+          import json, sys
+          data = json.load(open("/tmp/readyz.json"))
+          if not data.get("ok", False):
+              print("::error ::/readyz reports ok=false:", json.dumps(data, indent=2))
+              sys.exit(1)
+          print("✅ /readyz reports ok=true")
+          '
+
+      - name: Probe /version (commit match)
+        if: env.BASE_URL != ''
+        continue-on-error: true
+        run: |
+          set -eo pipefail
+          curl -sS --max-time 10 "${BASE_URL%/}/version" -o /tmp/version.json
+          cat /tmp/version.json
+          echo
+          python3 -c '
+          import json, os, sys
+          data = json.load(open("/tmp/version.json"))
+          deployed = (data.get("commit") or "")[:12]
+          expected = os.environ["EXPECTED_SHA"][:12]
+          if deployed and deployed == expected:
+              print(f"✅ /version commit matches: {deployed}")
+              sys.exit(0)
+          if not deployed:
+              print("::warning ::/version did not include a commit field")
+              sys.exit(0)
+          print(f"::warning ::/version commit ({deployed}) does not match this push ({expected})")
+          # Mismatch is a warning, not a failure — Railway sometimes finishes a
+          # newer deploy before this job races back.
+          '
+
+      - name: Probe /api/ops/health (per-section signal)
+        if: env.BASE_URL != '' && env.OPS_HEALTH_TOKEN != ''
+        run: |
+          set -eo pipefail
+          code=$(curl -sS -o /tmp/ops.json -w "%{http_code}" \
+            --max-time 20 \
+            -H "Authorization: Bearer ${OPS_HEALTH_TOKEN}" \
+            "${BASE_URL%/}/api/ops/health")
+          echo "HTTP ${code}"
+          # Pretty-print a digest, but never echo the raw token.
+          python3 -c '
+          import json, sys
+          data = json.load(open("/tmp/ops.json"))
+          ok = data.get("ok", False)
+          sections = data.get("sections", {}) or {}
+          for name, payload in sorted(sections.items()):
+              flag = "✅" if payload.get("ok", True) else "❌"
+              print(f"{flag} {name}: {payload}")
+          if not ok:
+              print("::error ::/api/ops/health overall ok=false")
+              sys.exit(1)
+          print("✅ /api/ops/health overall ok=true")
+          ' </tmp/ops.json
+          if [ "$code" != "200" ]; then
+            echo "::error ::/api/ops/health returned $code (expected 200)"
+            exit 1
+          fi
+
+      - name: Notice — ops token not configured
+        if: env.BASE_URL != '' && env.OPS_HEALTH_TOKEN == ''
+        run: |
+          echo "::notice ::OPS_HEALTH_TOKEN secret not set — skipping per-section probe."
+          echo "Add it (and the same value in Railway env vars) to enable deeper checks."
+
+      - name: Summary
+        if: env.BASE_URL != ''
+        run: |
+          {
+            echo "## ✅ Post-deploy health check"
+            echo
+            echo "**Commit:** \`${EXPECTED_SHA:0:12}\`"
+            echo "**App URL:** ${BASE_URL%/}"
+            echo
+            echo "| Probe | Status |"
+            echo "| --- | --- |"
+            echo "| Liveness (\`/healthz\`)   | ✅ |"
+            echo "| Readiness (\`/readyz\`)   | ✅ |"
+            echo "| Version match           | (see logs) |"
+            if [ -n "${OPS_HEALTH_TOKEN}" ]; then
+              echo "| Ops health (\`/api/ops/health\`) | ✅ |"
+            else
+              echo "| Ops health (\`/api/ops/health\`) | ⏭ skipped — token not set |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
