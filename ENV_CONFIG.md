@@ -86,3 +86,29 @@ without editing code:
 - [ ] `OWNER_SIGNUP_MODE` is `approval` or `invite_only` (never `open`)
 - [ ] `REDIS_URL` is set if you run more than one gunicorn worker
 - [ ] `TRUSTED_PROXIES` is set so HSTS / secure cookies work behind Railway
+
+## Integrations Hub (`/owner/integrations`)
+
+The unified Integrations Hub gives the owner a single screen for every
+external service (payment gateways, food-delivery aggregators, notifications)
+and is read by `lib_integrations.py`. The variables below are **only** used
+by that screen — they don't affect order taking, billing, or payment
+verification.
+
+| Variable | Purpose | Notes |
+| --- | --- | --- |
+| `TWILIO_ACCOUNT_SID` | Twilio account SID for the optional "SMS me the setup link" button. | Lazy-loaded — when unset, the SMS button is hidden in the UI. No SDK is shipped; the helper uses a stdlib HTTP POST. |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token. Paired with the SID. | Treat as sensitive. |
+| `TWILIO_FROM_NUMBER` | E.164 sender number registered on your Twilio account. | Example: `+15551234567`. |
+| `IS_PRODUCTION` | Forces the production-readiness checker into "production mode" even when not on Railway. | Set to `1` / `true` to make blocker checks active in any environment. Otherwise auto-detected from `FLASK_ENV=production` or `RAILWAY_ENVIRONMENT`. |
+| `BILLING_ENCRYPTION_KEY` | Independent Fernet key for the encrypted-at-rest payment + aggregator credentials. | Optional. Defaults to a key derived from `SECRET_KEY`. Set this if you want to rotate session secrets without re-encrypting every credential. |
+
+The "Email me the setup link" button reuses the existing `MAIL_*` /
+`SENDGRID_API_KEY` envs above — no extra config is needed for the email
+channel.
+
+### Production-readiness JSON
+
+`GET /owner/integrations/checklist.json` (auth required) returns a JSON
+snapshot of the readiness checks above plus per-integration status, with
+**no secret material**. Useful for external uptime monitors.

@@ -58,3 +58,22 @@ python start.py
 - **Reports** — CSV export (`/owner/export/orders`) and PDF daily report (`/owner/report/daily`).
 - **Feedback** — 1-5 star ratings linked to orders, averages shown on dashboard.
 - **Reorder** — Phone-based repeat ordering at `/owner/reorder`.
+
+## Integrations Hub (post-deploy)
+
+After your Railway redeploy, log in as the cafe owner and open
+`/owner/integrations`. This is the single screen that:
+
+1. Shows every supported payment gateway and food-delivery aggregator
+   with their connection state (Live / Test / Saved / Not connected).
+2. Lets you copy the per-provider webhook URL (HTTPS-enforced in
+   production) straight into the gateway dashboard.
+3. Emails (or, if Twilio is configured, SMS-es) **you** at your
+   registered email/phone a step-by-step setup brief — including the
+   webhook URL and a signup link with your name and email pre-filled.
+4. Surfaces a production-readiness checklist: missing env vars, weak
+   secrets, `OWNER_SIGNUP_MODE=open`, etc. Items are color-coded by
+   severity (blocker / warn / info / ok).
+
+You can also hit `GET /owner/integrations/checklist.json` (auth required)
+for a non-secret JSON snapshot — useful as a post-deploy smoke check.

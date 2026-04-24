@@ -70,3 +70,20 @@ Railway uses `railway.json` and `Procfile` to install dependencies, start Gunico
 - JSON fallback mode for local/free-tier development
 - Optional PostgreSQL mode with JSON-to-database import script
 - Production-grade file locking, atomic writes, cache invalidation, security headers, CSRF, logging, and rate limiting
+
+## Production Upgrade (April 2026)
+
+Added a unified **Integrations Hub** at `/owner/integrations` so the cafe owner manages every external service from one screen — payment gateways (Stripe, Razorpay, Cashfree), food-delivery aggregators (Swiggy, Zomato, Uber Eats), and notifications (email, SMS, web push).
+
+**New files**
+- `lib_integrations.py` — provider catalog, status overview, signup-link prefill, email/SMS setup-brief sender (Twilio via stdlib HTTP — no SDK), production-readiness checks. Zero I/O at import.
+- `templates/owner_integrations/index.html` — hub UI with status cards, copyable webhook URLs, color-coded readiness checklist.
+
+**New routes (in `app.py`)**
+- `GET /owner/integrations` — the hub.
+- `POST /owner/integrations/send-setup/<email|sms>/<provider>` — emails or texts the owner (at their *registered* address only) a setup brief with the webhook URL and a signup link pre-filled with their name + email.
+- `GET /owner/integrations/checklist.json` — non-secret JSON for monitoring.
+
+**New optional env vars** (see `ENV_CONFIG.md`): `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `IS_PRODUCTION`, `BILLING_ENCRYPTION_KEY`. None are required — the hub degrades gracefully when channels aren't configured.
+
+**Test coverage** added to `tests/test_smoke.py`: auth gate on hub + checklist + send-setup, side-effect-free import, signup-link prefill.
