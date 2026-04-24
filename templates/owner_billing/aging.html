@@ -1,0 +1,38 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Open Tabs Aging{% endblock %}
+{% block content %}
+<h1>Open Tabs &mdash; Aging Report</h1>
+<p class="muted" style="margin-top:-.75rem;">{{ buckets._total.count }} open bills, total exposure <strong>₹{{ '%.2f'|format(buckets._total.value) }}</strong>.</p>
+
+<div class="grid grid-stats" style="margin-bottom:1.5rem;">
+  <div class="stat ok"><div class="label">Fresh (&lt;1h)</div><div class="value">{{ buckets.under_1h.count }}</div><div class="sub">₹{{ '%.2f'|format(buckets.under_1h.value) }}</div></div>
+  <div class="stat"><div class="label">Active (1-4h)</div><div class="value">{{ buckets['1h_to_4h'].count }}</div><div class="sub">₹{{ '%.2f'|format(buckets['1h_to_4h'].value) }}</div></div>
+  <div class="stat warn"><div class="label">Stale (4-24h)</div><div class="value">{{ buckets['4h_to_24h'].count }}</div><div class="sub">₹{{ '%.2f'|format(buckets['4h_to_24h'].value) }}</div></div>
+  <div class="stat danger"><div class="label">Critical (&gt;24h)</div><div class="value">{{ buckets.over_24h.count }}</div><div class="sub">₹{{ '%.2f'|format(buckets.over_24h.value) }}</div></div>
+</div>
+
+{% if not orders %}
+  <div class="empty">No open tabs. Healthy floor!</div>
+{% else %}
+  <div class="panel" style="padding:0;overflow-x:auto;">
+    <table>
+      <thead><tr><th>#</th><th>Table</th><th>Customer</th><th>Age</th><th class="right">Total</th><th></th></tr></thead>
+      <tbody>
+        {% for o in orders %}
+          {% set age_label = age_labels.get(o.id, '—') %}
+          {% set bucket_class = age_classes.get(o.id, '') %}
+          <tr>
+            <td class="mono">#{{ o.id }}</td>
+            <td><strong>{{ o.tableName or '—' }}</strong></td>
+            <td>{{ o.customerName }}</td>
+            <td><span class="pill {{ bucket_class }}">{{ age_label }}</span></td>
+            <td class="right mono">₹{{ '%.2f'|format(o.total) }}</td>
+            <td><a class="btn btn-primary btn-sm" href="{{ url_for('owner_billing_order_detail', order_id=o.id) }}">Settle →</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:1rem;font-size:.82rem;">Tabs older than 24h frequently indicate forgotten orders, walked customers, or POS sync drift. Consider voiding with a clear reason if the customer never paid.</p>
+{% endif %}
+{% endblock %}

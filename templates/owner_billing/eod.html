@@ -1,15 +1,22 @@
 {% extends "owner_billing/_base.html" %}
 {% block title %}End of Day{% endblock %}
 {% block content %}
-<h1>End of Day Report — <span class="mono" style="font-weight:400;">{{ summary.date }}</span></h1>
+<h1>End of Day Report — <span class="mono" style="font-weight:400;">{{ summary.range_label }}</span></h1>
 
-<form method="GET" style="display:flex;gap:.5rem;margin-bottom:1.25rem;align-items:end;">
+<form method="GET" style="display:flex;gap:.5rem;margin-bottom:1.25rem;align-items:end;flex-wrap:wrap;">
   <div class="field" style="margin:0;">
-    <label>Pick a date</label>
-    <input type="date" name="date" value="{{ summary.date }}" />
+    <label>From</label>
+    <input type="date" name="from" value="{{ summary.from }}" />
+  </div>
+  <div class="field" style="margin:0;">
+    <label>To</label>
+    <input type="date" name="to" value="{{ summary.to }}" />
   </div>
   <button class="btn btn-primary btn-sm" type="submit">Load</button>
-  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod_csv') }}?date={{ summary.date }}">Export CSV</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod') }}">Today</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod') }}?from={{ summary.preset_week_from }}&amp;to={{ summary.to }}">This week</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod') }}?from={{ summary.preset_month_from }}&amp;to={{ summary.to }}">This month</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod_csv') }}?from={{ summary.from }}&amp;to={{ summary.to }}">Export CSV</a>
   <a class="btn btn-ghost btn-sm" href="javascript:window.print()">Print</a>
 </form>
 

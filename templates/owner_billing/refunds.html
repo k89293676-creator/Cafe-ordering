@@ -1,0 +1,56 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Refunds &amp; Disputes{% endblock %}
+{% block content %}
+<h1>Refunds <span class="muted" style="font-size:1rem;font-weight:400;">last {{ window_days }} days</span></h1>
+
+<div class="grid grid-stats" style="margin-bottom:1.5rem;">
+  <div class="stat danger"><div class="label">Refunded</div><div class="value">₹{{ '%.2f'|format(stats.refund_total) }}</div><div class="sub">{{ stats.refund_count }} events</div></div>
+  <div class="stat"><div class="label">Refund rate</div><div class="value">{{ '%.1f'|format(stats.refund_rate_pct) }}%</div><div class="sub">of gross revenue</div></div>
+  <div class="stat warn"><div class="label">Cap (today)</div><div class="value">₹{{ '%.2f'|format(stats.cap_today) }}</div><div class="sub">{{ '%.0f'|format(stats.cap_pct) }}% of gross</div></div>
+  <div class="stat"><div class="label">Used today</div><div class="value">₹{{ '%.2f'|format(stats.used_today) }}</div><div class="sub">remaining ₹{{ '%.2f'|format(stats.cap_remaining) }}</div></div>
+</div>
+
+<form method="GET" style="display:flex;gap:.5rem;margin-bottom:1.25rem;flex-wrap:wrap;align-items:end;">
+  <div class="field" style="margin:0;"><label>From</label><input type="date" name="from" value="{{ from_str }}" /></div>
+  <div class="field" style="margin:0;"><label>To</label><input type="date" name="to" value="{{ to_str }}" /></div>
+  <div class="field" style="margin:0;"><label>Reason contains</label>
+    <input type="text" name="q" value="{{ q }}" maxlength="64" placeholder="e.g. complaint" />
+  </div>
+  <button class="btn btn-primary btn-sm" type="submit">Filter</button>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_refunds') }}">Reset</a>
+</form>
+
+{% if not events %}
+  <div class="empty">No refunds in this window. Healthy week. ☕</div>
+{% else %}
+  <div class="panel" style="padding:0;overflow-x:auto;">
+    <table>
+      <thead><tr><th>When</th><th>Invoice</th><th>By</th><th>Reason</th><th class="right">Amount</th><th>IP</th><th></th></tr></thead>
+      <tbody>
+        {% for e in events %}
+          <tr>
+            <td class="mono muted">{{ e.created_at.strftime('%Y-%m-%d %H:%M') if e.created_at else '—' }}</td>
+            <td class="mono">{% if e.order_id %}<a href="{{ url_for('owner_billing_order_detail', order_id=e.order_id) }}">{{ e.invoice_number or '#' ~ e.order_id }}</a>{% else %}—{% endif %}</td>
+            <td>{{ e.actor_username or '—' }}</td>
+            <td>{{ e.reason or '—' }}</td>
+            <td class="right mono"><strong style="color:var(--danger);">₹{{ '%.2f'|format(e.amount or 0) }}</strong></td>
+            <td class="mono muted" style="font-size:.78rem;">{{ e.ip or '—' }}</td>
+            <td><a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_order_detail', order_id=e.order_id) }}">Open</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if total > per_page %}
+    <div style="margin-top:1rem;display:flex;justify-content:space-between;align-items:center;">
+      <span class="muted">Page {{ page }} of {{ ((total - 1) // per_page) + 1 }}</span>
+      <span>
+        {% if page > 1 %}<a class="btn btn-ghost btn-sm" href="?page={{ page - 1 }}&from={{ from_str }}&to={{ to_str }}&q={{ q }}">← Prev</a>{% endif %}
+        {% if page * per_page < total %}<a class="btn btn-ghost btn-sm" href="?page={{ page + 1 }}&from={{ from_str }}&to={{ to_str }}&q={{ q }}">Next →</a>{% endif %}
+      </span>
+    </div>
+  {% endif %}
+{% endif %}
+
+<p class="muted" style="margin-top:1.5rem;font-size:.82rem;">Refunds are subject to a daily cap of <strong>{{ '%.0f'|format(stats.cap_pct) }}%</strong> of gross revenue and a velocity limit of <strong>{{ stats.velocity_per_hour }}/hour</strong>. Configure with <code>BILLING_REFUND_DAILY_CAP_PCT</code> and <code>BILLING_REFUND_VELOCITY_PER_HOUR</code>.</p>
+{% endblock %}

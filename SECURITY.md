@@ -62,3 +62,53 @@ to older tags.
   new dependencies; the optional Twilio path uses a stdlib `urllib`
   POST gated on `TWILIO_ACCOUNT_SID`, so the attack surface only grows
   when the operator opts in.
+
+## Billing v2 hardening
+
+The billing dashboard sits on top of payment data, so it gets a heavier
+posture than the rest of the app:
+
+* **Step-up authentication.** Voiding a high-value bill or issuing a
+  large refund re-prompts the owner for their password before the
+  action is committed. The threshold for each is tuned via
+  `BILLING_STEPUP_VOID_THRESHOLD` and `BILLING_STEPUP_REFUND_THRESHOLD`
+  (see `ENV_CONFIG.md`); a successful step-up is cached on the session
+  for `BILLING_STEPUP_TTL_SECONDS` so back-to-back actions don't keep
+  prompting. The password is verified with a constant-time comparison
+  against the existing bcrypt/Werkzeug hash via `_password_matches`.
+* **Daily refund cap.** Refunds are clamped to a percentage of the
+  cafe's gross for the same UTC day, controlled by
+  `BILLING_REFUND_DAILY_CAP_PCT`. Attempts that would exceed the cap
+  are rejected and logged to `billing_logs` with action
+  `refund_blocked` so a tampered button can't quietly drain the float.
+* **Per-hour velocity ceiling.** No more than
+  `BILLING_REFUND_VELOCITY_PER_HOUR` refund events per owner per
+  rolling hour. This is independent of the per-IP rate limiter so it
+  catches scripted abuse from a logged-in session.
+* **Same-origin re-check on destructive actions.** Beyond the CSRF
+  token, void and refund routes verify that the `Origin`/`Referer`
+  matches `request.host`. Mismatches return HTTP 403 and log to the
+  application logger.
+* **Per-route rate limits.** `Flask-Limiter` decorators sit on
+  `adjust`, `settle`, `void`, `refund`, `charge`, and the cash-drawer
+  POST so even authenticated abuse is bounded.
+* **Cash-drawer reconciliation.** Every count is stored with the
+  recomputed expected cash, the variance, and a denormalised severity
+  word so historical reads don't depend on the runtime threshold; the
+  alert percentage is owner-tunable via
+  `BILLING_DRAWER_VARIANCE_ALERT_PCT`.
+* **Webhook idempotency.** Razorpay/Stripe-style providers and the
+  third-party-aggregator webhook all funnel through `WebhookEventLog`,
+  which has a unique `(provider, event_id)` index — re-deliveries are
+  no-ops.
+* **Health probe.** `GET /health/billing` is unauthenticated but only
+  reports database reachability and webhook-log writability — never
+  per-owner data — so it is safe to wire into a load-balancer probe.
+  The signed-in `/owner/billing/health` and `/owner/billing/health.json`
+  variants additionally surface owner-scoped checks (stale tabs, 7-day
+  refund ratio, unverified aggregator credentials, webhook volume).
+* **Audit log.** Every billing state change — adjust, settle, void,
+  refund, blocked refund, drawer count — appends an immutable row to
+  `billing_logs` with the actor, amount, reason, and a structured
+  payload. The table is indexed on `(owner_id, created_at DESC)` so
+  the audit page stays fast even after years of rows.

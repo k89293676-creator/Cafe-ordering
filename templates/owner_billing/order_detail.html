@@ -111,6 +111,10 @@
       <form method="POST" action="{{ url_for('owner_billing_void', order_id=order.id) }}" onsubmit="return confirm('Void this entire bill? This is logged and cannot be undone.');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <div class="field"><label>Reason (required)</label><input type="text" name="reason" maxlength="500" required placeholder="Customer left, duplicate order, …" /></div>
+        {% if void_stepup_required and not stepup_fresh %}
+          <div class="alert alert-info" style="font-size:.82rem;margin-top:.5rem;">High-value void: re-enter your password to confirm.</div>
+          <div class="field"><label>Password</label><input type="password" name="stepup_password" autocomplete="current-password" required /></div>
+        {% endif %}
         <button class="btn btn-danger btn-sm" type="submit">Void Bill</button>
       </form>
     </div>
@@ -127,11 +131,18 @@
     </div>
     <div class="panel">
       <h2 style="margin-top:0;color:var(--danger);">Issue Refund</h2>
-      <form method="POST" action="{{ url_for('owner_billing_refund', order_id=order.id) }}" onsubmit="return confirm('Issue this refund? It will be logged.');">
+      <p class="muted" style="font-size:.78rem;margin-top:-.5rem;">Daily cap remaining: <strong>₹{{ '%.2f'|format(refund_cap_remaining) }}</strong> · Refunds above ₹{{ '%.0f'|format(stepup_refund_threshold) }} require password confirmation.</p>
+      <form method="POST" action="{{ url_for('owner_billing_refund', order_id=order.id) }}" onsubmit="return confirm('Issue this refund? It will be logged.');" id="refundForm">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <div class="field"><label>Amount (₹) — max ₹{{ '%.2f'|format(order.total - order.refundAmount) }}</label>
-          <input type="number" name="amount" step="0.01" min="0.01" max="{{ order.total - order.refundAmount }}" required /></div>
+          <input type="number" name="amount" id="refundAmount" step="0.01" min="0.01" max="{{ order.total - order.refundAmount }}" required /></div>
         <div class="field"><label>Reason (required)</label><input type="text" name="reason" maxlength="500" required placeholder="Item not as described, customer complaint, …" /></div>
+        {% if not stepup_fresh %}
+          <div class="field" id="stepupField" style="display:none;">
+            <label>Password (required for high-value refunds)</label>
+            <input type="password" name="stepup_password" autocomplete="current-password" />
+          </div>
+        {% endif %}
         <button class="btn btn-danger btn-sm" type="submit">Process Refund</button>
       </form>
     </div>
@@ -143,6 +154,29 @@
 {% endblock %}
 {% block extrabody %}
 <script>
+  // Reveal the password field once the refund amount crosses the
+  // step-up threshold (server still re-validates, this is just UX).
+  (function () {
+    const amt = document.getElementById('refundAmount');
+    const fld = document.getElementById('stepupField');
+    if (!amt || !fld) return;
+    const threshold = {{ stepup_refund_threshold|default(500.0) }};
+    function toggle() {
+      const v = parseFloat(amt.value || '0') || 0;
+      if (v > threshold) {
+        fld.style.display = '';
+        const pw = fld.querySelector('input');
+        if (pw) pw.required = true;
+      } else {
+        fld.style.display = 'none';
+        const pw = fld.querySelector('input');
+        if (pw) pw.required = false;
+      }
+    }
+    amt.addEventListener('input', toggle);
+    toggle();
+  })();
+
   function addPaymentRow() {
     const wrap = document.getElementById('paymentRows');
     const methods = {{ valid_methods|tojson }};

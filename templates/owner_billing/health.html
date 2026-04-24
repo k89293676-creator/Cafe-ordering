@@ -1,0 +1,48 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Billing Health{% endblock %}
+{% block content %}
+<h1>Billing Health
+  <span class="pill {% if snapshot.verdict == 'ok' %}pill-paid{% elif snapshot.verdict == 'degraded' %}pill-unpaid{% else %}pill-voided{% endif %}">
+    {{ snapshot.verdict|upper }}
+  </span>
+</h1>
+<p class="muted" style="margin-top:-.75rem;">Live status of the billing subsystem. This page is a <em>private</em> health view; the public probe endpoint is <code>/health/billing</code>.</p>
+
+{% if snapshot.issues %}
+<div class="panel" style="border-left:4px solid var(--danger);margin-bottom:1.25rem;">
+  <h2 style="margin-top:0;color:var(--danger);">Active issues</h2>
+  <ul style="margin:0;padding-left:1.25rem;">
+    {% for issue in snapshot.issues %}<li class="mono">{{ issue }}</li>{% endfor %}
+  </ul>
+</div>
+{% else %}
+<div class="alert alert-ok">All systems nominal. Billing is processing settlements as expected.</div>
+{% endif %}
+
+<div class="grid grid-stats" style="margin-bottom:1.25rem;">
+  <div class="stat"><div class="label">Stuck "settling"</div><div class="value">{{ snapshot.metrics.stuck_settling_count }}</div><div class="sub">should always be 0</div></div>
+  <div class="stat"><div class="label">Unsettled value</div><div class="value">₹{{ '%.2f'|format(snapshot.metrics.unsettled_value) }}</div><div class="sub">open tabs total</div></div>
+  <div class="stat"><div class="label">Recent settle</div><div class="value">{% if snapshot.metrics.recent_settle_seconds is not none %}{{ '%.2f'|format(snapshot.metrics.recent_settle_seconds) }}s{% else %}—{% endif %}</div><div class="sub">latency p≈last</div></div>
+  <div class="stat"><div class="label">Webhook fails (1h)</div><div class="value">{{ snapshot.metrics.webhook_failures_last_hour }}</div><div class="sub">delete &amp; retry if &gt;5</div></div>
+  <div class="stat"><div class="label">Active providers</div><div class="value">{{ snapshot.metrics.payment_credentials_active }}</div><div class="sub">online charging</div></div>
+</div>
+
+<div class="panel" style="margin-bottom:1.25rem;">
+  <h2 style="margin-top:0;">Configured limits</h2>
+  <table>
+    <tr><td>Step-up auth required for refunds above</td><td class="right mono">₹{{ '%.2f'|format(thresholds.refund) }}</td></tr>
+    <tr><td>Step-up auth required for voids above</td><td class="right mono">₹{{ '%.2f'|format(thresholds.void) }}</td></tr>
+    <tr><td>Daily refund cap (% of gross revenue)</td><td class="right mono">{{ '%.0f'|format(thresholds.refund_daily_pct) }}%</td></tr>
+    <tr><td>Refund velocity cap (per hour)</td><td class="right mono">{{ thresholds.velocity }}</td></tr>
+    <tr><td>Drawer variance alert threshold</td><td class="right mono">{{ '%.1f'|format(thresholds.drawer_pct) }}%</td></tr>
+    <tr><td>Step-up session TTL</td><td class="right mono">{{ thresholds.stepup_ttl }}s</td></tr>
+  </table>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0;">Public probe</h2>
+  <p>Monitoring uptime? Point your probe at:</p>
+  <pre class="mono" style="background:var(--panel-2);padding:.75rem;border-radius:7px;overflow:auto;">GET /health/billing</pre>
+  <p class="muted" style="font-size:.82rem;">Returns HTTP 200 with <code>{"verdict":"ok"}</code> when healthy, 503 when critical, and 200 with <code>{"verdict":"degraded"}</code> when partially degraded. The body never includes tenant data &mdash; safe to expose.</p>
+</div>
+{% endblock %}

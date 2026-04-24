@@ -221,11 +221,32 @@ from lib_runtime import (  # noqa: E402  (import after configure_logging on purp
 )
 from lib_billing import (  # noqa: E402
     VALID_PAYMENT_METHODS,
+    aging_bucket_for,
+    billing_health_snapshot,
     compute_bill_totals,
     compute_settlement,
+    drawer_variance,
     next_invoice_number,
     normalise_payments,
+    parse_date_range,
+    revenue_sparkline,
+    summarise_aging,
     summarise_payment_breakdown,
+)
+from lib_billing_security import (  # noqa: E402
+    check_refund_amount_cap,
+    check_refund_velocity_per_hour,
+    drawer_variance_alert_pct,
+    is_stepup_session_fresh,
+    origin_matches as _bsec_origin_matches,
+    refund_daily_cap_pct,
+    refund_velocity_per_hour,
+    stepup_required_for_refund,
+    stepup_required_for_void,
+    stepup_refund_threshold,
+    stepup_session_ttl_seconds,
+    stepup_void_threshold,
+    verify_password_constant_time,
 )
 from lib_payments import (  # noqa: E402
     PROVIDER_GUIDES,
@@ -614,6 +635,33 @@ class WebhookEventLog(db.Model):
     )
 
 
+class CashDrawerCount(db.Model):
+    """One row per shift / day per owner — the cashier's physical
+    cash count vs. what the system *expected* to be in the drawer
+    based on cash payments minus cash refunds.
+
+    Variance is recomputed at write-time so reports don't depend on
+    runtime helpers, and ``severity`` is denormalised so dashboards
+    can colour rows without re-running the threshold logic.
+    """
+
+    __tablename__ = "cash_drawer_counts"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    counted_by_owner_id = db.Column(db.Integer, db.ForeignKey("owners.id"), nullable=True)
+    counted_by_username = db.Column(db.Text, default="")
+    day = db.Column(db.Date, nullable=False, index=True)
+    expected_cash = db.Column(db.Numeric(10, 2), default=0)
+    counted_cash = db.Column(db.Numeric(10, 2), default=0)
+    float_left = db.Column(db.Numeric(10, 2), default=0)
+    variance = db.Column(db.Numeric(10, 2), default=0)
+    variance_pct = db.Column(db.Numeric(6, 2), default=0)
+    severity = db.Column(db.Text, default="ok")
+    notes = db.Column(db.Text, default="")
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), index=True)
+
+
 class OnlinePayment(db.Model):
     """Individual online-payment attempts against an Order.
 
@@ -869,6 +917,7 @@ def _init_db() -> None:
             "CREATE INDEX IF NOT EXISTS ix_online_payments_owner_order ON online_payments(owner_id, order_id)",
             "CREATE INDEX IF NOT EXISTS ix_online_payments_intent ON online_payments(intent_id)",
             "CREATE INDEX IF NOT EXISTS ix_webhook_events_provider_event ON webhook_events(provider, event_id)",
+            "CREATE INDEX IF NOT EXISTS ix_cash_drawer_owner_day ON cash_drawer_counts(owner_id, day DESC)",
             "CREATE INDEX IF NOT EXISTS ix_aggregator_credentials_owner ON aggregator_credentials(owner_id)",
             "CREATE INDEX IF NOT EXISTS ix_aggregator_orders_owner_created ON aggregator_orders(owner_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS ix_aggregator_orders_external ON aggregator_orders(platform, external_order_id)",
@@ -4069,6 +4118,125 @@ def _invalidate_billing_cache(owner_id: int) -> None:
     response_cache.invalidate_prefix(f"billing_overview::{owner_id}")
 
 
+def _billing_health_compute(owner_id: int) -> dict:
+    """Build the billing-health snapshot used by the overview card,
+    the dedicated /owner/billing/health page and the public
+    /health/billing endpoint.
+
+    All checks use indexed columns so this is cheap to call on every
+    page load. Anything failing in here degrades gracefully — the
+    snapshot reports the failed check rather than 500-ing the page.
+    """
+    snapshot: dict = {
+        "owner_id": owner_id,
+        "checks": [],
+        "ok": True,
+        "degraded": False,
+    }
+    try:
+        # 1. Open tabs older than 12h — likely forgotten by waitstaff.
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+        stale = (db.session.query(db.func.count(Order.id))
+                 .filter(Order.owner_id == owner_id,
+                         Order.payment_status == "unpaid",
+                         Order.status != "cancelled",
+                         Order.created_at < cutoff)
+                 .scalar() or 0)
+        snapshot["checks"].append({
+            "key": "stale_open_tabs",
+            "label": "Open tabs older than 12h",
+            "value": int(stale),
+            "ok": stale == 0,
+            "severity": "ok" if stale == 0 else ("warn" if stale < 5 else "alert"),
+        })
+
+        # 2. Refund ratio over the last 7 days (% of gross).
+        since = datetime.now(timezone.utc) - timedelta(days=7)
+        gross = (db.session.query(db.func.coalesce(db.func.sum(Order.total), 0))
+                 .filter(Order.owner_id == owner_id,
+                         Order.payment_status.in_(("paid", "refunded")),
+                         Order.paid_at >= since)
+                 .scalar() or 0)
+        refunds = (db.session.query(db.func.coalesce(db.func.sum(Order.refund_amount), 0))
+                   .filter(Order.owner_id == owner_id,
+                           Order.payment_status.in_(("paid", "refunded")),
+                           Order.paid_at >= since)
+                   .scalar() or 0)
+        ratio = (float(refunds) / float(gross) * 100.0) if float(gross) > 0 else 0.0
+        snapshot["checks"].append({
+            "key": "refund_ratio_7d",
+            "label": "7-day refund ratio",
+            "value": round(ratio, 2),
+            "unit": "%",
+            "ok": ratio < 5.0,
+            "severity": "ok" if ratio < 5.0 else ("warn" if ratio < 10.0 else "alert"),
+        })
+
+        # 3. Aggregator credentials present + verified (if rows exist).
+        try:
+            from sqlalchemy import text as _sa_text
+            agg_unverified = db.session.execute(_sa_text(
+                "SELECT COUNT(*) FROM aggregator_credentials "
+                "WHERE owner_id=:o AND (verified_at IS NULL)"
+            ), {"o": owner_id}).scalar() or 0
+        except Exception:
+            agg_unverified = 0
+        snapshot["checks"].append({
+            "key": "aggregator_unverified",
+            "label": "Aggregator credentials unverified",
+            "value": int(agg_unverified),
+            "ok": agg_unverified == 0,
+            "severity": "ok" if agg_unverified == 0 else "warn",
+        })
+
+        # 4. Webhook event log not exploding (sanity bound — 50k/24h).
+        try:
+            wh_24h = (db.session.query(db.func.count(WebhookEventLog.id))
+                      .filter(WebhookEventLog.received_at >= since).scalar() or 0)
+        except Exception:
+            wh_24h = 0
+        snapshot["checks"].append({
+            "key": "webhook_volume_7d",
+            "label": "Webhook events (last 7d, all owners)",
+            "value": int(wh_24h),
+            "ok": wh_24h < 50000,
+            "severity": "ok" if wh_24h < 50000 else "warn",
+        })
+    except Exception as exc:  # pragma: no cover - defensive
+        app.logger.warning("billing health check failed: %s", exc)
+        snapshot["degraded"] = True
+        snapshot["error"] = "health_check_failed"
+
+    snapshot["ok"] = all(c.get("ok") for c in snapshot["checks"]) and not snapshot["degraded"]
+    return snapshot
+
+
+def _billing_sparkline_7d(owner_id: int) -> list[dict]:
+    """7-day net revenue series for the overview hero. Uses a single
+    GROUP BY on paid_at (indexed) so the cost is bounded regardless
+    of how many invoices a busy cafe writes."""
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+    rows = (db.session.query(
+                db.func.date(Order.paid_at).label("d"),
+                db.func.coalesce(db.func.sum(Order.total), 0).label("gross"),
+                db.func.coalesce(db.func.sum(Order.refund_amount), 0).label("refunds"))
+            .filter(Order.owner_id == owner_id,
+                    Order.payment_status.in_(("paid", "refunded")),
+                    Order.paid_at >= since)
+            .group_by("d").order_by("d").all())
+    out = []
+    for r in rows:
+        gross = float(r.gross or 0)
+        refunds = float(r.refunds or 0)
+        out.append({
+            "date": r.d.isoformat() if hasattr(r.d, "isoformat") else str(r.d),
+            "net": round(gross - refunds, 2),
+            "gross": round(gross, 2),
+            "refunds": round(refunds, 2),
+        })
+    return out
+
+
 @app.route("/owner/billing")
 @login_required
 def owner_billing_overview():
@@ -4085,6 +4253,8 @@ def owner_billing_overview():
         overview=overview,
         recent_paid=[_bill_dict(o) for o in recent_paid],
         settings=settings,
+        sparkline=_billing_sparkline_7d(owner_id),
+        health=_billing_health_compute(owner_id),
         owner_username=logged_in_owner(),
     )))
 
@@ -4143,6 +4313,15 @@ def owner_billing_order_detail(order_id: int):
         tax_flat=float(order.tax or 0),
         tip=float(order.tip or 0),
     )
+    # Step-up & refund-cap context the template needs to decide whether
+    # to show the password challenge and how big a refund is allowed.
+    bill_total = float(order.total or 0)
+    already_refunded = float(order.refund_amount or 0)
+    cap_pct = refund_daily_cap_pct()
+    gross_today = _gross_revenue_today(owner_id)
+    refunded_today = _refund_total_today(owner_id)
+    cap_amount = round(gross_today * (cap_pct / 100.0), 2) if cap_pct > 0 else 0.0
+    refund_cap_remaining = round(max(0.0, cap_amount - refunded_today), 2)
     return _no_store(app.make_response(render_template(
         "owner_billing/order_detail.html",
         order=_bill_dict(order),
@@ -4150,11 +4329,55 @@ def owner_billing_order_detail(order_id: int):
         settings=settings,
         valid_methods=VALID_PAYMENT_METHODS,
         owner_username=logged_in_owner(),
+        stepup_refund_threshold=stepup_refund_threshold(),
+        stepup_void_threshold=stepup_void_threshold(),
+        void_stepup_required=stepup_required_for_void(bill_total),
+        refund_stepup_required=stepup_required_for_refund(bill_total - already_refunded),
+        stepup_fresh=is_stepup_session_fresh(session.get("billing_stepup_at")),
+        refund_cap_remaining=refund_cap_remaining,
     )))
+
+
+def _gross_revenue_today(owner_id: int) -> float:
+    """Sum of paid bills for the current UTC day. Backs the daily refund
+    cap so refunds are bounded by what actually came in."""
+    start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    total = (db.session.query(db.func.coalesce(db.func.sum(Order.total), 0))
+             .filter(Order.owner_id == owner_id,
+                     Order.payment_status.in_(("paid", "refunded")),
+                     Order.paid_at >= start)
+             .scalar() or 0)
+    return float(total)
+
+
+def _refund_total_today(owner_id: int) -> float:
+    """Sum of refunds logged today for this owner — used to enforce the
+    daily refund cap. Reads from the immutable BillingLog so we get the
+    actual amount each refund event added (handles partial refunds)."""
+    start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    total = (db.session.query(db.func.coalesce(db.func.sum(BillingLog.amount), 0))
+             .filter(BillingLog.owner_id == owner_id,
+                     BillingLog.action == "refunded",
+                     BillingLog.created_at >= start)
+             .scalar() or 0)
+    return float(total)
+
+
+def _refund_count_last_hour(owner_id: int) -> int:
+    """Velocity counter — how many refunds this owner pushed in the
+    last 60 minutes. Backs the per-hour velocity ceiling."""
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    count = (db.session.query(db.func.count(BillingLog.id))
+             .filter(BillingLog.owner_id == owner_id,
+                     BillingLog.action == "refunded",
+                     BillingLog.created_at >= since)
+             .scalar() or 0)
+    return int(count)
 
 
 @app.route("/owner/billing/orders/<int:order_id>/adjust", methods=["POST"])
 @login_required
+@limiter.limit("60 per minute")
 def owner_billing_adjust(order_id: int):
     owner_id = logged_in_owner_id()
     order = _load_owner_order(order_id, owner_id, lock=True)
@@ -4197,6 +4420,7 @@ def owner_billing_adjust(order_id: int):
 
 @app.route("/owner/billing/orders/<int:order_id>/settle", methods=["POST"])
 @login_required
+@limiter.limit("60 per minute")
 def owner_billing_settle(order_id: int):
     owner_id = logged_in_owner_id()
     order = _load_owner_order(order_id, owner_id, lock=True)
@@ -4267,6 +4491,7 @@ def owner_billing_settle(order_id: int):
 
 @app.route("/owner/billing/orders/<int:order_id>/void", methods=["POST"])
 @login_required
+@limiter.limit("30 per minute")
 def owner_billing_void(order_id: int):
     owner_id = logged_in_owner_id()
     order = _load_owner_order(order_id, owner_id, lock=True)
@@ -4277,6 +4502,33 @@ def owner_billing_void(order_id: int):
     if not reason:
         flash("Voiding requires a reason for the audit log.", "billing_error")
         return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    # Same-origin defence-in-depth on top of CSRF token.
+    if not _bsec_origin_matches(
+        request_host=request.host,
+        origin_header=request.headers.get("Origin", ""),
+        referer_header=request.headers.get("Referer", ""),
+    ):
+        app.logger.warning("billing/void blocked by origin check owner=%s order=%s",
+                           owner_id, order_id)
+        abort(403)
+
+    # Step-up auth: high-value voids require password re-entry unless
+    # the owner cleared step-up within the last few minutes.
+    bill_total = float(order.total or 0)
+    if stepup_required_for_void(bill_total) and \
+       not is_stepup_session_fresh(session.get("billing_stepup_at")):
+        owner = db.session.get(Owner, owner_id)
+        submitted_pw = request.form.get("stepup_password", "")
+        if not verify_password_constant_time(submitted_pw, _password_matches, owner=owner):
+            _billing_log(owner_id=owner_id, order_id=order.id, action="void_blocked",
+                         amount=bill_total, reason="stepup_failed",
+                         payload={"threshold": stepup_void_threshold()})
+            flash("High-value void requires your password. Please re-enter it and try again.",
+                  "billing_error")
+            return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+        session["billing_stepup_at"] = datetime.now(timezone.utc).isoformat()
+
     order.payment_status = "voided"
     order.void_reason = reason
     order.status = "cancelled"
@@ -4291,6 +4543,7 @@ def owner_billing_void(order_id: int):
 
 @app.route("/owner/billing/orders/<int:order_id>/refund", methods=["POST"])
 @login_required
+@limiter.limit("20 per minute")
 def owner_billing_refund(order_id: int):
     owner_id = logged_in_owner_id()
     order = _load_owner_order(order_id, owner_id, lock=True)
@@ -4314,6 +4567,59 @@ def owner_billing_refund(order_id: int):
         return redirect(url_for("owner_billing_order_detail", order_id=order_id))
     if not reason:
         flash("Refunds require a reason for the audit log.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    # Same-origin defence — CSRF token + this is the second wall.
+    if not _bsec_origin_matches(
+        request_host=request.host,
+        origin_header=request.headers.get("Origin", ""),
+        referer_header=request.headers.get("Referer", ""),
+    ):
+        app.logger.warning("billing/refund blocked by origin check owner=%s order=%s",
+                           owner_id, order_id)
+        abort(403)
+
+    # Step-up: high-value refunds require the password again unless the
+    # owner just cleared step-up.
+    if stepup_required_for_refund(amount) and \
+       not is_stepup_session_fresh(session.get("billing_stepup_at")):
+        owner = db.session.get(Owner, owner_id)
+        submitted_pw = request.form.get("stepup_password", "")
+        if not verify_password_constant_time(submitted_pw, _password_matches, owner=owner):
+            _billing_log(owner_id=owner_id, order_id=order.id, action="refund_blocked",
+                         amount=amount, reason="stepup_failed",
+                         payload={"threshold": stepup_refund_threshold()})
+            flash("High-value refund requires your password. Please re-enter it and try again.",
+                  "billing_error")
+            return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+        session["billing_stepup_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Daily cap — a fraction of today's gross can be refunded by a single
+    # owner without admin intervention. Backs out runaway POS abuse.
+    todays_refunds = _refund_total_today(owner_id)
+    cap_verdict = check_refund_amount_cap(
+        requested=amount,
+        refunded_today=todays_refunds,
+        gross_revenue_today=_gross_revenue_today(owner_id),
+    )
+    if not cap_verdict.allowed:
+        _billing_log(owner_id=owner_id, order_id=order.id, action="refund_blocked",
+                     amount=amount, reason="daily_cap_exceeded",
+                     payload={"todays_refunds": todays_refunds,
+                              "cap": cap_verdict.cap, "used": cap_verdict.used})
+        flash(cap_verdict.reason or "Daily refund cap reached.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    # Per-hour velocity — guards against scripted abuse / panicked retries.
+    vel_verdict = check_refund_velocity_per_hour(
+        refund_count_last_hour=_refund_count_last_hour(owner_id),
+    )
+    if not vel_verdict.allowed:
+        _billing_log(owner_id=owner_id, order_id=order.id, action="refund_blocked",
+                     amount=amount, reason="velocity_exceeded",
+                     payload={"hourly_limit": refund_velocity_per_hour()})
+        flash(vel_verdict.reason or "Too many refunds in the last hour.",
+              "billing_error")
         return redirect(url_for("owner_billing_order_detail", order_id=order_id))
 
     order.refund_amount = round(already + amount, 2)
@@ -4350,27 +4656,34 @@ def owner_billing_invoice(order_id: int):
 @login_required
 def owner_billing_eod():
     owner_id = logged_in_owner_id()
-    # Date filter — defaults to today (UTC). Owners can pick a past date.
+    # Date-range filter. Accepts either ?date=YYYY-MM-DD (single day, the
+    # legacy contract) or ?from=YYYY-MM-DD&to=YYYY-MM-DD (range, new in v2).
+    today_start, _ = _today_window()
     date_str = (request.args.get("date") or "").strip()
-    try:
-        if date_str:
+    if date_str:
+        try:
             day = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        else:
-            day, _ = _today_window()
-    except ValueError:
-        day, _ = _today_window()
-    end = day + timedelta(days=1)
+        except ValueError:
+            day = today_start
+        rng_from, rng_to = day, day + timedelta(days=1)
+        range_label = day.strftime("%Y-%m-%d")
+    else:
+        rng_from, rng_to, range_label = parse_date_range(
+            from_str=request.args.get("from", ""),
+            to_str=request.args.get("to", ""),
+            today=today_start,
+        )
 
     paid = (Order.query
             .filter(Order.owner_id == owner_id,
                     Order.payment_status.in_(("paid", "refunded")),
-                    Order.paid_at >= day, Order.paid_at < end)
+                    Order.paid_at >= rng_from, Order.paid_at < rng_to)
             .order_by(Order.paid_at.asc()).all())
 
     voided = (Order.query
               .filter(Order.owner_id == owner_id,
                       Order.payment_status == "voided",
-                      Order.updated_at >= day, Order.updated_at < end)
+                      Order.updated_at >= rng_from, Order.updated_at < rng_to)
               .all())
 
     flat_payments: list[dict] = []
@@ -4381,7 +4694,12 @@ def owner_billing_eod():
     by_mode = summarise_payment_breakdown(flat_payments)
 
     summary = {
-        "date": day.strftime("%Y-%m-%d"),
+        "date": rng_from.strftime("%Y-%m-%d"),
+        "from": rng_from.strftime("%Y-%m-%d"),
+        "to": (rng_to - timedelta(days=1)).strftime("%Y-%m-%d"),
+        "range_label": range_label,
+        "preset_week_from": (today_start - timedelta(days=6)).strftime("%Y-%m-%d"),
+        "preset_month_from": (today_start - timedelta(days=29)).strftime("%Y-%m-%d"),
         "orders": len(paid),
         "gross_revenue": round(sum(float(o.total or 0) for o in paid), 2),
         "discounts": round(sum(float(o.discount or 0) for o in paid), 2),
@@ -4408,19 +4726,26 @@ def owner_billing_eod():
 @login_required
 def owner_billing_eod_csv():
     owner_id = logged_in_owner_id()
+    today_start, _ = _today_window()
     date_str = (request.args.get("date") or "").strip()
-    try:
-        if date_str:
+    if date_str:
+        try:
             day = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        else:
-            day, _ = _today_window()
-    except ValueError:
-        day, _ = _today_window()
-    end = day + timedelta(days=1)
+        except ValueError:
+            day = today_start
+        rng_from, rng_to = day, day + timedelta(days=1)
+        fname_label = day.strftime("%Y-%m-%d")
+    else:
+        rng_from, rng_to, _label = parse_date_range(
+            from_str=request.args.get("from", ""),
+            to_str=request.args.get("to", ""),
+            today=today_start,
+        )
+        fname_label = f"{rng_from:%Y-%m-%d}_to_{(rng_to - timedelta(days=1)):%Y-%m-%d}"
     rows = (Order.query
             .filter(Order.owner_id == owner_id,
                     Order.payment_status.in_(("paid", "refunded")),
-                    Order.paid_at >= day, Order.paid_at < end)
+                    Order.paid_at >= rng_from, Order.paid_at < rng_to)
             .order_by(Order.paid_at.asc()).all())
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -4440,8 +4765,294 @@ def owner_billing_eod_csv():
         ])
     out = make_response(buf.getvalue())
     out.headers["Content-Type"] = "text/csv; charset=utf-8"
-    out.headers["Content-Disposition"] = f'attachment; filename="eod-{day:%Y-%m-%d}.csv"'
+    out.headers["Content-Disposition"] = f'attachment; filename="eod-{fname_label}.csv"'
     return out
+
+
+# ---------------------------------------------------------------------------
+# v2 billing dashboards: refunds list, A/R aging, drawer, health
+# ---------------------------------------------------------------------------
+
+def _severity_pill(severity: str) -> str:
+    """Map a severity word to the CSS class the templates use."""
+    return {
+        "ok": "pill pill--ok",
+        "warn": "pill pill--warn",
+        "alert": "pill pill--alert",
+    }.get((severity or "ok").lower(), "pill pill--ok")
+
+
+@app.route("/owner/billing/refunds")
+@login_required
+def owner_billing_refunds():
+    """Searchable list of refund events with totals, who/why/when."""
+    owner_id = logged_in_owner_id()
+    today_start, _ = _today_window()
+    rng_from, rng_to, range_label = parse_date_range(
+        from_str=request.args.get("from", ""),
+        to_str=request.args.get("to", ""),
+        today=today_start,
+    )
+
+    logs = (BillingLog.query
+            .filter(BillingLog.owner_id == owner_id,
+                    BillingLog.action == "refunded",
+                    BillingLog.created_at >= rng_from,
+                    BillingLog.created_at < rng_to)
+            .order_by(BillingLog.created_at.desc())
+            .all())
+
+    rows = []
+    total_refunded = 0.0
+    for lg in logs:
+        amt = float(lg.amount or 0)
+        total_refunded += amt
+        rows.append({
+            "id": lg.id,
+            "order_id": lg.order_id,
+            "invoice_number": lg.invoice_number or "",
+            "amount": round(amt, 2),
+            "reason": lg.reason or "",
+            "actor": lg.owner_username or "",
+            "created_at": lg.created_at.isoformat() if lg.created_at else "",
+        })
+
+    blocked = (BillingLog.query
+               .filter(BillingLog.owner_id == owner_id,
+                       BillingLog.action == "refund_blocked",
+                       BillingLog.created_at >= rng_from,
+                       BillingLog.created_at < rng_to)
+               .order_by(BillingLog.created_at.desc())
+               .limit(50).all())
+    blocked_rows = [{
+        "id": b.id, "order_id": b.order_id,
+        "amount": float(b.amount or 0),
+        "reason": b.reason or "",
+        "created_at": b.created_at.isoformat() if b.created_at else "",
+    } for b in blocked]
+
+    summary = {
+        "from": rng_from.strftime("%Y-%m-%d"),
+        "to": (rng_to - timedelta(days=1)).strftime("%Y-%m-%d"),
+        "range_label": range_label,
+        "preset_week_from": (today_start - timedelta(days=6)).strftime("%Y-%m-%d"),
+        "preset_month_from": (today_start - timedelta(days=29)).strftime("%Y-%m-%d"),
+        "count": len(rows),
+        "total_refunded": round(total_refunded, 2),
+        "blocked_count": len(blocked_rows),
+        "todays_refunds": round(_refund_total_today(owner_id), 2),
+        "hourly_count": _refund_count_last_hour(owner_id),
+        "hourly_limit": refund_velocity_per_hour(),
+        "stepup_threshold": stepup_refund_threshold(),
+        "daily_cap_pct": refund_daily_cap_pct(),
+    }
+    return _no_store(app.make_response(render_template(
+        "owner_billing/refunds.html",
+        summary=summary,
+        rows=rows,
+        blocked=blocked_rows,
+        owner_username=logged_in_owner(),
+    )))
+
+
+@app.route("/owner/billing/aging")
+@login_required
+def owner_billing_aging():
+    """Accounts-receivable aging: open tabs grouped by how long they've sat."""
+    owner_id = logged_in_owner_id()
+    open_tabs = (Order.query
+                 .filter(Order.owner_id == owner_id,
+                         Order.payment_status == "unpaid",
+                         Order.status != "cancelled")
+                 .order_by(Order.created_at.asc()).all())
+    now = datetime.now(timezone.utc)
+    items = [{
+        "order_id": o.id,
+        "table": o.table_name or "",
+        "customer": o.customer_name or "",
+        "total": float(o.total or 0),
+        "created_at": o.created_at,
+        "age_hours": ((now - o.created_at).total_seconds() / 3600.0) if o.created_at else 0,
+        "bucket": aging_bucket_for(o.created_at, now=now),
+    } for o in open_tabs]
+    aging = summarise_aging(items)
+    return _no_store(app.make_response(render_template(
+        "owner_billing/aging.html",
+        aging=aging,
+        items=items,
+        owner_username=logged_in_owner(),
+    )))
+
+
+@app.route("/owner/billing/drawer", methods=["GET", "POST"])
+@login_required
+@limiter.limit("30 per minute", methods=["POST"])
+def owner_billing_drawer():
+    """Cash-drawer reconciliation: records expected vs counted cash and
+    surfaces variance with a severity pill so managers can spot drift."""
+    owner_id = logged_in_owner_id()
+    today_start, _ = _today_window()
+
+    if request.method == "POST":
+        try:
+            counted = float(request.form.get("counted_cash", "0") or 0)
+            float_left = float(request.form.get("float_left", "0") or 0)
+        except ValueError:
+            flash("Invalid number in the count form.", "billing_error")
+            return redirect(url_for("owner_billing_drawer"))
+        notes = (request.form.get("notes") or "").strip()[:500]
+        try:
+            day = datetime.strptime(
+                (request.form.get("day") or today_start.strftime("%Y-%m-%d")).strip(),
+                "%Y-%m-%d",
+            ).date()
+        except ValueError:
+            day = today_start.date()
+
+        # Recompute "expected cash" from billing logs for the chosen day.
+        day_start = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+        day_end = day_start + timedelta(days=1)
+        cash_in = (db.session.query(db.func.coalesce(db.func.sum(Order.total), 0))
+                   .filter(Order.owner_id == owner_id,
+                           Order.payment_status.in_(("paid", "refunded")),
+                           Order.payment_method == "cash",
+                           Order.paid_at >= day_start, Order.paid_at < day_end)
+                   .scalar() or 0)
+        cash_refunded = (db.session.query(db.func.coalesce(db.func.sum(Order.refund_amount), 0))
+                         .filter(Order.owner_id == owner_id,
+                                 Order.payment_status.in_(("paid", "refunded")),
+                                 Order.payment_method == "cash",
+                                 Order.paid_at >= day_start, Order.paid_at < day_end)
+                         .scalar() or 0)
+        expected = float(cash_in) - float(cash_refunded)
+
+        variance_d = drawer_variance(
+            counted=counted, expected=expected, float_left=float_left,
+        )
+        row = CashDrawerCount(
+            owner_id=owner_id,
+            counted_by_owner_id=owner_id,
+            counted_by_username=logged_in_owner() or "",
+            day=day,
+            expected_cash=round(expected, 2),
+            counted_cash=round(counted, 2),
+            float_left=round(float_left, 2),
+            variance=variance_d["variance"],
+            variance_pct=variance_d["variance_pct"],
+            severity=variance_d["severity"],
+            notes=notes,
+        )
+        db.session.add(row)
+        db.session.commit()
+        _billing_log(owner_id=owner_id, order_id=None, action="drawer_count",
+                     amount=counted, reason=notes,
+                     payload={"expected": expected,
+                              "variance": variance_d["variance"],
+                              "variance_pct": variance_d["variance_pct"],
+                              "severity": variance_d["severity"]})
+        flash(f"Drawer recorded — variance ₹{variance_d['variance']:.2f} "
+              f"({variance_d['severity']}).", "billing_ok")
+        return redirect(url_for("owner_billing_drawer"))
+
+    # GET: render the form + history.
+    history = (CashDrawerCount.query
+               .filter_by(owner_id=owner_id)
+               .order_by(CashDrawerCount.day.desc(),
+                         CashDrawerCount.created_at.desc())
+               .limit(60).all())
+    history_rows = [{
+        "id": h.id,
+        "day": h.day.strftime("%Y-%m-%d") if h.day else "",
+        "expected_cash": float(h.expected_cash or 0),
+        "counted_cash": float(h.counted_cash or 0),
+        "float_left": float(h.float_left or 0),
+        "variance": float(h.variance or 0),
+        "variance_pct": float(h.variance_pct or 0),
+        "severity": h.severity or "ok",
+        "severity_class": _severity_pill(h.severity or "ok"),
+        "notes": h.notes or "",
+        "counted_by": h.counted_by_username or "",
+        "created_at": h.created_at.isoformat() if h.created_at else "",
+    } for h in history]
+
+    # Pre-fill expected cash for *today* so the cashier sees what the
+    # till should hold before they open the drawer.
+    cash_in = (db.session.query(db.func.coalesce(db.func.sum(Order.total), 0))
+               .filter(Order.owner_id == owner_id,
+                       Order.payment_status.in_(("paid", "refunded")),
+                       Order.payment_method == "cash",
+                       Order.paid_at >= today_start)
+               .scalar() or 0)
+    cash_refunded = (db.session.query(db.func.coalesce(db.func.sum(Order.refund_amount), 0))
+                     .filter(Order.owner_id == owner_id,
+                             Order.payment_status.in_(("paid", "refunded")),
+                             Order.payment_method == "cash",
+                             Order.paid_at >= today_start)
+                     .scalar() or 0)
+    expected_today = round(float(cash_in) - float(cash_refunded), 2)
+
+    return _no_store(app.make_response(render_template(
+        "owner_billing/drawer.html",
+        history=history_rows,
+        expected_today=expected_today,
+        today=today_start.strftime("%Y-%m-%d"),
+        variance_alert_pct=drawer_variance_alert_pct(),
+        owner_username=logged_in_owner(),
+    )))
+
+
+@app.route("/owner/billing/health")
+@login_required
+def owner_billing_health():
+    owner_id = logged_in_owner_id()
+    snapshot = _billing_health_compute(owner_id)
+    # Annotate with display classes so the template stays dumb.
+    for c in snapshot.get("checks", []):
+        c["pill_class"] = _severity_pill(c.get("severity", "ok"))
+    return _no_store(app.make_response(render_template(
+        "owner_billing/health.html",
+        snapshot=snapshot,
+        owner_username=logged_in_owner(),
+    )))
+
+
+@app.route("/owner/billing/health.json")
+@login_required
+def owner_billing_health_json():
+    owner_id = logged_in_owner_id()
+    snapshot = _billing_health_compute(owner_id)
+    resp = jsonify(snapshot)
+    resp.headers["Cache-Control"] = "no-store"
+    resp.status_code = 200 if snapshot.get("ok") else 503
+    return resp
+
+
+@app.route("/health/billing")
+def public_billing_health():
+    """Liveness probe for the billing pipeline. No auth — returns a
+    minimal shape so load balancers can poll it. Does NOT leak per-owner
+    data: it only reports whether the database is reachable and the
+    webhook log is writable."""
+    out = {"ok": True, "checks": []}
+    try:
+        from sqlalchemy import text as _sa_text
+        db.session.execute(_sa_text("SELECT 1")).scalar()
+        out["checks"].append({"key": "db", "ok": True})
+    except Exception as exc:
+        out["ok"] = False
+        out["checks"].append({"key": "db", "ok": False,
+                              "error": exc.__class__.__name__})
+    try:
+        WebhookEventLog.query.limit(1).all()
+        out["checks"].append({"key": "webhook_log", "ok": True})
+    except Exception as exc:
+        out["ok"] = False
+        out["checks"].append({"key": "webhook_log", "ok": False,
+                              "error": exc.__class__.__name__})
+    resp = jsonify(out)
+    resp.headers["Cache-Control"] = "no-store"
+    resp.status_code = 200 if out["ok"] else 503
+    return resp
 
 
 @app.route("/owner/billing/logs")
@@ -4821,6 +5432,7 @@ def owner_billing_payment_methods_rotate_webhook(cred_id: int):
 
 @app.route("/owner/billing/orders/<int:order_id>/charge", methods=["POST"])
 @login_required
+@limiter.limit("60 per minute")
 def owner_billing_create_charge(order_id: int):
     owner_id = logged_in_owner_id()
     order = Order.query.filter_by(id=order_id, owner_id=owner_id).first_or_404()

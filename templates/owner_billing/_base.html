@@ -80,11 +80,15 @@
   <nav class="billnav">
     <a href="{{ url_for('owner_billing_overview') }}" class="{{ 'active' if request.endpoint == 'owner_billing_overview' }}">Overview</a>
     <a href="{{ url_for('owner_billing_open') }}" class="{{ 'active' if request.endpoint == 'owner_billing_open' }}">Open Tabs</a>
+    <a href="{{ url_for('owner_billing_aging') }}" class="{{ 'active' if request.endpoint == 'owner_billing_aging' }}">Aging</a>
     <a href="{{ url_for('owner_billing_eod') }}" class="{{ 'active' if request.endpoint == 'owner_billing_eod' }}">End of Day</a>
+    <a href="{{ url_for('owner_billing_drawer') }}" class="{{ 'active' if request.endpoint == 'owner_billing_drawer' }}">Drawer</a>
+    <a href="{{ url_for('owner_billing_refunds') }}" class="{{ 'active' if request.endpoint == 'owner_billing_refunds' }}">Refunds</a>
     <a href="{{ url_for('owner_billing_logs') }}" class="{{ 'active' if request.endpoint == 'owner_billing_logs' }}">Audit Log</a>
     <a href="{{ url_for('owner_billing_payment_methods') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('owner_billing_payment_methods') }}">Payment Methods</a>
     <a href="{{ url_for('owner_aggregators') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('owner_aggregator') }}">Aggregators</a>
     <a href="{{ url_for('owner_integrations_hub') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('owner_integrations_hub') }}">Integrations</a>
+    <a href="{{ url_for('owner_billing_health') }}" class="{{ 'active' if request.endpoint == 'owner_billing_health' }}">Health</a>
     <a href="{{ url_for('owner_billing_settings') }}" class="{{ 'active' if request.endpoint == 'owner_billing_settings' }}">Settings</a>
   </nav>
   <div class="wrap">
