@@ -129,18 +129,19 @@ async function load() {
         </div>
       </div>`).join('');
 
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     document.getElementById('cafes-rows').innerHTML = cafesData.cafes.length
       ? cafesData.cafes.map((c, i) => `
           <tr>
             <td class="ps-3 text-muted">${i + 1}</td>
-            <td><strong>${c.name}</strong></td>
+            <td><strong>${esc(c.name)}</strong></td>
             <td>${c.isActive
               ? '<span class="badge rounded-pill px-2" style="background:#d1fae5;color:#065f46;">Active</span>'
               : '<span class="badge rounded-pill px-2" style="background:#fee2e2;color:#991b1b;">Inactive</span>'}</td>
-            <td>${c.ownerCount}</td>
-            <td>${c.orders}</td>
+            <td>${Number(c.ownerCount)||0}</td>
+            <td>${Number(c.orders)||0}</td>
             <td>${fmtRupee(c.revenue)}</td>
-            <td>${c.avgRating != null ? '⭐ ' + c.avgRating.toFixed(1) + ' / 5' : '—'}</td>
+            <td>${c.avgRating != null ? '⭐ ' + Number(c.avgRating).toFixed(1) + ' / 5' : '—'}</td>
           </tr>`).join('')
       : '<tr><td colspan="7" class="text-center text-muted py-4">No cafes with owners yet.</td></tr>';
 

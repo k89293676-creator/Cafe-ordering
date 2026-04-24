@@ -32,6 +32,7 @@
 </div>
 
 <script>
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today = new Date(); const back = new Date(); back.setDate(today.getDate()-30);
 document.getElementById('start').value = back.toISOString().slice(0,10);
 document.getElementById('end').value = today.toISOString().slice(0,10);
@@ -61,12 +62,16 @@ async function refresh() {
     }
   });
 
+  const ALLOWED_QUADRANTS = new Set(['star','plowhorse','puzzle','dog']);
   document.getElementById('rows').innerHTML = r.items.length
-    ? r.items.map(i => `<tr>
-        <td>${i.name}</td><td>${i.category}</td><td>${i.qty}</td>
-        <td>$${i.unitPrice}</td><td>$${i.unitCost}</td><td>${i.marginPct}%</td>
-        <td>$${i.totalProfit}</td><td><span class="badge b-${i.quadrant}">${i.quadrant}</span></td>
-      </tr>`).join('')
+    ? r.items.map(i => {
+        const q = ALLOWED_QUADRANTS.has(i.quadrant) ? i.quadrant : 'dog';
+        return `<tr>
+          <td>${esc(i.name)}</td><td>${esc(i.category)}</td><td>${Number(i.qty)||0}</td>
+          <td>$${Number(i.unitPrice)||0}</td><td>$${Number(i.unitCost)||0}</td><td>${Number(i.marginPct)||0}%</td>
+          <td>$${Number(i.totalProfit)||0}</td><td><span class="badge b-${q}">${q}</span></td>
+        </tr>`;
+      }).join('')
     : '<tr><td colspan="8" class="empty">No completed orders in this range.</td></tr>';
 }
 document.getElementById('filter').addEventListener('submit', e => { e.preventDefault(); refresh(); });

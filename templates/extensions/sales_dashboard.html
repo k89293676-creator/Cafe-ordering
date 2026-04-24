@@ -43,6 +43,7 @@
 
 <script>
 const fmt = n => new Intl.NumberFormat(undefined, {style:'currency', currency:'USD'}).format(n||0);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today = new Date();
 const lastMonth = new Date(); lastMonth.setDate(today.getDate() - 30);
 document.getElementById('start').value = lastMonth.toISOString().slice(0,10);
@@ -100,7 +101,7 @@ async function refresh() {
 
   const tbody = document.getElementById('top-items-body');
   tbody.innerHTML = top.items.length
-    ? top.items.map(i => `<tr><td>${i.name}</td><td>${i.qty}</td><td>${fmt(i.revenue)}</td></tr>`).join('')
+    ? top.items.map(i => `<tr><td>${esc(i.name)}</td><td>${Number(i.qty)||0}</td><td>${fmt(i.revenue)}</td></tr>`).join('')
     : '<tr><td colspan="3" class="empty">No data</td></tr>';
 }
 
@@ -113,7 +114,7 @@ async function showDrill(bucket, granularity) {
   document.getElementById('drill-card').style.display='block';
   document.getElementById('drill-bucket').textContent = bucket;
   document.getElementById('drill-body').innerHTML = r.orders.length
-    ? r.orders.map(o => `<tr><td>#${o.id}</td><td>${o.customerName||''}</td><td>${o.tableName||''}</td><td>${fmt(o.total)}</td><td>${(o.createdAt||'').slice(0,16).replace('T',' ')}</td></tr>`).join('')
+    ? r.orders.map(o => `<tr><td>#${Number(o.id)||0}</td><td>${esc(o.customerName||'')}</td><td>${esc(o.tableName||'')}</td><td>${fmt(o.total)}</td><td>${esc((o.createdAt||'').slice(0,16).replace('T',' '))}</td></tr>`).join('')
     : '<tr><td colspan="5" class="empty">No orders</td></tr>';
 }
 

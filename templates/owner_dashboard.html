@@ -1919,6 +1919,7 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
 // ─── Employee assignment on order cards ─────────────────────────────────────
 (function(){
   const csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
   async function wireEmployeeAssign() {
     let employees = [];
@@ -1937,7 +1938,7 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
       sel.className = 'btn btn-secondary btn-sm btn-full emp-assign-sel';
       sel.style.cursor = 'pointer';
       sel.innerHTML = '<option value="">Assign employee…</option>' +
-        employees.map(e => `<option value="${e.id}">${e.name} (${e.role})</option>`).join('');
+        employees.map(e => `<option value="${esc(e.id)}">${esc(e.name)} (${esc(e.role)})</option>`).join('');
       sel.addEventListener('change', async () => {
         if (!sel.value) return;
         try {

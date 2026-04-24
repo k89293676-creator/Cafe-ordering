@@ -258,9 +258,9 @@
       const order = t.openOrder;
       const calls = t.openCalls;
       const orderHtml = order
-        ? `<div class="order-line"><b>Order #${order.id}</b> · ${order.status}<br>
-           ${order.itemsCount} item${order.itemsCount === 1 ? '' : 's'} · ${money(order.total)} · ${fmtAge(order.ageSeconds)}
-           ${order.customerName ? '<br>👤 ' + order.customerName : ''}</div>`
+        ? `<div class="order-line"><b>Order #${Number(order.id)||0}</b> · ${escapeHtml(order.status)}<br>
+           ${Number(order.itemsCount)||0} item${order.itemsCount === 1 ? '' : 's'} · ${money(order.total)} · ${fmtAge(order.ageSeconds)}
+           ${order.customerName ? '<br>👤 ' + escapeHtml(order.customerName) : ''}</div>`
         : '';
       const callsHtml = calls.count
         ? `<div class="calls-line">🔔 ${calls.count} open call${calls.count === 1 ? '' : 's'}

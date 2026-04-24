@@ -2342,6 +2342,30 @@ def _safe_redirect_target(target: str | None, fallback: str) -> str:
     return fallback
 
 
+def _safe_text(value, max_len: int = 500, default: str = "") -> str:
+    """Sanitize free-text user input for safe storage and rendering.
+
+    - Coerces to string and strips surrounding whitespace
+    - Removes ASCII control characters (except tab/newline) which can break
+      logs, terminals, or be used to smuggle payloads
+    - Strips angle brackets to defang HTML/script tags at the source (defense
+      in depth — Jinja autoescape and JS escapers also handle this downstream)
+    - Truncates to ``max_len`` characters
+    - Returns ``default`` if the result is empty
+    """
+    if value is None:
+        return default
+    s = str(value)
+    # Drop control chars except \t (\x09) and \n (\x0a)
+    s = "".join(ch for ch in s if ch == "\t" or ch == "\n" or (ord(ch) >= 0x20 and ord(ch) != 0x7F))
+    # Defang HTML angle brackets at ingestion time
+    s = s.replace("<", "").replace(">", "")
+    s = s.strip()
+    if max_len and len(s) > max_len:
+        s = s[:max_len]
+    return s or default
+
+
 @app.errorhandler(400)
 def err_bad_request(e):
     if _wants_json():
@@ -8215,12 +8239,15 @@ def checkout() -> tuple[dict, int]:
             cached_body, cached_status = cached
             return cached_body, cached_status
     payload = request.get_json(silent=True) or {}
-    customer_name = str(payload.get("customerName", "Guest")).strip()[:100] or "Guest"
-    customer_email = str(payload.get("customerEmail", "")).strip()[:254]
-    customer_phone = str(payload.get("customerPhone", "")).strip()[:30]
-    table_id = str(payload.get("tableId", "")).strip()[:64] if payload.get("tableId") else None
+    customer_name = _safe_text(payload.get("customerName"), max_len=100, default="Guest")
+    customer_email = _safe_text(payload.get("customerEmail"), max_len=254)
+    customer_phone = _safe_text(payload.get("customerPhone"), max_len=30)
+    table_id = _safe_text(payload.get("tableId"), max_len=64) or None
     items = payload.get("items", [])
-    notes = str(payload.get("notes", "")).strip()[:500]
+    notes = _safe_text(payload.get("notes"), max_len=500)
+
+    if customer_phone and not re.fullmatch(r"[0-9+\-\s().]{3,30}", customer_phone):
+        abort(400, description="Invalid phone number.")
 
     if customer_email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", customer_email):
         abort(400, description="Invalid email address.")
@@ -8467,11 +8494,11 @@ def submit_feedback() -> tuple[dict, int]:
     if not request.is_json:
         abort(400, description="JSON required.")
     payload = request.get_json(silent=True) or {}
-    table_id = str(payload.get("tableId", "")).strip()[:64] if payload.get("tableId") else None
-    customer_name = str(payload.get("customerName", "Guest")).strip()[:100] or "Guest"
+    table_id = _safe_text(payload.get("tableId"), max_len=64) or None
+    customer_name = _safe_text(payload.get("customerName"), max_len=100, default="Guest")
     order_id = payload.get("orderId")
     rating = payload.get("rating")
-    comment = str(payload.get("comment", "")).strip()[:1000]
+    comment = _safe_text(payload.get("comment"), max_len=1000)
 
     try:
         rating = int(rating)

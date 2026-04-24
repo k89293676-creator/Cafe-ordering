@@ -36,6 +36,7 @@
 
 <script>
 const fmt = n => new Intl.NumberFormat(undefined, {style:'currency', currency:'USD'}).format(n||0);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
 const today = new Date(); const back = new Date(); back.setDate(today.getDate()-30);
 document.getElementById('start').value = back.toISOString().slice(0,10);
@@ -45,9 +46,9 @@ async function loadEmployees() {
   const r = await fetch('/api/owner/employees').then(x=>x.json());
   document.getElementById('emp-rows').innerHTML = r.employees.length
     ? r.employees.map(e => `<tr>
-        <td>${e.name}</td><td>${e.role}</td>
+        <td>${esc(e.name)}</td><td>${esc(e.role)}</td>
         <td>${e.isActive ? '<span class="badge b-star">Active</span>' : '<span class="badge b-dog">Inactive</span>'}</td>
-        <td>${e.isActive ? `<button data-id="${e.id}" class="deact" style="background:transparent;border:1px solid #d3d7e2;border-radius:8px;padding:.3rem .65rem;cursor:pointer;">Deactivate</button>` : ''}</td>
+        <td>${e.isActive ? `<button data-id="${esc(e.id)}" class="deact" style="background:transparent;border:1px solid #d3d7e2;border-radius:8px;padding:.3rem .65rem;cursor:pointer;">Deactivate</button>` : ''}</td>
       </tr>`).join('')
     : '<tr><td colspan="4" class="empty">No employees yet.</td></tr>';
   document.querySelectorAll('button.deact').forEach(b => b.addEventListener('click', async () => {
