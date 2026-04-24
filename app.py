@@ -4606,6 +4606,55 @@ def owner_billing_payment_methods_test(cred_id: int):
     return redirect(url_for("owner_billing_payment_methods"))
 
 
+@app.route("/owner/billing/payment-methods/<int:cred_id>/rotate-webhook",
+           methods=["POST"])
+@login_required
+@limiter.limit("20 per hour; 5 per minute")
+def owner_billing_payment_methods_rotate_webhook(cred_id: int):
+    """Rotate just the webhook signing secret for one credential.
+
+    A focused alternative to the full save form: useful after a
+    suspected leak, after re-creating the webhook in the provider
+    dashboard, or as part of a routine quarterly key-rotation policy.
+    Only the encrypted ``webhook_secret_enc`` column is touched —
+    the API key, mode, default, and active flags are all preserved
+    so a busy owner can rotate during a service window without
+    risking accidental config drift.
+
+    The rotation is recorded in the billing audit log so an operator
+    can later prove WHEN a secret was changed, useful for chargeback
+    disputes ("you signed events with the old secret on date X")."""
+    owner_id = logged_in_owner_id()
+    cred = PaymentProviderCredential.query.filter_by(
+        id=cred_id, owner_id=owner_id).first_or_404()
+    new_secret = (request.form.get("webhook_secret") or "").strip()
+    if not new_secret:
+        flash("Paste the new webhook secret to rotate it.", "billing_error")
+        return redirect(url_for("owner_billing_payment_methods"))
+    if "•" in new_secret:
+        # Defensive: the masked placeholder uses bullet chars and must
+        # never be persisted as a real secret.
+        flash("That looks like the masked placeholder, not a real secret.",
+              "billing_error")
+        return redirect(url_for("owner_billing_payment_methods"))
+    cred.webhook_secret_enc = encrypt_secret(new_secret)
+    db.session.commit()
+    _billing_log(
+        owner_id=owner_id, order_id=None,
+        action=f"payment_methods.{cred.provider}.webhook_rotated",
+        amount=0, payment_method=cred.provider,
+        reason="webhook signing secret rotated",
+        payload={"provider": cred.provider, "credential_id": cred.id,
+                 "secret_fingerprint": _secret_fingerprint(new_secret)},
+    )
+    flash(
+        f"{PROVIDER_LABELS.get(cred.provider, cred.provider).title()} webhook "
+        f"secret rotated. New events will be verified against the new secret.",
+        "billing_ok",
+    )
+    return redirect(url_for("owner_billing_payment_methods"))
+
+
 # ---------------------------------------------------------------------------
 # Online charge flow — owner-side: create the intent for an open bill
 # ---------------------------------------------------------------------------

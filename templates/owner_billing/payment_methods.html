@@ -189,6 +189,35 @@
       </form>
     </div>
 
+    {# Focused webhook-only rotation. Hidden behind <details> so the card
+       stays compact for the 99% of owners who never need to rotate. #}
+    <details class="pm-details" style="margin-top:10px;">
+      <summary>Rotate webhook secret</summary>
+      <form method="post"
+            action="{{ url_for('owner_billing_payment_methods_rotate_webhook', cred_id=cred.id) }}"
+            autocomplete="off" style="margin-top:10px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <p class="hint" style="margin:0 0 8px;">
+          Use this if the webhook secret leaked or you regenerated it in
+          your provider's dashboard. Only the webhook signing secret
+          changes — your API key, mode, and active flag stay the same.
+        </p>
+        <div class="pm-row">
+          <label>New webhook secret</label>
+          <div>
+            <input type="password" name="webhook_secret" value=""
+                   autocomplete="new-password"
+                   placeholder="Paste the new secret from your provider dashboard"
+                   required>
+            <div class="hint">Stored encrypted with Fernet. The previous secret is overwritten on save and cannot be recovered.</div>
+          </div>
+        </div>
+        <div class="pm-actions">
+          <button type="submit" class="pm-btn pm-btn-primary">Rotate webhook secret</button>
+        </div>
+      </form>
+    </details>
+
     {% if cred.guide.steps %}
     <details class="pm-details">
       <summary>Setup checklist</summary>
