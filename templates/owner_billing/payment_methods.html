@@ -1,56 +1,70 @@
 {% extends "owner_billing/_base.html" %}
-{% block billing_title %}Payment Methods{% endblock %}
-{% block billing_body %}
+{% block title %}Payment Methods{% endblock %}
+{% block content %}
+<h1>Payment Methods</h1>
 <style>
-  .pm-grid{display:grid;gap:18px;}
-  .pm-card{border:1px solid #e3e8ef;border-radius:14px;padding:18px;background:#fff;
-           box-shadow:0 1px 2px rgba(15,23,42,.04);}
-  .pm-card h3{margin:0 0 4px;font-size:18px;display:flex;align-items:center;gap:10px;}
-  .pm-card .summary{color:#475569;font-size:13px;margin:0 0 14px;}
-  .pm-row{display:grid;grid-template-columns:200px 1fr;gap:10px;align-items:center;
-          padding:6px 0;border-top:1px solid #f1f5f9;}
+  .pm-grid{display:grid;gap:1rem;}
+  .pm-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+           padding:1.25rem 1.5rem;}
+  .pm-card h3{margin:0 0 .25rem;font-size:1.1rem;display:flex;align-items:center;gap:.5rem;
+              flex-wrap:wrap;color:var(--text);}
+  .pm-card .summary{color:var(--muted);font-size:.88rem;margin:0 0 .9rem;}
+  .pm-row{display:grid;grid-template-columns:200px 1fr;gap:.7rem;align-items:center;
+          padding:.45rem 0;border-top:1px solid var(--line);}
   .pm-row:first-of-type{border-top:0;}
-  .pm-row label{font-size:13px;color:#334155;font-weight:600;}
+  .pm-row label{font-size:.85rem;color:var(--muted);font-weight:600;}
   .pm-row input[type=text],.pm-row input[type=password],.pm-row select{
-    width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;}
-  .pm-row .hint{font-size:11.5px;color:#64748b;margin-top:2px;}
-  .pm-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
-  .pm-btn{padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;
-          border:1px solid transparent;cursor:pointer;text-decoration:none;display:inline-block;}
-  .pm-btn-primary{background:#2563eb;color:#fff;}
-  .pm-btn-secondary{background:#f1f5f9;color:#0f172a;border-color:#cbd5e1;}
-  .pm-btn-ghost{background:transparent;color:#2563eb;}
-  .pm-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;
-            font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
-  .pm-badge-test{background:#fef3c7;color:#92400e;}
-  .pm-badge-live{background:#dcfce7;color:#166534;}
-  .pm-badge-off{background:#e2e8f0;color:#475569;}
-  .pm-badge-default{background:#dbeafe;color:#1d4ed8;}
-  .pm-badge-verified{background:#d1fae5;color:#065f46;}
-  .pm-badge-unverified{background:#fee2e2;color:#991b1b;}
-  .pm-webhook{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:10px;
-              font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;
-              display:flex;align-items:center;gap:10px;word-break:break-all;}
-  .pm-webhook button{background:#1e293b;color:#fff;border:1px solid #334155;border-radius:6px;
-                     padding:4px 10px;font-size:11.5px;cursor:pointer;flex-shrink:0;}
-  .pm-guide{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;
-            padding:12px 14px;margin-top:12px;font-size:13px;color:#334155;}
-  .pm-guide ol{margin:6px 0 0 18px;padding:0;}
-  .pm-guide li{margin:4px 0;}
-  .pm-guide a{color:#2563eb;text-decoration:none;}
+    width:100%;padding:.55rem .75rem;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:7px;font-size:.9rem;color:var(--text);
+    font-family:inherit;}
+  .pm-row input:focus,.pm-row select:focus{outline:none;border-color:var(--primary);}
+  .pm-row .hint{font-size:.78rem;color:var(--muted);margin-top:.25rem;}
+  .pm-actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.95rem;}
+  .pm-btn{padding:.55rem 1rem;border-radius:8px;font-size:.88rem;font-weight:600;
+          border:1px solid transparent;cursor:pointer;text-decoration:none;display:inline-block;
+          font-family:inherit;}
+  .pm-btn-primary{background:var(--primary);color:#0a0a0a;}
+  .pm-btn-secondary{background:transparent;color:var(--text);border-color:var(--line);}
+  .pm-btn-ghost{background:transparent;color:var(--primary);}
+  .pm-badge{display:inline-flex;align-items:center;gap:.35rem;padding:.15rem .55rem;
+            border-radius:999px;font-size:.7rem;font-weight:700;text-transform:uppercase;
+            letter-spacing:.04em;}
+  .pm-badge-test{background:rgba(245,158,11,.18);color:#fcd34d;}
+  .pm-badge-live{background:rgba(34,197,94,.18);color:#86efac;}
+  .pm-badge-off{background:rgba(154,154,154,.2);color:var(--muted);}
+  .pm-badge-default{background:rgba(79,70,229,.2);color:#c7d2fe;}
+  .pm-badge-verified{background:rgba(34,197,94,.18);color:#86efac;}
+  .pm-badge-unverified{background:rgba(239,68,68,.18);color:#fca5a5;}
+  .pm-webhook{background:#000;color:#e2e8f0;padding:.65rem .75rem;border-radius:8px;
+              font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.8rem;
+              display:flex;align-items:center;gap:.6rem;word-break:break-all;
+              border:1px solid var(--line);}
+  .pm-webhook button{background:var(--panel);color:var(--text);
+                     border:1px solid var(--line);border-radius:6px;
+                     padding:.25rem .65rem;font-size:.75rem;cursor:pointer;flex-shrink:0;
+                     font-family:inherit;}
+  .pm-webhook button:hover{border-color:var(--primary);}
+  .pm-guide{background:var(--panel-2);border:1px dashed var(--line);border-radius:8px;
+            padding:.75rem .9rem;margin-top:.75rem;font-size:.88rem;color:var(--text);}
+  .pm-guide ol{margin:.4rem 0 0 1.1rem;padding:0;}
+  .pm-guide li{margin:.25rem 0;color:var(--text);}
+  .pm-guide a{color:var(--primary);text-decoration:none;}
   .pm-guide a:hover{text-decoration:underline;}
-  .pm-events{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;
-             background:#eef2ff;color:#3730a3;padding:1px 6px;border-radius:4px;margin:0 2px;}
-  details.pm-details{margin-top:8px;}
-  details.pm-details summary{cursor:pointer;color:#2563eb;font-weight:600;font-size:13px;list-style:none;}
+  .pm-events{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem;
+             background:rgba(79,70,229,.18);color:#c7d2fe;padding:.05rem .4rem;
+             border-radius:4px;margin:0 .15rem;}
+  details.pm-details{margin-top:.5rem;}
+  details.pm-details summary{cursor:pointer;color:var(--primary);font-weight:600;
+                              font-size:.88rem;list-style:none;}
   details.pm-details summary::-webkit-details-marker{display:none;}
   details.pm-details summary::before{content:"▸ ";}
   details.pm-details[open] summary::before{content:"▾ ";}
-  .pm-test-result{margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12.5px;}
-  .pm-test-ok{background:#dcfce7;color:#14532d;}
-  .pm-test-err{background:#fee2e2;color:#7f1d1d;}
-  .pm-warn{background:#fffbeb;border:1px solid #fde68a;color:#92400e;
-           padding:8px 12px;border-radius:8px;font-size:12.5px;margin-bottom:12px;}
+  .pm-test-result{margin-top:.7rem;padding:.55rem .8rem;border-radius:8px;font-size:.83rem;}
+  .pm-test-ok{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#86efac;}
+  .pm-test-err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;}
+  .pm-warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);
+           color:#fcd34d;padding:.7rem .9rem;border-radius:8px;font-size:.85rem;
+           margin-bottom:1rem;}
 </style>
 
 <p class="pm-warn">
@@ -185,7 +199,7 @@
             onsubmit="return pmConfirm(this, '{{ cred.provider }}');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="confirm_provider" value="">
-        <button type="submit" class="pm-btn" style="background:#dc2626;color:#fff;">Disconnect</button>
+        <button type="submit" class="pm-btn" style="background:var(--danger);color:#fff;">Disconnect</button>
       </form>
     </div>
 

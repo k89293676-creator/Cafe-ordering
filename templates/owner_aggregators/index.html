@@ -1,69 +1,88 @@
 {% extends "owner_billing/_base.html" %}
-{% block billing_title %}Aggregator Platforms{% endblock %}
-{% block billing_body %}
+{% block title %}Food Delivery{% endblock %}
+{% block content %}
+<h1>Food Delivery (Swiggy / Zomato / Uber Eats)</h1>
 <style>
-  .ag-grid{display:grid;gap:18px;}
-  .ag-card{border:1px solid #e3e8ef;border-radius:14px;padding:18px;background:#fff;
-           box-shadow:0 1px 2px rgba(15,23,42,.04);}
-  .ag-card h3{margin:0 0 4px;font-size:18px;display:flex;align-items:center;gap:10px;}
-  .ag-card .summary{color:#475569;font-size:13px;margin:0 0 14px;}
-  .ag-row{display:grid;grid-template-columns:200px 1fr;gap:10px;align-items:center;
-          padding:6px 0;border-top:1px solid #f1f5f9;}
+  .ag-grid{display:grid;gap:1rem;}
+  .ag-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+           padding:1.25rem 1.5rem;}
+  .ag-card h3{margin:0 0 .25rem;font-size:1.1rem;display:flex;align-items:center;gap:.5rem;
+              flex-wrap:wrap;color:var(--text);}
+  .ag-card .summary{color:var(--muted);font-size:.88rem;margin:0 0 .9rem;}
+  .ag-row{display:grid;grid-template-columns:200px 1fr;gap:.7rem;align-items:center;
+          padding:.45rem 0;border-top:1px solid var(--line);}
   .ag-row:first-of-type{border-top:0;}
-  .ag-row label{font-size:13px;color:#334155;font-weight:600;}
+  .ag-row label{font-size:.85rem;color:var(--muted);font-weight:600;}
   .ag-row input[type=text],.ag-row input[type=password],.ag-row select{
-    width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;}
-  .ag-row .hint{font-size:11.5px;color:#64748b;margin-top:2px;}
-  .ag-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
-  .ag-btn{padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;
-          border:1px solid transparent;cursor:pointer;text-decoration:none;display:inline-block;}
-  .ag-btn-primary{background:#2563eb;color:#fff;}
-  .ag-btn-secondary{background:#f1f5f9;color:#0f172a;border-color:#cbd5e1;}
-  .ag-btn-success{background:#16a34a;color:#fff;}
-  .ag-btn-danger{background:#dc2626;color:#fff;}
-  .ag-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;
-            font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
-  .ag-badge-test{background:#fef3c7;color:#92400e;}
-  .ag-badge-live{background:#dcfce7;color:#166534;}
-  .ag-badge-off{background:#e2e8f0;color:#475569;}
-  .ag-badge-verified{background:#d1fae5;color:#065f46;}
-  .ag-badge-unverified{background:#fee2e2;color:#991b1b;}
-  .ag-webhook{background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:10px;
-              font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;
-              display:flex;align-items:center;gap:10px;word-break:break-all;}
-  .ag-webhook button{background:#1e293b;color:#fff;border:1px solid #334155;border-radius:6px;
-                     padding:4px 10px;font-size:11.5px;cursor:pointer;flex-shrink:0;}
-  .ag-guide{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;
-            padding:12px 14px;margin-top:12px;font-size:13px;color:#334155;}
-  .ag-guide ol{margin:6px 0 0 18px;padding:0;}
-  .ag-guide li{margin:4px 0;}
-  .ag-guide a{color:#2563eb;text-decoration:none;}
-  .ag-events{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;
-             background:#eef2ff;color:#3730a3;padding:1px 6px;border-radius:4px;margin:0 2px;}
-  details.ag-details{margin-top:8px;}
-  details.ag-details summary{cursor:pointer;color:#2563eb;font-weight:600;font-size:13px;list-style:none;}
+    width:100%;padding:.55rem .75rem;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:7px;font-size:.9rem;color:var(--text);
+    font-family:inherit;}
+  .ag-row input:focus,.ag-row select:focus{outline:none;border-color:var(--primary);}
+  .ag-row .hint{font-size:.78rem;color:var(--muted);margin-top:.25rem;}
+  .ag-actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.95rem;}
+  .ag-btn{padding:.55rem 1rem;border-radius:8px;font-size:.88rem;font-weight:600;
+          border:1px solid transparent;cursor:pointer;text-decoration:none;display:inline-block;
+          font-family:inherit;}
+  .ag-btn-primary{background:var(--primary);color:#0a0a0a;}
+  .ag-btn-secondary{background:transparent;color:var(--text);border-color:var(--line);}
+  .ag-btn-success{background:var(--ok);color:#0a0a0a;}
+  .ag-btn-danger{background:var(--danger);color:#fff;}
+  .ag-badge{display:inline-flex;align-items:center;gap:.35rem;padding:.15rem .55rem;
+            border-radius:999px;font-size:.7rem;font-weight:700;text-transform:uppercase;
+            letter-spacing:.04em;}
+  .ag-badge-test{background:rgba(245,158,11,.18);color:#fcd34d;}
+  .ag-badge-live{background:rgba(34,197,94,.18);color:#86efac;}
+  .ag-badge-off{background:rgba(154,154,154,.2);color:var(--muted);}
+  .ag-badge-verified{background:rgba(34,197,94,.18);color:#86efac;}
+  .ag-badge-unverified{background:rgba(239,68,68,.18);color:#fca5a5;}
+  .ag-webhook{background:#000;color:#e2e8f0;padding:.65rem .75rem;border-radius:8px;
+              font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.8rem;
+              display:flex;align-items:center;gap:.6rem;word-break:break-all;
+              border:1px solid var(--line);}
+  .ag-webhook button{background:var(--panel);color:var(--text);
+                     border:1px solid var(--line);border-radius:6px;
+                     padding:.25rem .65rem;font-size:.75rem;cursor:pointer;flex-shrink:0;
+                     font-family:inherit;}
+  .ag-webhook button:hover{border-color:var(--primary);}
+  .ag-guide{background:var(--panel-2);border:1px dashed var(--line);border-radius:8px;
+            padding:.75rem .9rem;margin-top:.75rem;font-size:.88rem;color:var(--text);}
+  .ag-guide ol{margin:.4rem 0 0 1.1rem;padding:0;}
+  .ag-guide li{margin:.25rem 0;color:var(--text);}
+  .ag-guide a{color:var(--primary);text-decoration:none;}
+  .ag-events{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem;
+             background:rgba(79,70,229,.18);color:#c7d2fe;padding:.05rem .4rem;
+             border-radius:4px;margin:0 .15rem;}
+  details.ag-details{margin-top:.5rem;}
+  details.ag-details summary{cursor:pointer;color:var(--primary);font-weight:600;
+                              font-size:.88rem;list-style:none;}
   details.ag-details summary::-webkit-details-marker{display:none;}
   details.ag-details summary::before{content:"▸ ";}
   details.ag-details[open] summary::before{content:"▾ ";}
-  .ag-test-result{margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12.5px;}
-  .ag-test-ok{background:#dcfce7;color:#14532d;}
-  .ag-test-err{background:#fee2e2;color:#7f1d1d;}
-  .ag-warn{background:#fffbeb;border:1px solid #fde68a;color:#92400e;
-           padding:8px 12px;border-radius:8px;font-size:12.5px;margin-bottom:12px;}
-  .ag-orders{margin-top:30px;}
-  .ag-orders h2{font-size:16px;margin:0 0 10px;}
-  .ag-orders table{width:100%;border-collapse:collapse;font-size:13px;}
-  .ag-orders th,.ag-orders td{text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;
-                              vertical-align:top;}
-  .ag-orders th{background:#f8fafc;font-size:11px;text-transform:uppercase;color:#475569;}
-  .ag-pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;
-           text-transform:uppercase;letter-spacing:.04em;}
-  .ag-pill-placed{background:#dbeafe;color:#1d4ed8;}
-  .ag-pill-accepted{background:#dcfce7;color:#15803d;}
-  .ag-pill-ready{background:#fef9c3;color:#854d0e;}
-  .ag-pill-delivered{background:#ede9fe;color:#5b21b6;}
-  .ag-pill-cancelled,.ag-pill-rejected{background:#fee2e2;color:#991b1b;}
-  .ag-inline-form{display:inline;margin-right:4px;}
+  .ag-test-result{margin-top:.7rem;padding:.55rem .8rem;border-radius:8px;font-size:.83rem;}
+  .ag-test-ok{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#86efac;}
+  .ag-test-err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;}
+  .ag-warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);
+           color:#fcd34d;padding:.7rem .9rem;border-radius:8px;font-size:.85rem;
+           margin-bottom:1rem;}
+  .ag-orders{margin-top:1.75rem;}
+  .ag-orders h2{font-size:1.1rem;margin:0 0 .65rem;color:var(--text);}
+  .ag-orders table{width:100%;border-collapse:collapse;font-size:.88rem;
+                   background:var(--panel);border:1px solid var(--line);border-radius:10px;
+                   overflow:hidden;}
+  .ag-orders th,.ag-orders td{text-align:left;padding:.65rem .85rem;
+                              border-bottom:1px solid var(--line);vertical-align:top;}
+  .ag-orders th{background:var(--panel-2);font-size:.72rem;text-transform:uppercase;
+                color:var(--muted);font-weight:600;letter-spacing:.05em;}
+  .ag-orders tbody tr:hover{background:rgba(255,255,255,.02);}
+  .ag-orders small{color:var(--muted);}
+  .ag-pill{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.7rem;
+           font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .ag-pill-placed{background:rgba(79,70,229,.2);color:#c7d2fe;}
+  .ag-pill-accepted{background:rgba(34,197,94,.18);color:#86efac;}
+  .ag-pill-ready{background:rgba(245,158,11,.2);color:#fcd34d;}
+  .ag-pill-delivered{background:rgba(168,85,247,.2);color:#e9d5ff;}
+  .ag-pill-cancelled,.ag-pill-rejected{background:rgba(239,68,68,.18);color:#fca5a5;}
+  .ag-inline-form{display:inline;margin-right:.25rem;}
 </style>
 
 <p class="ag-warn">
@@ -100,7 +119,7 @@
       <button type="button" onclick="copyText('wh-{{ cred.id }}', this)">Copy</button>
     </div>
     {% if cred.guide.events %}
-    <p style="font-size:11.5px;color:#64748b;margin-top:6px;">
+    <p style="font-size:.78rem;color:var(--muted);margin-top:.4rem;">
       Subscribe these events:
       {% for ev in cred.guide.events %}<code class="ag-events">{{ ev }}</code>{% endfor %}
     </p>
@@ -318,7 +337,7 @@
     </tbody>
   </table>
   {% else %}
-  <p style="color:#64748b;font-size:13px;">No aggregator orders yet — they will appear here as soon as Swiggy/Zomato/Uber Eats start pushing to your webhook URL.</p>
+  <p class="muted" style="font-size:.88rem;">No aggregator orders yet — they will appear here as soon as Swiggy / Zomato / Uber Eats start pushing to your webhook URL.</p>
   {% endif %}
 </div>
 

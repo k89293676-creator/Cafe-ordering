@@ -433,6 +433,9 @@ class Ingredient(db.Model):
     low_stock_threshold = db.Column(db.Numeric(10, 3), default=5)
     menu_item_id = db.Column(db.Text, nullable=True)
     qty_per_order = db.Column(db.Numeric(10, 3), default=1)
+    # Cost-per-unit lets owners track inventory valuation and food cost %.
+    # Auto-added at boot via generic auto-sync on legacy DBs.
+    cost_per_unit = db.Column(db.Numeric(10, 4), default=0, server_default="0")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
 
@@ -5806,6 +5809,7 @@ def add_ingredient():
     qty_per_order = str(request.form.get("qty_per_order", "1")).strip()
     low_stock_threshold = str(request.form.get("low_stock_threshold", "5")).strip()
     stock = str(request.form.get("stock", "0")).strip()
+    cost_per_unit = str(request.form.get("cost_per_unit", "0")).strip()
 
     if not name:
         flash("Ingredient name is required.")
@@ -5814,6 +5818,7 @@ def add_ingredient():
         qty_per_order_f = float(qty_per_order)
         low_stock_f = float(low_stock_threshold)
         stock_f = float(stock)
+        cost_f = max(0.0, float(cost_per_unit or 0))
     except ValueError:
         flash("Invalid numeric value.")
         return redirect(url_for("inventory_view"))
@@ -5828,6 +5833,7 @@ def add_ingredient():
         low_stock_threshold=low_stock_f,
         menu_item_id=menu_item_id,
         qty_per_order=qty_per_order_f,
+        cost_per_unit=cost_f,
     )
     db.session.add(ing)
     db.session.commit()
@@ -5845,11 +5851,100 @@ def update_ingredient(ing_id: int):
     try:
         ing.stock = float(request.form.get("stock", ing.stock))
         ing.low_stock_threshold = float(request.form.get("low_stock_threshold", ing.low_stock_threshold))
+        if request.form.get("cost_per_unit") is not None:
+            ing.cost_per_unit = max(0.0, float(request.form.get("cost_per_unit") or 0))
     except ValueError:
         flash("Invalid value.")
         return redirect(url_for("inventory_view"))
     db.session.commit()
     flash("Ingredient updated.")
+    return redirect(url_for("inventory_view"))
+
+
+@app.route("/owner/inventory/import", methods=["POST"])
+@login_required
+@limiter.limit("10 per hour")
+def import_inventory_csv():
+    """Bulk-import ingredients from a CSV upload.
+
+    Accepted columns (case-insensitive, in any order):
+      name (required), unit, stock, low_stock_threshold, qty_per_order,
+      cost_per_unit, menu_item_id
+
+    Existing rows (matched by case-insensitive name) are UPDATED;
+    unknown names are INSERTED. Bad rows are skipped — the response
+    summarises the count so the owner can spot-check.
+    """
+    owner_id = logged_in_owner_id()
+    upload = request.files.get("file")
+    if not upload or not upload.filename:
+        flash("Choose a CSV file to import.")
+        return redirect(url_for("inventory_view"))
+    try:
+        raw = upload.read().decode("utf-8-sig", errors="replace")
+    except Exception as exc:  # noqa: BLE001
+        flash(f"Could not read file: {exc}")
+        return redirect(url_for("inventory_view"))
+
+    reader = csv.DictReader(io.StringIO(raw))
+    if not reader.fieldnames:
+        flash("CSV is empty or missing a header row.")
+        return redirect(url_for("inventory_view"))
+
+    # Normalise header lookup so 'Name' / 'NAME' / 'name' all work.
+    field_map = {(h or "").strip().lower(): h for h in reader.fieldnames}
+    if "name" not in field_map:
+        flash("CSV must include a 'name' column.")
+        return redirect(url_for("inventory_view"))
+
+    def _get(row: dict, key: str, default: str = "") -> str:
+        h = field_map.get(key)
+        if not h:
+            return default
+        return str(row.get(h, default) or default).strip()
+
+    def _f(val: str, fallback: float = 0.0) -> float:
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return fallback
+
+    owner = db.session.get(Owner, owner_id)
+    cafe_id = owner.cafe_id if owner else None
+    created, updated, skipped = 0, 0, 0
+
+    # Pre-load existing rows once to avoid per-row queries on big imports.
+    existing = {(i.name or "").strip().lower(): i for i in
+                Ingredient.query.filter_by(owner_id=owner_id).all()}
+
+    for row in reader:
+        name = _get(row, "name")[:200]
+        if not name:
+            skipped += 1
+            continue
+        key = name.lower()
+        ing = existing.get(key)
+        if ing is None:
+            ing = Ingredient(owner_id=owner_id, cafe_id=cafe_id, name=name)
+            db.session.add(ing)
+            existing[key] = ing
+            created += 1
+        else:
+            updated += 1
+        ing.unit = (_get(row, "unit") or ing.unit or "unit")[:50]
+        ing.stock = _f(_get(row, "stock"), float(ing.stock or 0))
+        ing.low_stock_threshold = _f(_get(row, "low_stock_threshold"),
+                                      float(ing.low_stock_threshold or 5))
+        ing.qty_per_order = _f(_get(row, "qty_per_order"),
+                                float(ing.qty_per_order or 1))
+        ing.cost_per_unit = max(0.0, _f(_get(row, "cost_per_unit"),
+                                          float(ing.cost_per_unit or 0)))
+        link = _get(row, "menu_item_id")[:100] or None
+        if link is not None:
+            ing.menu_item_id = link
+
+    db.session.commit()
+    flash(f"Imported: {created} added, {updated} updated, {skipped} skipped.")
     return redirect(url_for("inventory_view"))
 
 
@@ -5893,11 +5988,22 @@ def export_inventory_csv():
     ings = Ingredient.query.filter_by(owner_id=owner_id).order_by(Ingredient.name).all()
     out = io.StringIO()
     w = csv.writer(out)
-    w.writerow(["id", "name", "unit", "stock", "low_stock_threshold", "menu_item_id", "qty_per_order", "status"])
+    w.writerow(["id", "name", "unit", "stock", "low_stock_threshold",
+                "menu_item_id", "qty_per_order", "cost_per_unit",
+                "stock_value", "status"])
     for i in ings:
-        status = "LOW" if float(i.stock or 0) <= float(i.low_stock_threshold or 0) else "OK"
-        w.writerow([i.id, i.name, i.unit, i.stock, i.low_stock_threshold,
-                    i.menu_item_id or "", i.qty_per_order, status])
+        s = float(i.stock or 0)
+        t = float(i.low_stock_threshold or 0)
+        cost = float(getattr(i, "cost_per_unit", 0) or 0)
+        if s <= 0:
+            status = "OUT"
+        elif s <= t:
+            status = "LOW"
+        else:
+            status = "OK"
+        w.writerow([i.id, i.name, i.unit, s, t,
+                    i.menu_item_id or "", i.qty_per_order, cost,
+                    round(s * cost, 2), status])
     out.seek(0)
     fname = f"inventory_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     return Response(out.getvalue(), mimetype="text/csv",
