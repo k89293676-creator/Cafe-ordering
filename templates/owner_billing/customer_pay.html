@@ -18,6 +18,7 @@
     #status { margin-top:1rem; min-height:1.5rem; }
     #status.error { color:#ef4444; }
     #status.ok { color:#22c55e; }
+    #status.info { color:#9a9a9a; }
   </style>
 </head>
 <body>
@@ -39,34 +40,111 @@
     {% endif %}
   </div>
 
-  {% if provider == 'stripe' and payment.status != 'succeeded' %}
-    <script src="https://js.stripe.com/v3/"></script>
-    <script>
-      // Stripe Payment Element redirect flow — keeps PCI scope minimal.
-      const stripe = Stripe({{ public_key|tojson }});
+{% if payment.status != 'succeeded' %}
+  <script>
+    // Poll our server for the authoritative payment status. Used after the
+    // customer returns from a hosted-checkout redirect (Stripe / Cashfree)
+    // — the webhook is the source of truth, this just lets the page reflect
+    // the success state without a manual reload.
+    const STATUS_URL = {{ url_for('billing_pay_status', order_id=order.id) | tojson }};
+    let pollTimer = null;
+    function startStatusPolling(intervalMs = 3000, maxAttempts = 40) {
+      let attempts = 0;
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        attempts++;
+        try {
+          const r = await fetch(STATUS_URL, {cache: 'no-store'});
+          const j = await r.json();
+          if (j.status === 'succeeded') {
+            clearInterval(pollTimer);
+            const s = document.getElementById('status');
+            if (s) { s.className = 'ok'; s.textContent = '✓ Payment confirmed.'; }
+            setTimeout(() => location.reload(), 1200);
+          } else if (j.status === 'failed' || j.status === 'cancelled') {
+            clearInterval(pollTimer);
+            const s = document.getElementById('status');
+            if (s) { s.className = 'error'; s.textContent = 'Payment ' + j.status + '.'; }
+          }
+        } catch (e) { /* network blip — keep polling */ }
+        if (attempts >= maxAttempts && pollTimer) clearInterval(pollTimer);
+      }, intervalMs);
+    }
+    // If the customer has just landed back from a hosted checkout the URL
+    // typically includes ?session_id=... (Stripe) or ?order_id=... (Cashfree)
+    // so we start polling immediately on load.
+    if (location.search && /session_id|order_id|cf_payment/i.test(location.search)) {
+      startStatusPolling();
+    }
+  </script>
+{% endif %}
+
+{% if provider == 'stripe' and payment.status != 'succeeded' %}
+  <script>
+    // Stripe Checkout Session: a fully-hosted page on Stripe's domain.
+    // We just redirect; Stripe handles cards, Apple Pay, Google Pay, Link.
+    (function () {
+      const url = {{ checkout_url | tojson }};
       const status = document.getElementById('status');
-      document.getElementById('pay-btn').addEventListener('click', async () => {
-        // For brevity we redirect to Stripe-hosted Checkout via a Payment Link
-        // would be the recommended path; here we use confirmPayment with a
-        // Payment Element if a client_secret is available, else show fallback.
-        status.textContent = 'Stripe Checkout: please follow your provider dashboard to complete the link.';
+      const btn = document.getElementById('pay-btn');
+      if (!url) {
+        status.className = 'error';
+        status.textContent = 'Stripe checkout link is unavailable. Please ask the cafe to regenerate the payment link.';
+        if (btn) btn.disabled = true;
+        return;
+      }
+      btn.addEventListener('click', () => {
+        status.className = 'info';
+        status.textContent = 'Redirecting to Stripe…';
+        window.location.assign(url);
       });
-    </script>
-  {% elif provider == 'razorpay' and payment.status != 'succeeded' %}
-    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-    <script>
+    })();
+  </script>
+{% elif provider == 'razorpay' and payment.status != 'succeeded' %}
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <script>
+    (function () {
       const status = document.getElementById('status');
-      document.getElementById('pay-btn').addEventListener('click', () => {
+      const btn = document.getElementById('pay-btn');
+      const VERIFY_URL = {{ url_for('billing_pay_razorpay_verify', order_id=order.id) | tojson }};
+      btn.addEventListener('click', () => {
         const rzp = new Razorpay({
           key: {{ public_key|tojson }},
           amount: {{ amount_minor }},
           currency: {{ currency|tojson }},
-          name: 'Cafe Order #{{ order.id }}',
+          name: 'Order #{{ order.id }}',
           order_id: {{ payment.intent_id|tojson }},
-          handler: function (resp) {
-            status.className = 'ok';
-            status.textContent = '✓ Payment authorised. We will confirm shortly.';
-            setTimeout(() => location.reload(), 2500);
+          handler: async function (resp) {
+            // Server-side signature verification — the webhook also confirms
+            // the payment, but verifying here closes the loop instantly.
+            status.className = 'info';
+            status.textContent = 'Verifying payment…';
+            try {
+              const r = await fetch(VERIFY_URL, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                  razorpay_payment_id: resp.razorpay_payment_id,
+                  razorpay_order_id: resp.razorpay_order_id,
+                  razorpay_signature: resp.razorpay_signature,
+                }),
+              });
+              const j = await r.json();
+              if (j.ok && j.status === 'succeeded') {
+                status.className = 'ok';
+                status.textContent = '✓ Payment confirmed.';
+                setTimeout(() => location.reload(), 1500);
+              } else {
+                status.className = 'error';
+                status.textContent = 'Verification failed: ' + (j.error || 'unknown');
+                // Webhook will still settle eventually — keep polling.
+                startStatusPolling();
+              }
+            } catch (e) {
+              status.className = 'error';
+              status.textContent = 'Network error during verification.';
+              startStatusPolling();
+            }
           },
           modal: {
             ondismiss: () => { status.className = ''; status.textContent = 'Payment cancelled.'; }
@@ -75,11 +153,52 @@
         });
         rzp.on('payment.failed', (resp) => {
           status.className = 'error';
-          status.textContent = 'Payment failed: ' + (resp.error && resp.error.description || 'unknown error');
+          status.textContent = 'Payment failed: ' + ((resp.error && resp.error.description) || 'unknown error');
         });
         rzp.open();
       });
-    </script>
-  {% endif %}
+    })();
+  </script>
+{% elif provider == 'cashfree' and payment.status != 'succeeded' %}
+  <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+  <script>
+    (function () {
+      const status = document.getElementById('status');
+      const btn = document.getElementById('pay-btn');
+      const sessionId = {{ cashfree_session_id | tojson }};
+      const mode = {{ mode | tojson }};
+      const returnUrl = window.location.href.split('?')[0] + '?order_id=' + {{ order.id | tojson }};
+      if (!sessionId) {
+        status.className = 'error';
+        status.textContent = 'Cashfree session is unavailable. Please ask the cafe to regenerate the payment link.';
+        if (btn) btn.disabled = true;
+        return;
+      }
+      const cashfree = Cashfree({mode: mode === 'live' ? 'production' : 'sandbox'});
+      btn.addEventListener('click', () => {
+        status.className = 'info';
+        status.textContent = 'Opening Cashfree…';
+        cashfree.checkout({
+          paymentSessionId: sessionId,
+          returnUrl: returnUrl,
+          redirectTarget: '_self',
+        });
+      });
+    })();
+  </script>
+{% else %}
+  <script>
+    (function () {
+      // Unknown provider — show a clear message rather than a silent dead button.
+      const status = document.getElementById('status');
+      const btn = document.getElementById('pay-btn');
+      if (status && {{ (payment.status != 'succeeded') | tojson }}) {
+        status.className = 'error';
+        status.textContent = 'Provider {{ provider }} is not yet supported in the customer pay page.';
+        if (btn) btn.disabled = true;
+      }
+    })();
+  </script>
+{% endif %}
 </body>
 </html>

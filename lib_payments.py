@@ -252,31 +252,93 @@ class StripeProvider(PaymentProvider):
 
     def create_payment_intent(self, *, amount_minor, currency, order_id, description,
                               customer_email="", customer_phone="", return_url=""):
+        """Create a Stripe Checkout Session.
+
+        We use Checkout Sessions instead of bare PaymentIntents because:
+        * Stripe hosts the entire payment UI — no PCI scope on our side.
+        * Apple Pay / Google Pay / Link work automatically.
+        * The customer just clicks a link; no SDK code on our page.
+        * The same session URL works on desktop and mobile.
+
+        The session id (cs_…) is the canonical ``intent_id`` we store and
+        match webhooks against.
+        """
         stripe = self._client()
+        success_url = return_url or "https://example.com/success"
+        # Stripe requires the literal {CHECKOUT_SESSION_ID} placeholder so
+        # the success page can confirm exactly which session paid.
+        if "{CHECKOUT_SESSION_ID}" not in success_url:
+            sep = "&" if "?" in success_url else "?"
+            success_url = f"{success_url}{sep}session_id={{CHECKOUT_SESSION_ID}}"
         try:
-            pi = stripe.PaymentIntent.create(
-                amount=int(amount_minor),
-                currency=(currency or "inr").lower(),
-                description=description[:500],
+            session = stripe.checkout.Session.create(
+                mode="payment",
+                payment_method_types=["card"],
+                line_items=[{
+                    "price_data": {
+                        "currency": (currency or "inr").lower(),
+                        "product_data": {"name": description[:120] or f"Order #{order_id}"},
+                        "unit_amount": int(amount_minor),
+                    },
+                    "quantity": 1,
+                }],
+                success_url=success_url,
+                cancel_url=return_url or success_url,
+                customer_email=customer_email[:128] or None,
+                client_reference_id=str(order_id),
                 metadata={
                     "order_id": str(order_id),
-                    "customer_email": customer_email[:128],
                     "customer_phone": customer_phone[:32],
                 },
-                automatic_payment_methods={"enabled": True},
+                payment_intent_data={
+                    "description": description[:500],
+                    "metadata": {"order_id": str(order_id)},
+                },
             )
         except Exception as exc:  # noqa: BLE001
             raise PaymentProviderError(f"Stripe could not create the payment: {exc}") from exc
         return PaymentIntent(
-            intent_id=pi["id"],
-            client_secret=pi.get("client_secret", ""),
+            intent_id=session["id"],
+            client_secret="",  # Checkout Sessions don't expose a client_secret.
+            checkout_url=session.get("url", "") or "",
             amount_minor=int(amount_minor),
             currency=currency,
-            raw={"status": pi.get("status")},
+            raw={"status": session.get("status"),
+                 "payment_status": session.get("payment_status"),
+                 "payment_intent": session.get("payment_intent")},
         )
 
     def fetch_payment_status(self, intent_id: str) -> WebhookEvent:
+        """Authoritative status lookup. Handles both Checkout Session ids
+        (cs_…) and bare PaymentIntent ids (pi_…) so legacy rows created
+        before the Checkout Session migration still reconcile correctly."""
         stripe = self._client()
+        if intent_id.startswith("cs_"):
+            try:
+                obj = stripe.checkout.Session.retrieve(intent_id)
+            except Exception as exc:  # noqa: BLE001
+                raise PaymentProviderError(
+                    f"Stripe could not fetch session {intent_id}: {exc}") from exc
+            payment_status = (obj.get("payment_status") or "").lower()
+            session_status = (obj.get("status") or "").lower()
+            if payment_status == "paid":
+                status = "succeeded"
+            elif session_status == "expired":
+                status = "failed"
+            elif session_status == "complete":
+                status = "succeeded"
+            elif payment_status == "unpaid" and session_status == "open":
+                status = "pending"
+            else:
+                status = "pending"
+            return WebhookEvent(
+                event_type=f"checkout.session.{session_status or 'unknown'}",
+                intent_id=obj.get("id", intent_id),
+                status=status,
+                amount_minor=int(obj.get("amount_total", 0) or 0),
+                currency=(obj.get("currency") or "inr").upper(),
+                raw=dict(obj),
+            )
         try:
             pi = stripe.PaymentIntent.retrieve(intent_id)
         except Exception as exc:  # noqa: BLE001
@@ -302,6 +364,16 @@ class StripeProvider(PaymentProvider):
         )
 
     def parse_webhook(self, payload_bytes, signature_header):
+        """Parse + signature-verify a Stripe webhook.
+
+        Handles both the Checkout Session lifecycle (preferred since we
+        switched ``create_payment_intent`` to sessions) and bare
+        PaymentIntent events (still emitted for sessions but pointing
+        at the underlying intent — and used by legacy rows). We always
+        report the *session id* as ``intent_id`` when we recognise a
+        session-scoped event so the OnlinePayment lookup in the route
+        finds the row we created in ``create_payment_intent``.
+        """
         stripe = self._client()
         if not self.webhook_secret:
             raise PaymentProviderError("Webhook secret not configured for Stripe.")
@@ -313,6 +385,35 @@ class StripeProvider(PaymentProvider):
             raise PaymentProviderError(f"Stripe webhook signature invalid: {exc}") from exc
         etype = event.get("type", "")
         obj = event.get("data", {}).get("object", {}) or {}
+
+        # Checkout Session events come first because they're the primary
+        # lifecycle signal for hosted-checkout payments.
+        if etype.startswith("checkout.session."):
+            payment_status = (obj.get("payment_status") or "").lower()
+            session_status = (obj.get("status") or "").lower()
+            if etype == "checkout.session.completed":
+                # ``complete`` + payment_status=paid → success. For async
+                # payments (e.g. bank debit) payment_status is 'unpaid'
+                # initially and resolves via async_payment_succeeded.
+                status = "succeeded" if payment_status == "paid" else "pending"
+            elif etype == "checkout.session.async_payment_succeeded":
+                status = "succeeded"
+            elif etype == "checkout.session.async_payment_failed":
+                status = "failed"
+            elif etype == "checkout.session.expired":
+                status = "failed"
+            else:
+                status = "pending" if session_status != "complete" else "succeeded"
+            return WebhookEvent(
+                event_type=etype,
+                intent_id=obj.get("id", ""),  # cs_…
+                status=status,
+                amount_minor=int(obj.get("amount_total", 0) or 0),
+                currency=(obj.get("currency") or "inr").upper(),
+                raw=obj,
+            )
+
+        # PaymentIntent / charge events — legacy and refund flows.
         intent_id = obj.get("id", "") or obj.get("payment_intent", "")
         status_map = {
             "payment_intent.succeeded": "succeeded",

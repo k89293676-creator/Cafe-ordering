@@ -4,6 +4,7 @@ import base64
 import csv
 import io
 import hashlib
+import hmac
 import json
 import logging
 import mimetypes
@@ -4692,6 +4693,57 @@ def owner_billing_create_charge(order_id: int):
 # Customer-facing hosted pay page + provider webhook
 # ---------------------------------------------------------------------------
 
+def _settle_online_payment(order: "Order", op: "OnlinePayment", *,
+                           source: str, credential_id: int | None = None) -> None:
+    """Mark ``order`` as paid by ``op`` and emit the audit trail.
+
+    Single source of truth used by both the provider webhook and any
+    synchronous client-side verification path (e.g. Razorpay handler
+    callback). Caller must guarantee the order is not already paid —
+    we re-check defensively but the caller's check is what makes the
+    flow correct under concurrent webhook + handler race conditions.
+
+    The function does NOT commit; callers are expected to call
+    ``db.session.commit()`` at the end of their own transaction so
+    related rows (OnlinePayment status, WebhookEventLog) land
+    atomically with the order update.
+    """
+    if (order.payment_status or "unpaid") == "paid":
+        return
+    settings = _settings_for(order.owner_id)
+    totals = compute_bill_totals(
+        subtotal=float(order.amount or 0),
+        discount=float(order.discount or 0),
+        service_charge_pct=float(settings.service_charge_percent or 0),
+        tax_pct=float(settings.tax_rate_percent or 0),
+    )
+    order.payment_status = "paid"
+    order.payment_method = op.provider
+    order.tax = totals.tax
+    order.service_charge = totals.service_charge
+    order.paid_at = datetime.now(timezone.utc)
+    order.payments_breakdown = [{
+        "method": op.provider,
+        "amount": float(op.amount or totals.total),
+        "reference": op.intent_id or "",
+    }]
+    if not order.invoice_number:
+        inv, seq = next_invoice_number(settings.invoice_prefix or "INV",
+                                       int(settings.invoice_seq or 0))
+        order.invoice_number = inv
+        settings.invoice_seq = seq
+    db.session.add(order)
+    _billing_log(owner_id=order.owner_id, order_id=order.id,
+                 action="online_charge.settled",
+                 amount=float(op.amount or totals.total),
+                 payment_method=op.provider,
+                 reason=source,
+                 payload={"intent_id": op.intent_id,
+                          "provider": op.provider,
+                          "credential_id": credential_id})
+    _invalidate_billing_cache(order.owner_id)
+
+
 @app.route("/billing/pay/<int:order_id>")
 def billing_pay_page(order_id: int):
     order = Order.query.get_or_404(order_id)
@@ -4704,13 +4756,125 @@ def billing_pay_page(order_id: int):
         owner_id=op.owner_id, provider=op.provider).first()
     if cred is None:
         return ("Payment provider is no longer configured.", 410)
+    raw = op.raw if isinstance(op.raw, dict) else {}
     return _no_store(app.make_response(render_template(
         "owner_billing/customer_pay.html",
         order=order, payment=op, provider=op.provider,
         public_key=cred.public_key, mode=cred.mode,
         amount_minor=int(round(float(op.amount or 0) * 100)),
         currency=op.currency or "INR",
+        # Surface the hosted-checkout URL directly to the template so
+        # Stripe (Checkout Session) and Cashfree (payment_session_id) can
+        # launch their respective hosted flows without any further server
+        # round-trip. Razorpay still uses its in-page Checkout JS.
+        checkout_url=raw.get("checkout_url") or "",
+        cashfree_session_id=(raw.get("extra") or {}).get("payment_session_id", "")
+            if op.provider == "cashfree" else "",
     )))
+
+
+@app.route("/billing/pay/<int:order_id>/status")
+@limiter.limit("60 per minute")
+def billing_pay_status(order_id: int):
+    """Lightweight JSON status endpoint the customer pay page polls after
+    returning from a hosted checkout (Stripe / Cashfree). The webhook is
+    still the source of truth — this just lets the customer's browser see
+    the success state without a manual reload, and triggers a synchronous
+    reconciliation against the PSP if the row is still pending."""
+    op = (OnlinePayment.query.filter_by(order_id=order_id)
+          .order_by(OnlinePayment.created_at.desc()).first())
+    if op is None:
+        return jsonify({"status": "unknown"}), 404
+    if op.status == "pending":
+        # Pull from the PSP — covers the (rare) case where the success
+        # redirect beats the webhook delivery, especially in test mode.
+        cred = PaymentProviderCredential.query.filter_by(
+            owner_id=op.owner_id, provider=op.provider).first()
+        if cred is not None:
+            try:
+                provider = _provider_for_credential(cred)
+                event = provider.fetch_payment_status(op.intent_id)
+                if event.status and event.status != op.status:
+                    op.status = event.status
+                    db.session.add(op)
+                    db.session.commit()
+            except Exception as exc:  # noqa: BLE001
+                app.logger.info("billing_pay_status reconcile skipped: %s", exc)
+    return jsonify({"status": op.status, "order_id": op.order_id,
+                    "intent_id": op.intent_id})
+
+
+@csrf.exempt
+@app.route("/billing/pay/<int:order_id>/razorpay/verify", methods=["POST"])
+@limiter.limit("30 per minute")
+def billing_pay_razorpay_verify(order_id: int):
+    """Server-side verification of a Razorpay handler response.
+
+    The Razorpay Checkout JS posts back ``razorpay_payment_id``,
+    ``razorpay_order_id`` and ``razorpay_signature`` to us. Verification
+    is a constant-time HMAC compare of ``"<order_id>|<payment_id>"``
+    signed with the merchant's webhook/key secret. The webhook will
+    *also* mark the row paid (with idempotency) — this endpoint just
+    closes the loop synchronously so the customer sees confirmation
+    immediately even if the webhook is delayed.
+    """
+    payload = request.get_json(silent=True) or request.form
+    rzp_order_id = (payload.get("razorpay_order_id") or "").strip()
+    rzp_payment_id = (payload.get("razorpay_payment_id") or "").strip()
+    rzp_signature = (payload.get("razorpay_signature") or "").strip()
+    if not (rzp_order_id and rzp_payment_id and rzp_signature):
+        return jsonify({"ok": False, "error": "missing fields"}), 400
+
+    op = (OnlinePayment.query.filter_by(
+            order_id=order_id, provider="razorpay", intent_id=rzp_order_id)
+          .order_by(OnlinePayment.created_at.desc()).first())
+    if op is None:
+        return jsonify({"ok": False, "error": "unknown payment"}), 404
+
+    cred = PaymentProviderCredential.query.filter_by(
+        owner_id=op.owner_id, provider="razorpay", is_active=True).first()
+    if cred is None:
+        return jsonify({"ok": False, "error": "razorpay not configured"}), 410
+
+    # Razorpay's handler signature is HMAC-SHA256(secret, order_id|payment_id)
+    # signed with the *Key Secret* (not the webhook secret). See
+    # https://razorpay.com/docs/payments/server-integration/python/payment-gateway/build-integration#verify-payment-signature
+    api_secret = decrypt_secret(cred.secret_key_enc) or ""
+    if not api_secret:
+        return jsonify({"ok": False, "error": "secret unavailable"}), 500
+    expected = hmac.new(
+        api_secret.encode("utf-8"),
+        f"{rzp_order_id}|{rzp_payment_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, rzp_signature):
+        op.error_message = "razorpay handler signature invalid"
+        db.session.add(op)
+        db.session.commit()
+        app.logger.warning("Razorpay verify: signature mismatch for op=%s", op.id)
+        return jsonify({"ok": False, "error": "signature invalid"}), 400
+
+    if op.status != "succeeded":
+        op.status = "succeeded"
+        op.raw = {"event_type": "razorpay.handler.verified",
+                  "razorpay_payment_id": rzp_payment_id,
+                  "razorpay_order_id": rzp_order_id,
+                  "verified_via": "client_handler"}
+        db.session.add(op)
+        # Reuse the same settle-on-paid path the webhook uses so the
+        # customer flow and the webhook flow converge.
+        order = Order.query.filter_by(id=op.order_id, owner_id=op.owner_id).first()
+        if order and (order.payment_status or "unpaid") != "paid":
+            try:
+                _settle_online_payment(
+                    order, op,
+                    source="razorpay.handler.verified",
+                    credential_id=cred.id,
+                )
+            except Exception as exc:  # noqa: BLE001 — best-effort; webhook will retry
+                app.logger.warning("settle on razorpay verify failed: %s", exc)
+        db.session.commit()
+    return jsonify({"ok": True, "status": op.status})
 
 
 @app.route("/owner/billing/payment-methods/<int:cred_id>/delete", methods=["POST"])
@@ -5375,37 +5539,11 @@ def billing_webhook(provider: str):
     if event.status == "succeeded":
         order = Order.query.filter_by(id=op.order_id, owner_id=op.owner_id).first()
         if order and (order.payment_status or "unpaid") != "paid":
-            settings = _settings_for(order.owner_id)
-            totals = compute_bill_totals(
-                subtotal=float(order.amount or 0),
-                discount=float(order.discount or 0),
-                service_charge_pct=float(settings.service_charge_percent or 0),
-                tax_pct=float(settings.tax_rate_percent or 0),
+            _settle_online_payment(
+                order, op,
+                source=f"webhook {event.event_type}",
+                credential_id=matched_cred.id if matched_cred else None,
             )
-            order.payment_status = "paid"
-            order.payment_method = provider
-            order.tax = totals.tax
-            order.service_charge = totals.service_charge
-            order.paid_at = datetime.now(timezone.utc)
-            order.payments_breakdown = [{
-                "method": provider, "amount": float(op.amount or totals.total),
-                "reference": event.intent_id,
-            }]
-            if not order.invoice_number:
-                inv, seq = next_invoice_number(settings.invoice_prefix or "INV",
-                                               int(settings.invoice_seq or 0))
-                order.invoice_number = inv
-                settings.invoice_seq = seq
-            db.session.add(order)
-            _billing_log(owner_id=order.owner_id, order_id=order.id,
-                         action="online_charge.settled",
-                         amount=float(op.amount or totals.total),
-                         payment_method=provider,
-                         reason=f"webhook {event.event_type}",
-                         payload={"intent_id": event.intent_id,
-                                  "provider": provider,
-                                  "credential_id": matched_cred.id if matched_cred else None})
-            _invalidate_billing_cache(order.owner_id)
     # Mark the dedup row as fully processed so an ops dashboard can
     # distinguish "received but never finished" from "fully settled".
     WebhookEventLog.query.filter_by(
