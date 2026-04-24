@@ -1354,31 +1354,28 @@ def load_owners() -> list[dict]:
 # Admin access keys (server-stored secret keys per authorised owner)
 # ---------------------------------------------------------------------------
 
-_admin_keys_lock = threading.Lock()
+# Cross-process safe via portalocker (advisory file lock). The earlier
+# in-process ``threading.Lock`` only protected one gunicorn worker;
+# under WEB_CONCURRENCY > 1 two workers could race on the JSON write
+# and corrupt the file. ``safe_read_json`` / ``atomic_write_json``
+# both take the same advisory lock, so reads observe a consistent
+# snapshot and writes are atomic.
 
 
 def load_admin_keys() -> list[dict]:
     """Return all stored admin access keys (without plaintext)."""
-    if not ADMIN_KEYS_PATH.exists():
+    data = safe_read_json(ADMIN_KEYS_PATH, default=None)
+    if data is None:
         return []
-    try:
-        with open(ADMIN_KEYS_PATH, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if isinstance(data, dict) and "keys" in data:
-            return list(data.get("keys") or [])
-        if isinstance(data, list):
-            return data
-        return []
-    except Exception:
-        return []
+    if isinstance(data, dict) and "keys" in data:
+        return list(data.get("keys") or [])
+    if isinstance(data, list):
+        return data
+    return []
 
 
 def _save_admin_keys(keys: list[dict]) -> None:
-    with _admin_keys_lock:
-        tmp = ADMIN_KEYS_PATH.with_suffix(".json.tmp")
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"keys": keys}, fh, indent=2)
-        os.replace(tmp, ADMIN_KEYS_PATH)
+    atomic_write_json(ADMIN_KEYS_PATH, {"keys": keys})
 
 
 def generate_admin_key_for_owner(owner_id: int, username: str = "") -> str:
@@ -2034,15 +2031,44 @@ def _password_matches(password_hash: str, password: str) -> bool:
 
 # ---------------------------------------------------------------------------
 # IP login lockout
+#
+# Cross-worker safe: when ``REDIS_URL`` is configured we keep the
+# attempt counters in Redis (atomic ``INCR`` + ``EXPIRE``) so a brute-
+# force attempt fanning across gunicorn workers can't multiply its
+# allowed budget. Without Redis we fall back to a per-process dict
+# guarded by a lock — fine for single-worker dev, but the readiness
+# check (`/readyz`) and ENV_CONFIG.md make it loud that production
+# must set REDIS_URL when WEB_CONCURRENCY > 1.
 # ---------------------------------------------------------------------------
 
 _failed_logins: dict[str, list[float]] = {}
 _failed_logins_lock = threading.Lock()
 _MAX_FAIL_ATTEMPTS = 5
-_LOCKOUT_WINDOW = 900.0
+_LOCKOUT_WINDOW = 900  # seconds (15 min)
+
+
+def _failed_login_redis():
+    """Return the shared SSE Redis client when available, else None.
+
+    The SSE client is initialised later in this module (search for
+    ``_redis_client``), so we resolve it lazily — at call time, not
+    at import time.
+    """
+    return globals().get("_redis_client")
+
+
+def _failed_login_key(ip: str) -> str:
+    return f"cafe:lockout:login:{ip}"
 
 
 def _is_ip_locked_out(ip: str) -> bool:
+    rds = _failed_login_redis()
+    if rds is not None:
+        try:
+            count = int(rds.get(_failed_login_key(ip)) or 0)
+            return count >= _MAX_FAIL_ATTEMPTS
+        except Exception as exc:  # noqa: BLE001 - never break login on cache miss
+            app.logger.warning("login-lockout: redis read failed: %s", exc)
     now = time.monotonic()
     with _failed_logins_lock:
         recent = [t for t in _failed_logins.get(ip, []) if now - t < _LOCKOUT_WINDOW]
@@ -2051,6 +2077,19 @@ def _is_ip_locked_out(ip: str) -> bool:
 
 
 def _record_failed_login(ip: str) -> None:
+    rds = _failed_login_redis()
+    if rds is not None:
+        try:
+            # Atomic INCR + EXPIRE so the counter both grows and ages out.
+            # The EXPIRE is only set on the first hit (NX) so a steady
+            # stream of failures doesn't reset the rolling window.
+            pipe = rds.pipeline()
+            pipe.incr(_failed_login_key(ip))
+            pipe.expire(_failed_login_key(ip), _LOCKOUT_WINDOW, nx=True)
+            pipe.execute()
+            return
+        except Exception as exc:  # noqa: BLE001
+            app.logger.warning("login-lockout: redis write failed: %s", exc)
     now = time.monotonic()
     with _failed_logins_lock:
         recent = [t for t in _failed_logins.get(ip, []) if now - t < _LOCKOUT_WINDOW]
@@ -2059,6 +2098,12 @@ def _record_failed_login(ip: str) -> None:
 
 
 def _clear_failed_logins(ip: str) -> None:
+    rds = _failed_login_redis()
+    if rds is not None:
+        try:
+            rds.delete(_failed_login_key(ip))
+        except Exception as exc:  # noqa: BLE001
+            app.logger.warning("login-lockout: redis delete failed: %s", exc)
     with _failed_logins_lock:
         _failed_logins.pop(ip, None)
 

@@ -57,24 +57,56 @@ ACTIVE_ORDER_STATUSES = ("pending", "confirmed", "preparing", "ready")
 # "needs attention" so it visually pops on the grid.
 CALL_ESCALATION_SECONDS = 5 * 60
 
-# Per-process notes (ephemeral). We deliberately do NOT persist these:
-# they're meant for "Birthday party — go slow" style sticky notes that
-# the next shift shouldn't inherit. Cleared after 30 minutes of silence
-# or when the table is cleared.
+# Ephemeral per-shift state: "Birthday party — go slow" sticky notes
+# and "needs cleaning" flags. We deliberately do NOT persist these
+# beyond the configured TTL so the next shift starts fresh.
+#
+# Storage choice (decided at module import):
+#   * REDIS_URL set  → Redis with native TTL keys. Cross-worker safe
+#     so two gunicorn workers can't disagree about whether T3 is dirty.
+#   * No REDIS_URL   → per-process dict guarded by a lock. Fine for
+#     single-worker dev; in production WEB_CONCURRENCY > 1 should
+#     always come with REDIS_URL (also gates SSE pub/sub & rate-limit
+#     storage — same reason).
+import os as _os
+
 _NOTE_TTL_SECONDS = 30 * 60
+_CLEANING_TTL_SECONDS = 2 * 60 * 60
+
 _notes_lock = Lock()
 _notes: dict[tuple[int, str], tuple[str, float]] = {}
-
-# Owner-toggled "needs cleaning" flag — same ephemeral semantics as notes
-# (per-process, auto-clears so the next shift starts fresh). A separate
-# concept from customer-initiated service calls so a busser can mark a
-# table after a guest leaves without spamming the calls queue.
-_CLEANING_TTL_SECONDS = 2 * 60 * 60
 _cleaning_lock = Lock()
 _cleaning: dict[tuple[int, str], float] = {}
 
+_table_state_redis = None
+try:
+    if _os.environ.get("REDIS_URL"):
+        import redis as _redis_lib  # type: ignore
+        _table_state_redis = _redis_lib.Redis.from_url(
+            _os.environ["REDIS_URL"], decode_responses=True,
+            socket_connect_timeout=2, socket_timeout=2,
+        )
+        # Force a connection so a misconfigured URL fails loudly at import,
+        # not at the first table-card render.
+        _table_state_redis.ping()
+except Exception:  # noqa: BLE001 - Redis is optional, never block boot
+    _table_state_redis = None
+
+
+def _r_note_key(owner_id: int, table_id: str) -> str:
+    return f"cafe:tableovr:note:{owner_id}:{table_id}"
+
+
+def _r_clean_key(owner_id: int, table_id: str) -> str:
+    return f"cafe:tableovr:clean:{owner_id}:{table_id}"
+
 
 def _is_cleaning(owner_id: int, table_id: str) -> bool:
+    if _table_state_redis is not None:
+        try:
+            return bool(_table_state_redis.exists(_r_clean_key(owner_id, table_id)))
+        except Exception:  # noqa: BLE001
+            pass
     with _cleaning_lock:
         ts = _cleaning.get((owner_id, table_id))
         if not ts:
@@ -86,6 +118,16 @@ def _is_cleaning(owner_id: int, table_id: str) -> bool:
 
 
 def _set_cleaning(owner_id: int, table_id: str, on: bool) -> None:
+    if _table_state_redis is not None:
+        try:
+            key = _r_clean_key(owner_id, table_id)
+            if on:
+                _table_state_redis.set(key, "1", ex=_CLEANING_TTL_SECONDS)
+            else:
+                _table_state_redis.delete(key)
+            return
+        except Exception:  # noqa: BLE001
+            pass
     with _cleaning_lock:
         if on:
             _cleaning[(owner_id, table_id)] = time.time()
@@ -94,6 +136,11 @@ def _set_cleaning(owner_id: int, table_id: str, on: bool) -> None:
 
 
 def _get_note(owner_id: int, table_id: str) -> str:
+    if _table_state_redis is not None:
+        try:
+            return _table_state_redis.get(_r_note_key(owner_id, table_id)) or ""
+        except Exception:  # noqa: BLE001
+            pass
     with _notes_lock:
         item = _notes.get((owner_id, table_id))
         if not item:
@@ -107,6 +154,16 @@ def _get_note(owner_id: int, table_id: str) -> str:
 
 def _set_note(owner_id: int, table_id: str, text: str) -> None:
     text = (text or "").strip()[:200]
+    if _table_state_redis is not None:
+        try:
+            key = _r_note_key(owner_id, table_id)
+            if text:
+                _table_state_redis.set(key, text, ex=_NOTE_TTL_SECONDS)
+            else:
+                _table_state_redis.delete(key)
+            return
+        except Exception:  # noqa: BLE001
+            pass
     with _notes_lock:
         if text:
             _notes[(owner_id, table_id)] = (text, time.time())
