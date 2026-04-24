@@ -2422,7 +2422,17 @@ def superadmin_last_error():
 @app.route("/health")
 @limiter.exempt
 def health_check():
-    """Cheap liveness probe for Railway. No DB / disk calls — must always be fast."""
+    """Cheap liveness probe for Railway. No DB / disk calls — must always be fast.
+
+    Also surfaces deploy metadata (commit SHA, replica id, region) so operators
+    can confirm a fresh deploy is actually serving traffic without grepping logs.
+    """
+    commit_sha = (
+        os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+        or os.environ.get("GIT_COMMIT")
+        or os.environ.get("SOURCE_VERSION")
+        or ""
+    )
     return jsonify(
         status="ok",
         service="cafe-ordering-saas",
@@ -2430,6 +2440,10 @@ def health_check():
         uptimeSeconds=int(time.time() - APP_START_TIME),
         env=("production" if os.environ.get("IS_PRODUCTION", "").lower() == "true"
              or os.environ.get("RAILWAY_ENVIRONMENT") else "development"),
+        commit=(commit_sha[:12] if commit_sha else None),
+        replicaId=os.environ.get("RAILWAY_REPLICA_ID") or None,
+        region=os.environ.get("RAILWAY_REGION") or None,
+        deployId=os.environ.get("RAILWAY_DEPLOYMENT_ID") or None,
     ), 200
 
 
@@ -8617,6 +8631,13 @@ else:
 
 
 if __name__ == "__main__":
+    # NOTE: production / Railway uses ``python start.py`` → gunicorn → ``app:app``;
+    # this branch only runs when somebody invokes ``python app.py`` locally.
+    # ``use_reloader=False`` is intentional: the reloader re-imports app.py as
+    # both ``__main__`` and ``app``, which produces two SQLAlchemy ``db``
+    # instances and breaks ``register_extensions`` with a misleading
+    # "partially initialized module" warning. Use ``python wsgi.py`` (or
+    # ``flask --app app run``) when you need the reloader during local dev.
     port = int(os.environ.get("PORT", "5000"))
     debug = os.environ.get("FLASK_ENV") == "development"
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=False)
