@@ -44,3 +44,21 @@ to older tags.
 - Reports that require a privileged owner account compromising their own
   cafe's data.
 - Missing security headers on third-party CDN responses.
+
+## Integrations Hub controls
+
+* `/owner/integrations` requires `@login_required` + a valid CSRF token on
+  every form post. The "send setup link" endpoint accepts only `email`
+  and `sms` channels and **always** sends to the owner's registered
+  email/phone — there is no free-form recipient field, so the route
+  cannot be abused as an open relay even if CSRF were bypassed.
+* The send-setup endpoint is rate-limited (`12 per hour; 3 per minute`)
+  and emits a `INTEGRATION_SETUP_SENT` (or `..._FAIL`) entry to the
+  security log so spam attempts are observable.
+* Webhook URLs surfaced by the hub respect the existing HTTPS
+  enforcement guard (`_enforce_https_for_webhooks`) — plaintext
+  callbacks are rejected with HTTP 400 in production.
+* `lib_integrations.py` performs **no I/O at import time** and ships no
+  new dependencies; the optional Twilio path uses a stdlib `urllib`
+  POST gated on `TWILIO_ACCOUNT_SID`, so the attack surface only grows
+  when the operator opts in.

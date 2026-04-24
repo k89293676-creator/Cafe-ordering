@@ -33,6 +33,50 @@ def test_extensions_blueprints_registered(app):
         assert bp in names, f"blueprint missing: {bp}"
 
 
+def test_integrations_hub_requires_auth(client):
+    """Hub must be behind owner login — never serve it anonymously."""
+    r = client.get("/owner/integrations", follow_redirects=False)
+    assert r.status_code in (301, 302, 401, 403)
+
+
+def test_integrations_checklist_json_requires_auth(client):
+    r = client.get("/owner/integrations/checklist.json", follow_redirects=False)
+    assert r.status_code in (301, 302, 401, 403)
+
+
+def test_integrations_send_setup_requires_auth_and_csrf(client):
+    """The send-setup endpoint must reject anonymous AND must reject
+    cross-site posts (CSRF). Both are required because it triggers
+    outbound email/SMS to the registered owner."""
+    r = client.post("/owner/integrations/send-setup/email/stripe",
+                    follow_redirects=False)
+    # Either redirect to login (auth gate) OR a CSRF rejection — never 200.
+    assert r.status_code in (301, 302, 400, 401, 403)
+
+
+def test_lib_integrations_imports_without_io():
+    """Importing must be side-effect free so tests / route_audit don't
+    hit Twilio or Flask-Mail at collection time."""
+    import lib_integrations as lib_i
+    items = lib_i.production_readiness_check()
+    assert isinstance(items, list)
+    summary = lib_i.readiness_summary(items)
+    assert summary["verdict"] in {"blocked", "needs_attention", "production_ready"}
+    # Catalog is non-empty so the hub UI always has cards to render.
+    assert lib_i.PAYMENT_CATALOG and lib_i.AGGREGATOR_CATALOG
+
+
+def test_integrations_signup_link_prefill():
+    """Signup URL helper must include name + email when given."""
+    import lib_integrations as lib_i
+    url = lib_i.build_provider_signup_link(
+        "stripe", owner_name="Cafe 11:11", owner_email="owner@example.com")
+    assert "email=owner%40example.com" in url
+    assert "name=Cafe+11" in url or "name=Cafe%2011" in url
+    # Unknown provider → empty string, not a crash.
+    assert lib_i.build_provider_signup_link("nope") == ""
+
+
 def test_table_call_create_and_list(app, client):
     """End-to-end: customer posts a call, owner sees it as 'open'."""
     import app as flask_app

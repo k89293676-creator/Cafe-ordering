@@ -245,6 +245,17 @@ from lib_aggregators import (  # noqa: E402
     AggregatorError,
     build_aggregator,
 )
+from lib_integrations import (  # noqa: E402
+    build_overview as _ih_build_overview,
+    build_provider_signup_link as _ih_build_signup_link,
+    channel_available as _ih_channel_available,
+    production_readiness_check as _ih_readiness_check,
+    readiness_summary as _ih_readiness_summary,
+    render_setup_brief as _ih_render_setup_brief,
+    send_setup_email as _ih_send_email,
+    send_setup_sms_via_twilio as _ih_send_sms,
+    to_jsonable as _ih_to_jsonable,
+)
 
 bg_tasks = BackgroundTaskQueue(name="cafe-bg")
 idem_cache = IdempotencyCache(
@@ -5380,7 +5391,243 @@ def owner_integrations_test_all():
     else:
         flash(f"{ok_count} passed, {fail_count} failed. See badges below for details.",
               "billing_error")
+    # If the click came from the new Integrations Hub, return there so the
+    # owner sees the refreshed status badges in the same context they
+    # initiated the test from. Falls back to the dashboard otherwise.
+    referrer = request.referrer or ""
+    if "/owner/integrations" in referrer:
+        return redirect(url_for("owner_integrations_hub"))
     return redirect(url_for("owner_dashboard"))
+
+
+# ---------------------------------------------------------------------------
+# Unified Integrations Hub
+# ---------------------------------------------------------------------------
+
+_IH_CATEGORY_LABELS = [
+    ("payment", "Payment Gateways"),
+    ("delivery", "Food Delivery Aggregators"),
+    ("notification", "Notifications"),
+]
+
+# Webhook events we recommend the owner subscribe to per provider.
+# Used in the setup-link email so the owner doesn't have to guess
+# which events to enable in the gateway dashboard.
+_IH_WEBHOOK_EVENTS: dict[str, list[str]] = {
+    "stripe": [
+        "payment_intent.succeeded",
+        "payment_intent.payment_failed",
+        "charge.refunded",
+        "checkout.session.completed",
+    ],
+    "razorpay": [
+        "payment.captured",
+        "payment.failed",
+        "refund.processed",
+        "order.paid",
+    ],
+    "cashfree": [
+        "PAYMENT_SUCCESS_WEBHOOK",
+        "PAYMENT_FAILED_WEBHOOK",
+        "REFUND_STATUS_WEBHOOK",
+    ],
+    "swiggy": ["order.placed", "order.cancelled", "order.modified"],
+    "zomato": ["order_placed", "order_cancelled", "order_acknowledged"],
+    "ubereats": ["orders.notification", "orders.cancel"],
+}
+
+
+def _ih_owner_payment_views(owner_id: int) -> list[dict]:
+    creds = (PaymentProviderCredential.query
+             .filter_by(owner_id=owner_id)
+             .order_by(PaymentProviderCredential.updated_at.desc()).all())
+    return [_credential_view(c) for c in creds]
+
+
+def _ih_owner_aggregator_views(owner_id: int) -> list[dict]:
+    creds = (AggregatorPlatformCredential.query
+             .filter_by(owner_id=owner_id)
+             .order_by(AggregatorPlatformCredential.updated_at.desc()).all())
+    return [_aggregator_credential_view(c) for c in creds]
+
+
+def _ih_resolve_webhook_url(provider_key: str, owner_id: int) -> str:
+    """Return the webhook URL for ``provider_key`` if the owner has a
+    saved credential, else fall back to the route-level URL so the owner
+    can still set it up on the gateway dashboard before saving keys here."""
+    pay = PaymentProviderCredential.query.filter_by(
+        owner_id=owner_id, provider=provider_key).first()
+    if pay:
+        return url_for("billing_webhook", provider=provider_key, _external=True)
+    agg = AggregatorPlatformCredential.query.filter_by(
+        owner_id=owner_id, platform=provider_key).first()
+    if agg:
+        return url_for("aggregator_webhook", platform=provider_key, _external=True)
+    if provider_key in {"stripe", "razorpay", "cashfree"}:
+        return url_for("billing_webhook", provider=provider_key, _external=True)
+    if provider_key in {"swiggy", "zomato", "ubereats"}:
+        return url_for("aggregator_webhook", platform=provider_key, _external=True)
+    return ""
+
+
+@app.route("/owner/integrations")
+@login_required
+def owner_integrations_hub():
+    """One-screen overview of every external service attached to the cafe.
+
+    The hub *augments* — it never replaces — the existing per-provider
+    setup screens (``/owner/billing/payment-methods``, ``/owner/aggregators``).
+    It exists so the owner can see status, copy webhook URLs, and trigger
+    "email me the setup link" without hopping between tabs."""
+    owner = logged_in_owner_obj()
+    if owner is None:
+        return redirect(url_for("owner_login"))
+    payment_views = _ih_owner_payment_views(owner.id)
+    aggregator_views = _ih_owner_aggregator_views(owner.id)
+    cards = _ih_build_overview(
+        payment_credentials=payment_views,
+        aggregator_credentials=aggregator_views,
+        payments_setup_url=url_for("owner_billing_payment_methods"),
+        aggregators_setup_url=url_for("owner_aggregators"),
+    )
+    cards_by_category: dict[str, list] = {"payment": [], "delivery": [], "notification": []}
+    for c in cards:
+        cards_by_category[c.category].append(c)
+    readiness = _ih_readiness_check()
+    verdict = _ih_readiness_summary(readiness)
+    sms_ok, _ = _ih_channel_available("sms")
+    return _no_store(app.make_response(render_template(
+        "owner_integrations/index.html",
+        owner=owner,
+        cards_by_category=cards_by_category,
+        categories=_IH_CATEGORY_LABELS,
+        readiness=readiness,
+        verdict=verdict,
+        sms_configured=sms_ok,
+    )))
+
+
+@app.route("/owner/integrations/checklist.json")
+@login_required
+@limiter.limit("60 per hour")
+def owner_integrations_checklist_json():
+    """JSON snapshot — useful for monitoring scripts or a future status
+    badge on the dashboard. Returns only non-secret data."""
+    owner_id = logged_in_owner_id()
+    payment_views = _ih_owner_payment_views(owner_id)
+    aggregator_views = _ih_owner_aggregator_views(owner_id)
+    cards = _ih_build_overview(
+        payment_credentials=payment_views,
+        aggregator_credentials=aggregator_views,
+        payments_setup_url=url_for("owner_billing_payment_methods"),
+        aggregators_setup_url=url_for("owner_aggregators"),
+    )
+    readiness = _ih_readiness_check()
+    verdict = _ih_readiness_summary(readiness)
+    return jsonify({
+        "verdict": verdict,
+        "readiness": [{
+            "key": r.key, "severity": r.severity, "label": r.label,
+            "detail": r.detail, "fix_hint": r.fix_hint,
+        } for r in readiness],
+        "integrations": [_ih_to_jsonable(c) for c in cards],
+    })
+
+
+@app.route("/owner/integrations/send-setup/<channel>/<provider_key>", methods=["POST"])
+@login_required
+@limiter.limit("12 per hour; 3 per minute")
+def owner_integrations_send_setup(channel: str, provider_key: str):
+    """Email or SMS the owner a step-by-step setup brief for one provider,
+    with the webhook URL and a signup URL that has their name+email pre-filled.
+
+    We deliberately only send to the owner's *registered* email/phone — we
+    never accept a free-form recipient field, so this endpoint cannot be
+    abused as an open relay even if CSRF were bypassed."""
+    owner = logged_in_owner_obj()
+    if owner is None:
+        return redirect(url_for("owner_login"))
+
+    channel = (channel or "").strip().lower()
+    provider_key = (provider_key or "").strip().lower()
+
+    catalog_keys = {"stripe", "razorpay", "cashfree", "swiggy", "zomato", "ubereats"}
+    if provider_key not in catalog_keys:
+        flash("Unknown provider.", "billing_error")
+        return redirect(url_for("owner_integrations_hub"))
+
+    available, msg = _ih_channel_available(channel)
+    if not available:
+        flash(msg, "billing_error")
+        return redirect(url_for("owner_integrations_hub"))
+
+    label_map = {
+        "stripe": "Stripe", "razorpay": "Razorpay", "cashfree": "Cashfree",
+        "swiggy": "Swiggy", "zomato": "Zomato", "ubereats": "Uber Eats",
+    }
+    provider_label = label_map.get(provider_key, provider_key.title())
+
+    signup_url = _ih_build_signup_link(
+        provider_key,
+        owner_name=(owner.cafe_name or owner.username or ""),
+        owner_email=owner.email or "",
+    )
+    webhook_url = _ih_resolve_webhook_url(provider_key, owner.id)
+    dashboard_lookup = {e["key"]: e["dashboard_url"] for e in
+                        __import__("lib_integrations").PAYMENT_CATALOG +
+                        __import__("lib_integrations").AGGREGATOR_CATALOG}
+    dashboard_url = dashboard_lookup.get(provider_key, "")
+
+    subject, plain, html = _ih_render_setup_brief(
+        provider_key=provider_key,
+        provider_label=provider_label,
+        webhook_url=webhook_url,
+        signup_url=signup_url,
+        dashboard_url=dashboard_url,
+        events=_IH_WEBHOOK_EVENTS.get(provider_key, []),
+        owner_name=owner.username or "",
+        cafe_name=owner.cafe_name or "",
+    )
+
+    try:
+        if channel == "email":
+            _ih_send_email(
+                mail_obj=mail,
+                recipient=owner.email or "",
+                subject=subject,
+                plain=plain,
+                html=html,
+                sender=app.config.get("MAIL_DEFAULT_SENDER"),
+            )
+            flash(f"Setup link for {provider_label} sent to {owner.email}.",
+                  "billing_ok")
+        elif channel == "sms":
+            sms_body = (
+                f"Set up {provider_label} for {owner.cafe_name or 'your cafe'}: "
+                f"{signup_url or 'see email'}. "
+                f"Webhook: {webhook_url}" if webhook_url else
+                f"Set up {provider_label} for {owner.cafe_name or 'your cafe'}: "
+                f"{signup_url}"
+            )
+            _ih_send_sms(recipient=owner.phone or "", body=sms_body)
+            flash(f"Setup link for {provider_label} texted to {owner.phone}.",
+                  "billing_ok")
+        else:
+            flash(f"Unknown channel: {channel}.", "billing_error")
+            return redirect(url_for("owner_integrations_hub"))
+    except ValueError as exc:
+        # Missing recipient on file — friendly, actionable error.
+        flash(str(exc), "billing_error")
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("send-setup %s/%s failed", channel, provider_key)
+        flash(f"Could not send {channel}: {exc}", "billing_error")
+        log_security("INTEGRATION_SETUP_SEND_FAIL",
+                     f"owner={owner.id} channel={channel} provider={provider_key}")
+        return redirect(url_for("owner_integrations_hub"))
+
+    log_security("INTEGRATION_SETUP_SENT",
+                 f"owner={owner.id} channel={channel} provider={provider_key}")
+    return redirect(url_for("owner_integrations_hub"))
 
 
 @app.route("/owner/aggregators/<int:cred_id>/delete", methods=["POST"])
