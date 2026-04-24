@@ -1015,6 +1015,23 @@ def extra_security_headers(response: Response) -> Response:
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    # Fallback CSP: Talisman owns CSP in production, but if Talisman ever
+    # fails to register (e.g. a future package upgrade that changes the
+    # signature) we still want a baseline policy on every response. Skip
+    # JSON / streaming responses where CSP is meaningless.
+    if "Content-Security-Policy" not in response.headers:
+        ct = (response.content_type or "").lower()
+        if "html" in ct or ct == "":
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+                "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+                "img-src 'self' data: blob: https://image.pollinations.ai "
+                "https://*.unsplash.com https://images.unsplash.com https://*.googleusercontent.com; "
+                "connect-src 'self' https://image.pollinations.ai; "
+                "frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
+            )
     # Echo the request correlation id so clients can quote it in bug reports.
     rid = request.environ.get("request_id")
     if rid:
