@@ -26,7 +26,32 @@
     .actions { max-width:720px; margin:0 auto 1rem; text-align:right; }
     .actions button, .actions a { padding:.5rem 1rem; background:#111; color:#fff; border:0; border-radius:6px; cursor:pointer; text-decoration:none; font-size:.85rem; margin-left:.4rem; }
     .actions a.back { background:#666; }
-    @media print { .actions { display:none; } body { background:#fff; padding:0; } .invoice { box-shadow:none; max-width:none; } }
+    /* Standard print (A4 / Letter): clean, single-page receipt */
+    @media print {
+      .actions { display:none; }
+      body { background:#fff; padding:0; font-size:12px; }
+      .invoice { box-shadow:none; max-width:none; padding:1rem 1.5rem; }
+      .head h1 { font-size:1.25rem; }
+      th, td { padding:.35rem .5rem; }
+      .foot { font-size:.72rem; }
+      a { color:#111; text-decoration:none; }
+      .page-break { page-break-after:always; }
+    }
+    /* Thermal-roll (80mm receipt printer). Triggered by a "?print=80mm"
+       hint or by browsers configured to a narrow paper size — the rules
+       collapse the layout to a single column and reduce font weight. */
+    @media print and (max-width: 90mm) {
+      body { padding:0; font-size:10px; }
+      .invoice { padding:.5rem; }
+      .head { display:block; border-bottom:1px dashed #111; padding-bottom:.4rem; }
+      .head h1 { font-size:1rem; text-align:center; }
+      .head .meta { text-align:center; margin-top:.25rem; }
+      .grid2 { display:block; }
+      .grid2 > div { margin-bottom:.4rem; }
+      .totals { width:100%; margin-left:0; }
+      th { background:transparent; }
+      th, td { padding:.2rem .25rem; font-size:9.5px; }
+    }
   </style>
 </head>
 <body>

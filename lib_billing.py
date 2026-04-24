@@ -157,3 +157,198 @@ def summarise_payment_breakdown(payments: list[dict]) -> dict[str, float]:
     totals = {k: v for k, v in totals.items() if v > 0}
     totals["_total"] = _money(sum(totals.values()))
     return totals
+
+
+# ---------------------------------------------------------------------------
+# v2: reporting helpers — pure-functions consumed by the new dashboard
+# pages (refunds, aging, drawer, health).
+# ---------------------------------------------------------------------------
+
+from datetime import timedelta as _timedelta  # local re-import for clarity
+
+
+def parse_date_range(from_str: str | None, to_str: str | None,
+                     fallback_days: int = 1) -> tuple[datetime, datetime]:
+    """Parse ``?from=YYYY-MM-DD&to=YYYY-MM-DD``. Inclusive day-bounds.
+
+    Returns ``(start_utc, end_utc)`` where ``end_utc`` is the *exclusive*
+    upper bound (i.e. start of the day *after* ``to_str``). Falls back
+    to "today minus ``fallback_days``" when no range is supplied so the
+    EOD page keeps working without any query string."""
+    now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def _parse(s: str | None) -> datetime | None:
+        if not s:
+            return None
+        try:
+            return datetime.strptime(s.strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    start = _parse(from_str)
+    end_inclusive = _parse(to_str)
+    if start and end_inclusive:
+        return start, end_inclusive + _timedelta(days=1)
+    if start and not end_inclusive:
+        return start, start + _timedelta(days=1)
+    if end_inclusive and not start:
+        return end_inclusive, end_inclusive + _timedelta(days=1)
+    # Neither: today (or last N days back).
+    return now - _timedelta(days=max(0, fallback_days - 1)), now + _timedelta(days=1)
+
+
+# Aging-bucket boundaries in seconds. The boundaries are intentionally
+# coarse so the dashboard groups orders into "fresh / warm / stale /
+# critical" without needing to over-think — finer-grain reports go in
+# the EOD CSV.
+AGING_BUCKETS: list[tuple[str, int]] = [
+    ("under_1h",     60 * 60),
+    ("1h_to_4h",     4 * 60 * 60),
+    ("4h_to_24h",    24 * 60 * 60),
+    ("over_24h",     None),  # type: ignore[arg-type]
+]
+
+
+def aging_bucket_for(seconds_old: float) -> str:
+    """Map an "age in seconds" to a bucket key from ``AGING_BUCKETS``."""
+    s = max(0.0, float(seconds_old or 0))
+    for key, upper in AGING_BUCKETS:
+        if upper is None or s < upper:
+            return key
+    return AGING_BUCKETS[-1][0]
+
+
+def summarise_aging(open_orders: Iterable[dict],
+                    *, now: datetime | None = None) -> dict:
+    """Return ``{bucket_key: {count, value}}`` for the aging report.
+
+    Each ``open_orders`` entry is expected to expose ``createdAt`` (ISO
+    string) and ``total`` (float). The function tolerates missing /
+    malformed values rather than raising, because dashboards must not
+    500 just because one row has a NULL ``created_at``."""
+    now = now or datetime.now(timezone.utc)
+    out = {key: {"count": 0, "value": 0.0} for key, _ in AGING_BUCKETS}
+    for o in open_orders or []:
+        created_iso = o.get("createdAt") if isinstance(o, dict) else None
+        try:
+            created = datetime.fromisoformat(str(created_iso).replace("Z", "+00:00"))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age = (now - created).total_seconds()
+        except (TypeError, ValueError):
+            age = 0.0
+        bucket = aging_bucket_for(age)
+        out[bucket]["count"] += 1
+        try:
+            out[bucket]["value"] = round(out[bucket]["value"] + float(o.get("total") or 0), 2)
+        except (TypeError, ValueError):
+            pass
+    out["_total"] = {
+        "count": sum(b["count"] for b in out.values()),
+        "value": round(sum(b["value"] for b in out.values()), 2),
+    }
+    return out
+
+
+def revenue_sparkline(daily_rows: Iterable[dict]) -> dict:
+    """Reduce a list of ``{date, gross, refunds, orders}`` rows to a
+    sparkline payload suitable for the dashboard.
+
+    Returns ``{labels, gross, net, refund_pct, peak, total_net}``.
+    Caller is responsible for the SQL aggregation; this helper exists so
+    the formatting/edge-cases (zero-revenue days etc.) live in one
+    tested place instead of being repeated in each route."""
+    rows = list(daily_rows or [])
+    labels: list[str] = []
+    gross: list[float] = []
+    net: list[float] = []
+    refund_pct: list[float] = []
+    for r in rows:
+        d = r.get("date") if isinstance(r, dict) else None
+        labels.append(str(d) if d else "")
+        g = _money(r.get("gross", 0))
+        rf = _money(r.get("refunds", 0))
+        n = max(0.0, round(g - rf, 2))
+        gross.append(g)
+        net.append(n)
+        refund_pct.append(round((rf / g * 100.0) if g > 0 else 0.0, 2))
+    peak = max(net) if net else 0.0
+    return {
+        "labels": labels,
+        "gross": gross,
+        "net": net,
+        "refund_pct": refund_pct,
+        "peak": peak,
+        "total_net": round(sum(net), 2),
+    }
+
+
+def drawer_variance(*, expected_cash: float, counted_cash: float) -> dict:
+    """Return ``{variance, variance_pct, severity}`` for a cash-drawer
+    count. Severity follows ``BILLING_DRAWER_VARIANCE_ALERT_PCT``
+    semantics and is computed against the *expected* total."""
+    exp = _money(expected_cash)
+    counted = _money(counted_cash)
+    var = round(counted - exp, 2)
+    if exp > 0:
+        pct = round(abs(var) / exp * 100.0, 2)
+    else:
+        pct = 100.0 if var != 0 else 0.0
+    if abs(var) < 0.01:
+        severity = "ok"
+    elif pct < 1.0:
+        severity = "ok"
+    elif pct < 2.0:
+        severity = "info"
+    elif pct < 5.0:
+        severity = "warn"
+    else:
+        severity = "critical"
+    return {"variance": var, "variance_pct": pct, "severity": severity}
+
+
+def billing_health_snapshot(*, db_ok: bool,
+                            stuck_settling_count: int = 0,
+                            unsettled_value: float = 0.0,
+                            recent_settle_seconds: float | None = None,
+                            webhook_failures_last_hour: int = 0,
+                            payment_creds_active: int = 0) -> dict:
+    """Compose the response body for ``/health/billing`` and
+    ``/owner/billing/health.json``.
+
+    Verdict policy:
+      * ``critical`` if DB is unreachable.
+      * ``degraded`` if there are stuck "settling" rows, or the most
+        recent settle took > 5s, or webhook failures > 5/hour.
+      * ``ok`` otherwise.
+    """
+    issues: list[str] = []
+    if not db_ok:
+        issues.append("database_unreachable")
+    if stuck_settling_count > 0:
+        issues.append(f"stuck_settling:{stuck_settling_count}")
+    if recent_settle_seconds is not None and recent_settle_seconds > 5.0:
+        issues.append(f"slow_recent_settle:{recent_settle_seconds:.2f}s")
+    if webhook_failures_last_hour > 5:
+        issues.append(f"webhook_failures:{webhook_failures_last_hour}")
+    if not db_ok:
+        verdict = "critical"
+    elif issues:
+        verdict = "degraded"
+    else:
+        verdict = "ok"
+    return {
+        "verdict": verdict,
+        "issues": issues,
+        "metrics": {
+            "stuck_settling_count": stuck_settling_count,
+            "unsettled_value": _money(unsettled_value),
+            "recent_settle_seconds": (
+                round(recent_settle_seconds, 3)
+                if recent_settle_seconds is not None else None
+            ),
+            "webhook_failures_last_hour": int(webhook_failures_last_hour),
+            "payment_credentials_active": int(payment_creds_active),
+        },
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }

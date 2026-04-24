@@ -87,3 +87,21 @@ Added a unified **Integrations Hub** at `/owner/integrations` so the cafe owner 
 **New optional env vars** (see `ENV_CONFIG.md`): `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `IS_PRODUCTION`, `BILLING_ENCRYPTION_KEY`. None are required — the hub degrades gracefully when channels aren't configured.
 
 **Test coverage** added to `tests/test_smoke.py`: auth gate on hub + checklist + send-setup, side-effect-free import, signup-link prefill.
+
+## Billing dashboard v2 (April 2026)
+
+Hardened the entire owner-billing surface area for production: step-up auth on high-value voids and refunds, daily refund cap, per-hour velocity ceiling, same-origin re-check on destructive routes, per-route rate limits, cash-drawer reconciliation, A/R aging report, refund history, and a public health probe.
+
+**New files**
+- `lib_billing_security.py` — env-tunable thresholds, step-up/freshness helpers, refund cap + velocity, origin check, webhook dedupe key.
+- `templates/owner_billing/refunds.html`, `aging.html`, `drawer.html`, `health.html` — new dashboard tabs.
+- `tests/test_billing_v2.py` — 40 tests covering thresholds, parsing, aging buckets, sparkline, drawer variance, health snapshot.
+
+**Extended files**
+- `lib_billing.py` — added `parse_date_range`, `aging_bucket_for`, `summarise_aging`, `revenue_sparkline`, `drawer_variance`, `billing_health_snapshot`.
+- `app.py` — new model `CashDrawerCount`; new helpers `_billing_health_compute`, `_billing_sparkline_7d`, `_refund_total_today`, `_refund_count_last_hour`, `_severity_pill`; new routes `owner_billing_refunds`, `owner_billing_aging`, `owner_billing_drawer` (GET+POST), `owner_billing_health`, `owner_billing_health_json`, public `public_billing_health` at `/health/billing`. EOD route + CSV now accept `?from=&to=` ranges. Existing void/refund routes carry step-up + cap + velocity + origin checks; adjust/settle/void/refund/charge are rate-limited.
+- Templates `_base.html`, `overview.html`, `eod.html`, `invoice.html`, `order_detail.html` updated for the new nav, sparkline, range filter, thermal-print rules, and step-up password fields.
+
+**New optional env vars** (see `ENV_CONFIG.md`): `BILLING_STEPUP_REFUND_THRESHOLD`, `BILLING_STEPUP_VOID_THRESHOLD`, `BILLING_STEPUP_TTL_SECONDS`, `BILLING_REFUND_DAILY_CAP_PCT`, `BILLING_REFUND_VELOCITY_PER_HOUR`, `BILLING_DRAWER_VARIANCE_ALERT_PCT`. All have safe defaults.
+
+**Public health probe**: `GET /health/billing` returns 200/503 with no per-owner data — safe for load-balancer wiring.

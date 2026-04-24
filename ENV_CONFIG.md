@@ -112,3 +112,32 @@ channel.
 `GET /owner/integrations/checklist.json` (auth required) returns a JSON
 snapshot of the readiness checks above plus per-integration status, with
 **no secret material**. Useful for external uptime monitors.
+
+## Billing dashboard v2
+
+These knobs tune the hardened billing dashboard (refunds, voids, drawer,
+health). All have safe defaults — only set them if you need to deviate
+from the shipping policy. Numbers are in INR for amounts, plain integers
+for counts, and seconds for durations.
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `BILLING_STEPUP_REFUND_THRESHOLD` | Refund amount that forces the owner to re-enter their password before the refund is committed. | `500` |
+| `BILLING_STEPUP_VOID_THRESHOLD` | Bill total that forces the owner to re-enter their password before voiding. | `2000` |
+| `BILLING_STEPUP_TTL_SECONDS` | How long a successful step-up is cached on the session before we re-prompt. | `300` |
+| `BILLING_REFUND_DAILY_CAP_PCT` | Max percentage of today's gross any single owner can refund before the route returns "daily cap reached". | `30` |
+| `BILLING_REFUND_VELOCITY_PER_HOUR` | Hard ceiling on refund events per owner per rolling hour. | `20` |
+| `BILLING_DRAWER_VARIANCE_ALERT_PCT` | Cash-drawer variance percentage above which the row is flagged `alert` (red pill). Below half of this is `warn`. | `2` |
+
+These are read by `lib_billing_security.py` at request time, so changing
+them only requires restarting the worker — no schema migration.
+
+### Public billing health probe
+
+`GET /health/billing` is unauthenticated and returns
+`{"ok": true, "checks": [...]}` with HTTP 200 when the database is
+reachable and the webhook log is writable, or HTTP 503 otherwise. Wire
+this into your load-balancer / uptime monitor — it never leaks
+per-owner data. The signed-in `/owner/billing/health.json` returns the
+richer per-cafe view (stale tabs, refund ratio, aggregator credentials,
+webhook volume).

@@ -1,0 +1,72 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Cash Drawer Reconciliation{% endblock %}
+{% block content %}
+<h1>Cash Drawer Reconciliation</h1>
+<p class="muted" style="margin-top:-.75rem;">Count the cash in the till at end-of-day and record it here. The system tracks variance vs the cash payments it logged so you can spot drift early.</p>
+
+<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:1.25rem;align-items:start;">
+  <div>
+    <div class="panel" style="margin-bottom:1.25rem;">
+      <h2 style="margin-top:0;">Today's Count &mdash; <span class="mono" style="font-weight:400;">{{ today_str }}</span></h2>
+      <table style="margin-bottom:1rem;">
+        <tr><td>Cash payments expected</td><td class="right mono"><strong>₹{{ '%.2f'|format(expected_cash) }}</strong></td></tr>
+        <tr><td>Cash refunds today</td><td class="right mono">−₹{{ '%.2f'|format(cash_refunds) }}</td></tr>
+        <tr style="border-top:2px solid var(--line);"><td><strong>Net expected in drawer</strong></td><td class="right mono"><strong>₹{{ '%.2f'|format(expected_cash - cash_refunds) }}</strong></td></tr>
+      </table>
+      <form method="POST" action="{{ url_for('owner_billing_drawer') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="day" value="{{ today_str }}" />
+        <div class="row">
+          <div class="field">
+            <label>Counted cash (₹)</label>
+            <input type="number" name="counted_cash" step="0.01" min="0" required autofocus />
+          </div>
+          <div class="field">
+            <label>Float left in drawer (₹)</label>
+            <input type="number" name="float_left" step="0.01" min="0" value="0" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Notes (optional)</label>
+          <textarea name="notes" rows="2" maxlength="500" placeholder="Any context: skim, deposits, voids…"></textarea>
+        </div>
+        <button class="btn btn-success" type="submit">Save count</button>
+      </form>
+    </div>
+
+    {% if recent %}
+    <div class="panel">
+      <h2 style="margin-top:0;">Recent counts</h2>
+      <table>
+        <thead><tr><th>Day</th><th>Counted by</th><th class="right">Expected</th><th class="right">Counted</th><th class="right">Variance</th><th></th></tr></thead>
+        <tbody>
+          {% for r in recent %}
+            <tr>
+              <td class="mono">{{ r.day }}</td>
+              <td>{{ r.counted_by_username or '—' }}</td>
+              <td class="right mono">₹{{ '%.2f'|format(r.expected_cash or 0) }}</td>
+              <td class="right mono">₹{{ '%.2f'|format(r.counted_cash or 0) }}</td>
+              <td class="right mono"><span class="pill {{ severity_class(r.severity) }}">{% if r.variance >= 0 %}+{% endif %}₹{{ '%.2f'|format(r.variance or 0) }}</span></td>
+              <td>{% if r.notes %}<span class="muted" title="{{ r.notes }}">📝</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2 style="margin-top:0;">Why this matters</h2>
+      <p class="muted" style="font-size:.88rem;">Cash variance &gt; <strong>{{ '%.0f'|format(alert_pct) }}%</strong> of the expected total triggers a warning. Patterns to watch for:</p>
+      <ul class="muted" style="font-size:.88rem;line-height:1.55;">
+        <li><strong>Recurring shortages</strong> on a single shift &mdash; coach the staff member.</li>
+        <li><strong>Large overages</strong> &mdash; usually missed bill entries; check the audit log.</li>
+        <li><strong>Round-number variances</strong> (₹100, ₹500, ₹2000) &mdash; usually a missed sale, not theft.</li>
+      </ul>
+      <p class="muted" style="font-size:.82rem;margin-top:1rem;">Configure the alert threshold via <code>BILLING_DRAWER_VARIANCE_ALERT_PCT</code>.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
