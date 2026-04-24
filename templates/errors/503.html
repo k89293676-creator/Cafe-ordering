@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Service Unavailable — Cafe Portal</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <meta http-equiv="refresh" content="30" />
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-logo">
+    <div class="auth-logo-icon">☕</div>
+    <h1>Cafe Portal</h1>
+  </div>
+  <div class="auth-card" style="text-align:center;">
+    <div style="font-size:4rem;margin-bottom:1rem;">⏳</div>
+    <h2 style="margin:0 0 0.5rem;">503 — Service Unavailable</h2>
+    <p class="subtitle">We're temporarily down for maintenance or under heavy load. This page will refresh automatically in 30 seconds.</p>
+    {% if retry_after %}
+      <p style="font-size:0.85rem;color:#6b7280;">Estimated recovery: <strong>{{ retry_after }} seconds</strong></p>
+    {% endif %}
+    {% if request_id %}
+      <p style="font-size:0.8rem;color:#9ca3af;margin-top:1rem;">Reference: <code>{{ request_id }}</code></p>
+    {% endif %}
+    <a href="/" class="btn btn-secondary" style="margin-top:1.5rem;display:inline-block;">Try Now</a>
+  </div>
+</div>
+</body>
+</html>

@@ -158,3 +158,33 @@ See `ENV_CONFIG.md` for the full list of related variables.
 ## Notes
 
 Legacy JSON files are imported into the SQLAlchemy database on first startup if the owners table is empty. After migration, database storage is the source of truth.
+
+## Resilience: error tracking, alerting, retry, backups
+
+Production-grade additions covering the gaps from the platform review:
+
+- **Branded error pages** for 400/403/404/405/413/429/500/502/503/504
+  with the request-id surfaced for support handoff.
+- **File-backed error tracker** (`lib_error_tracking.py`) that survives
+  restarts and is visible across all gunicorn workers. Read recent
+  events via `GET /api/ops/errors` (Bearer = `OPS_HEALTH_TOKEN`).
+  Works alongside Sentry — neither replaces the other.
+- **Outbound webhook retry queue** (`lib_webhook_retry.py`) with
+  exponential backoff + jitter, HMAC-SHA256 signing, and a
+  dead-letter queue at `GET /api/ops/webhooks` with
+  `POST /api/ops/webhooks/<id>/requeue`.
+- **Unified notification dispatcher** (`lib_notifications.py`) that
+  exposes one `send_email` / `send_sms` / `send_notification` API
+  across Flask-Mail and Twilio. SMS routes through the retry queue by
+  default so OTP delivery survives Twilio 5xx blips.
+- **Alerting hub** (`lib_alerting.py`) — fire-once-per-cooldown
+  alerts to Slack / Discord / email. Configure any subset.
+- **Encrypted database backups** via `scripts/backup_db.sh`
+  (pg_dump + AES-256 gpg + optional S3 upload) plus a daily
+  GitHub Actions workflow at `.github/workflows/backup-db.yml`.
+- **Disaster-recovery runbook** with RPO/RTO targets and a step-by-step
+  restore procedure: `scripts/disaster_recovery.md`.
+
+Every feature degrades gracefully if its config is missing — see
+`ENV_CONFIG.md → "Error tracking, alerting & backups"` for the full
+list of opt-in variables.

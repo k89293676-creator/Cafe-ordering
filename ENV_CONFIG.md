@@ -151,3 +151,76 @@ this into your load-balancer / uptime monitor — it never leaks
 per-owner data. The signed-in `/owner/billing/health.json` returns the
 richer per-cafe view (stale tabs, refund ratio, aggregator credentials,
 webhook volume).
+
+## Error tracking, alerting & backups (3.6 / 3.9)
+
+These envs configure the production-grade additions: file-backed error
+tracking, outbound webhook retry queue, alerting hub, encrypted DB
+backups, and unified notification dispatcher. None of them are
+required — every feature degrades gracefully when its config is
+missing (e.g. SMS just returns "not configured" instead of crashing).
+
+### Error tracking
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `ERROR_LOG_MAX_BYTES` | Max bytes of `errors.jsonl` before in-place truncation. Keeps the file from filling the data volume. | `5242880` (5 MB) |
+| `ERROR_INMEM_RING_MAX` | Max events kept in the per-worker in-memory ring (drives `/superadmin/last-error`). | `100` |
+| `OPS_HEALTH_TOKEN` | Bearer token that protects `/api/ops/health`, `/api/ops/errors`, and `/api/ops/webhooks`. Same value, three endpoints. | (unset → endpoints return 401) |
+
+`/api/ops/errors?source=jsonl&limit=100` returns the cross-worker
+recent-errors view. `?source=memory` (default) returns the
+per-worker view, which is faster but only sees the worker the
+request happened to land on.
+
+### Outbound webhook retry
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `WEBHOOK_MAX_ATTEMPTS` | Per-row attempt budget before the row is moved to `dead`. | `8` |
+| `WEBHOOK_BASE_BACKOFF_SECONDS` | Floor for the exp-backoff delay. | `5` |
+| `WEBHOOK_MAX_BACKOFF_SECONDS` | Ceiling for the exp-backoff delay. | `3600` |
+| `WEBHOOK_TIMEOUT_SECONDS` | Per-attempt HTTP timeout. | `10` |
+| `WEBHOOK_POLL_SECONDS` | Worker idle poll interval (events from `enqueue` wake it instantly). | `5` |
+| `WEBHOOK_BATCH_SIZE` | Max rows processed per worker tick. | `10` |
+| `WEBHOOK_SIGNATURE_HEADER` | Header name carrying the HMAC-SHA256 signature. | `X-Cafe-Signature` |
+| `WEBHOOK_TIMESTAMP_HEADER` | Header name carrying the signed timestamp (replay protection). | `X-Cafe-Timestamp` |
+| `DISABLE_WEBHOOK_WORKER` | Set truthy in tests / one-off scripts to skip starting the daemon thread. | (unset) |
+
+Operator UI: `GET /api/ops/webhooks` lists the dead-letter queue;
+`POST /api/ops/webhooks/<id>/requeue` puts a row back to `pending`.
+Both protected by `OPS_HEALTH_TOKEN`.
+
+### Notifications (SMS via Twilio)
+
+The existing `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` /
+`TWILIO_FROM_NUMBER` envs now feed both the legacy "send setup link"
+button **and** the new `lib_notifications.send_sms()` API. SMS sent
+through the new helper goes via the webhook retry queue by default,
+so a Twilio 5xx blip won't drop an OTP.
+
+### Alerting hub
+
+Configure any subset of these — every configured channel fires for
+every alert:
+
+| Variable | Purpose |
+| --- | --- |
+| `ALERT_SLACK_WEBHOOK` | Slack incoming-webhook URL. |
+| `ALERT_DISCORD_WEBHOOK` | Discord incoming-webhook URL. |
+| `ALERT_EMAIL` | Comma-separated recipients (uses Flask-Mail). |
+| `ALERT_COOLDOWN_SECONDS` | Per-`dedup_key` cooldown so the same alert doesn't page twice. Default `300`. |
+
+### Backups
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL_BACKUP` *(GitHub secret)* | Read-only Postgres URL used by the daily backup workflow. |
+| `BACKUP_GPG_PASSPHRASE` | Symmetric GPG passphrase (16+ chars). **Store this OUTSIDE Railway** (password manager). Without it the backups are unrecoverable. |
+| `BACKUP_UPLOAD_URL` | Base PUT URL for an S3-compatible bucket. Optional — without it backups stay in `BACKUP_DIR`. |
+| `BACKUP_UPLOAD_AUTH_HEADER` | Full header line, e.g. `Authorization: Bearer ...`. |
+| `BACKUP_DIR` | Local backup directory before upload. Default `./backups`. |
+| `BACKUP_RETENTION_DAYS` | Local cleanup horizon. Default `14`. |
+| `BACKUP_LABEL` | Filename prefix for dumps. Default `cafe`. |
+
+The full restore procedure lives in `scripts/disaster_recovery.md`.

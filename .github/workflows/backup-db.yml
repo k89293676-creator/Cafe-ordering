@@ -1,0 +1,86 @@
+name: Daily Database Backup
+
+# Encrypted Postgres dump uploaded to S3-compatible storage. See
+# scripts/backup_db.sh and scripts/disaster_recovery.md for the
+# complete picture.
+#
+# Required GitHub repository secrets:
+#   - DATABASE_URL_BACKUP        — read-only Postgres URL (use a role
+#     with SELECT-only permissions so a compromised CI runner can't
+#     write to the DB)
+#   - BACKUP_GPG_PASSPHRASE      — long random string; back this up
+#     OUTSIDE of GitHub (password manager)
+#   - BACKUP_UPLOAD_URL          — base PUT URL for the bucket (no
+#     trailing filename)
+#   - BACKUP_UPLOAD_AUTH_HEADER  — full header line, e.g.
+#     "Authorization: Bearer ..."
+#
+# If any of those secrets are missing the workflow exits early with
+# a notice instead of failing CI noisily.
+
+on:
+  schedule:
+    # 02:00 UTC daily. Keep this *off* the top of the hour so we
+    # don't compete with every other cron in the universe for runner
+    # capacity.
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Override BACKUP_LABEL (optional)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Encrypted dump + upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL_BACKUP }}
+      BACKUP_GPG_PASSPHRASE: ${{ secrets.BACKUP_GPG_PASSPHRASE }}
+      BACKUP_UPLOAD_URL: ${{ secrets.BACKUP_UPLOAD_URL }}
+      BACKUP_UPLOAD_AUTH_HEADER: ${{ secrets.BACKUP_UPLOAD_AUTH_HEADER }}
+      BACKUP_LABEL: ${{ github.event.inputs.label || 'cafe' }}
+
+    steps:
+      - name: Skip when secrets are missing
+        if: env.DATABASE_URL == '' || env.BACKUP_GPG_PASSPHRASE == ''
+        run: |
+          echo "::warning ::Required backup secrets not set — skipping run."
+          echo "Add DATABASE_URL_BACKUP and BACKUP_GPG_PASSPHRASE to enable backups."
+          exit 0
+
+      - name: Checkout
+        if: env.DATABASE_URL != '' && env.BACKUP_GPG_PASSPHRASE != ''
+        uses: actions/checkout@v4
+
+      - name: Install pg_dump (matching client version)
+        if: env.DATABASE_URL != '' && env.BACKUP_GPG_PASSPHRASE != ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client gnupg
+
+      - name: Run backup
+        if: env.DATABASE_URL != '' && env.BACKUP_GPG_PASSPHRASE != ''
+        run: |
+          chmod +x scripts/backup_db.sh
+          scripts/backup_db.sh
+
+      - name: Summary
+        if: always() && env.DATABASE_URL != ''
+        run: |
+          {
+            echo "## 🗄️  Daily DB backup"
+            echo
+            echo "**Label:** \`${BACKUP_LABEL}\`"
+            echo "**Started:** $(date -u +%FT%TZ)"
+            echo "**Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          } >> "$GITHUB_STEP_SUMMARY"

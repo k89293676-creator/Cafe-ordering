@@ -266,6 +266,8 @@ from lib_aggregators import (  # noqa: E402
     AggregatorError,
     build_aggregator,
 )
+import lib_error_tracking  # noqa: E402  (file-backed structured error tracker)
+import lib_webhook_retry   # noqa: E402  (outbound webhook retry queue)
 from lib_integrations import (  # noqa: E402
     build_overview as _ih_build_overview,
     build_provider_signup_link as _ih_build_signup_link,
@@ -2514,8 +2516,22 @@ _LAST_ERRORS_MAX = 20
 def _capture_last_error(where: str, exc: BaseException) -> None:
     """Stash the most recent unexpected error so a superadmin can read it
     via /superadmin/last-error without having to dig through deploy logs.
-    Process-local — fine for single-worker dynos, best-effort for many."""
+
+    Two-layer capture:
+      1. Process-local ring (this list) — drives /superadmin/last-error.
+      2. File-backed JSONL via lib_error_tracking — survives restarts
+         and is visible across all gunicorn workers.
+
+    Both calls are best-effort and never raise."""
     import traceback as _tb
+    rid = (request.environ.get("request_id") if request else None) or ""
+    path = request.path if request else ""
+    method = request.method if request else ""
+    ip = _client_ip() if request else ""
+    try:
+        owner_id = session.get("owner_id") if request else None
+    except Exception:  # noqa: BLE001
+        owner_id = None
     try:
         _LAST_ERRORS.insert(0, {
             "at": datetime.now(timezone.utc).isoformat(),
@@ -2523,27 +2539,85 @@ def _capture_last_error(where: str, exc: BaseException) -> None:
             "type": type(exc).__name__,
             "message": str(exc)[:500],
             "traceback": "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))[:8000],
-            "request_id": (request.environ.get("request_id")
-                           if request else None),
-            "path": (request.path if request else ""),
-            "ip": _client_ip() if request else "",
+            "request_id": rid,
+            "path": path,
+            "ip": ip,
         })
         del _LAST_ERRORS[_LAST_ERRORS_MAX:]
     except Exception:  # noqa: BLE001 — never let error capture itself crash
+        pass
+    # File-backed cross-worker capture. Independent try so a write
+    # failure on one layer doesn't take down the other.
+    try:
+        lib_error_tracking.capture_exception(
+            where=where, exc=exc,
+            request_id=rid, path=path, method=method, ip=ip,
+            owner_id=owner_id,
+        )
+    except Exception:  # noqa: BLE001
         pass
 
 
 @app.errorhandler(500)
 def err_server(e):
     app.logger.exception("Internal server error: %s", e)
+    rid = (request.environ.get("request_id") if request else None) or ""
     try:
         original = getattr(e, "original_exception", None) or e
         _capture_last_error(request.path if request else "?", original)
     except Exception:  # noqa: BLE001
         pass
     if _wants_json():
-        return jsonify(description="An internal error occurred."), 500
-    return render_template("errors/500.html"), 500
+        return jsonify(description="An internal error occurred.",
+                       request_id=rid), 500
+    return render_template("errors/500.html", request_id=rid), 500
+
+
+@app.errorhandler(405)
+def err_method_not_allowed(e):
+    if _wants_json():
+        return jsonify(description="Method not allowed."), 405
+    return render_template("errors/405.html"), 405
+
+
+@app.errorhandler(413)
+def err_payload_too_large(e):
+    if _wants_json():
+        return jsonify(description="Request body too large."), 413
+    return render_template("errors/413.html"), 413
+
+
+@app.errorhandler(502)
+def err_bad_gateway(e):
+    """Rendered when an upstream we proxy to (e.g. payment provider)
+    returns garbage. Real 502s from Railway never reach Flask."""
+    rid = (request.environ.get("request_id") if request else None) or ""
+    if _wants_json():
+        return jsonify(description="Upstream service error.",
+                       request_id=rid), 502
+    return render_template("errors/502.html", request_id=rid), 502
+
+
+@app.errorhandler(503)
+def err_service_unavailable(e):
+    rid = (request.environ.get("request_id") if request else None) or ""
+    retry = getattr(e, "retry_after", None) or 30
+    resp = render_template("errors/503.html",
+                            request_id=rid, retry_after=retry)
+    headers = {"Retry-After": str(retry)}
+    if _wants_json():
+        return jsonify(description="Service temporarily unavailable.",
+                       request_id=rid, retry_after=retry), 503, headers
+    return resp, 503, headers
+
+
+@app.errorhandler(504)
+def err_gateway_timeout(e):
+    rid = (request.environ.get("request_id") if request else None) or ""
+    if _wants_json():
+        return jsonify(description="Upstream timeout.",
+                       request_id=rid), 504
+    return render_template("errors/504.html", request_id=rid), 504
 
 
 @app.route("/superadmin/last-error")
@@ -9945,6 +10019,26 @@ if not IS_PRODUCTION:
     _initialize_runtime_state(force=True)
 else:
     app.logger.info("Deferring database initialization until first non-health request.")
+
+
+# ---------------------------------------------------------------------------
+# Late wiring: error tracker + webhook queue
+# ---------------------------------------------------------------------------
+# Registered after the app is otherwise complete so the routes they add
+# (/api/ops/errors, /api/ops/webhooks) sit alongside /api/ops/health and
+# share the same OPS_HEALTH_TOKEN auth model.
+try:
+    lib_error_tracking.register(app, data_dir=DATA_DIR)
+    app.logger.info("error-tracker initialised (path=%s)",
+                    lib_error_tracking.stats().get("jsonl_path"))
+except Exception as _et_err:  # pragma: no cover — must never crash boot
+    app.logger.warning("error-tracker init failed: %s", _et_err)
+
+try:
+    lib_webhook_retry.register(app, db)
+    app.logger.info("webhook-retry queue initialised")
+except Exception as _wq_err:  # pragma: no cover
+    app.logger.warning("webhook-retry init failed: %s", _wq_err)
 
 
 if __name__ == "__main__":
