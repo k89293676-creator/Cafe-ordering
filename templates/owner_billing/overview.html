@@ -16,18 +16,19 @@
     <div class="value">₹{{ '%.2f'|format(overview.revenue) }}</div>
     <div class="sub">{{ overview.orders_paid }} paid orders</div>
   </div>
+  <div class="stat">
+    <div class="label">Average Ticket</div>
+    <div class="value">₹{{ '%.2f'|format(overview.average_ticket) }}</div>
+    <div class="sub">Across today’s settled bills</div>
+  </div>
   <div class="stat warn">
     <div class="label">Open Tabs</div>
     <div class="value">{{ overview.open_tabs }}</div>
-    <div class="sub"><a href="{{ url_for('owner_billing_open') }}">Settle now →</a></div>
+    <div class="sub">Exposure ₹{{ '%.2f'|format(overview.open_value) }}</div>
   </div>
   <div class="stat">
     <div class="label">{{ settings.tax_label or 'Tax' }} Collected</div>
     <div class="value">₹{{ '%.2f'|format(overview.tax_collected) }}</div>
-  </div>
-  <div class="stat">
-    <div class="label">Service Charge</div>
-    <div class="value">₹{{ '%.2f'|format(overview.service_charge) }}</div>
   </div>
   <div class="stat">
     <div class="label">Tips</div>
@@ -36,8 +37,13 @@
   <div class="stat danger">
     <div class="label">Refunds</div>
     <div class="value">₹{{ '%.2f'|format(overview.refunds) }}</div>
-    <div class="sub">{{ overview.voided_today }} voided</div>
+    <div class="sub">{{ overview.refund_ratio }}% of settled revenue</div>
   </div>
+</div>
+<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;">
+  <a class="btn btn-primary btn-sm" href="{{ url_for('owner_billing_open') }}">View open tabs</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod') }}">Run EOD report</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_logs') }}">View audit trail</a>
 </div>
 
 {% if sparkline and sparkline.labels %}

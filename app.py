@@ -4194,6 +4194,9 @@ def _billing_log(*, owner_id: int, order_id: int | None, action: str,
 def _bill_dict(order: Order) -> dict:
     """Order dict augmented with billing-specific fields used by templates."""
     base = _order_dict(order)
+    payments = order.payments_breakdown if isinstance(order.payments_breakdown, list) else []
+    paid_amount = sum(float(p.get("amount") or 0) for p in payments if isinstance(p, dict))
+    balance_due = round(max(0.0, float(order.total or 0) - paid_amount), 2)
     base.update({
         "paymentStatus": order.payment_status or "unpaid",
         "paymentMethod": order.payment_method or "",
@@ -4202,7 +4205,9 @@ def _bill_dict(order: Order) -> dict:
         "serviceCharge": float(order.service_charge or 0),
         "invoiceNumber": order.invoice_number or "",
         "paidAt": _iso(order.paid_at) if order.paid_at else None,
-        "paymentsBreakdown": order.payments_breakdown if isinstance(order.payments_breakdown, list) else [],
+        "paymentsBreakdown": payments,
+        "paidAmount": paid_amount,
+        "balanceDue": balance_due,
         "voidReason": order.void_reason or "",
         "refundAmount": float(order.refund_amount or 0),
         "refundReason": order.refund_reason or "",
@@ -4240,26 +4245,30 @@ def _billing_overview(owner_id: int) -> dict:
             for p in (o.payments_breakdown or []):
                 if not isinstance(p, dict):
                     continue
-                m = p.get("method", "other")
+                m = (p.get("method") or "other").lower()
                 per_mode[m] = round(per_mode.get(m, 0.0) + float(p.get("amount") or 0), 2)
         open_tabs = (Order.query
                      .filter(Order.owner_id == owner_id,
                              Order.payment_status == "unpaid",
                              Order.status != "cancelled")
                      .count())
-        voided_today = (Order.query
-                        .filter(Order.owner_id == owner_id,
-                                Order.payment_status == "voided",
-                                Order.updated_at >= start)
-                        .count())
+        open_value = float(db.session.query(db.func.coalesce(db.func.sum(Order.total), 0))
+                           .filter(Order.owner_id == owner_id,
+                                   Order.payment_status == "unpaid",
+                                   Order.status != "cancelled").scalar() or 0)
+        avg_ticket = round((revenue / len(paid_today)) if paid_today else 0.0, 2)
+        refund_ratio = round((refunds / (revenue + refunds) * 100.0) if (revenue + refunds) else 0.0, 2)
         return {
             "revenue": round(revenue, 2),
             "orders_paid": len(paid_today),
+            "average_ticket": avg_ticket,
             "tax_collected": round(tax_collected, 2),
             "service_charge": round(service_charge, 2),
             "tips": round(tips, 2),
             "refunds": round(refunds, 2),
+            "refund_ratio": refund_ratio,
             "open_tabs": open_tabs,
+            "open_value": round(open_value, 2),
             "voided_today": voided_today,
             "per_mode": per_mode,
             "as_of": datetime.now(timezone.utc).isoformat(),
@@ -4377,17 +4386,26 @@ def _billing_sparkline_7d(owner_id: int) -> list[dict]:
                     Order.payment_status.in_(("paid", "refunded")),
                     Order.paid_at >= since)
             .group_by("d").order_by("d").all())
-    out = []
+    labels = []
+    gross = []
+    net = []
+    refund_pct = []
     for r in rows:
-        gross = float(r.gross or 0)
-        refunds = float(r.refunds or 0)
-        out.append({
-            "date": r.d.isoformat() if hasattr(r.d, "isoformat") else str(r.d),
-            "net": round(gross - refunds, 2),
-            "gross": round(gross, 2),
-            "refunds": round(refunds, 2),
-        })
-    return out
+        day_gross = float(r.gross or 0)
+        day_refunds = float(r.refunds or 0)
+        labels.append(r.d.isoformat() if hasattr(r.d, "isoformat") else str(r.d))
+        gross.append(round(day_gross, 2))
+        net.append(round(day_gross - day_refunds, 2))
+        refund_pct.append(round((day_refunds / day_gross * 100.0) if day_gross else 0.0, 2))
+    total_net = round(sum(net), 2)
+    return {
+        "labels": labels,
+        "gross": gross,
+        "net": net,
+        "refund_pct": refund_pct,
+        "total_net": total_net,
+        "peak": max(net) if net else 0.0,
+    }
 
 
 @app.route("/owner/billing")
@@ -4426,6 +4444,10 @@ def owner_billing_open():
     if table_filter:
         q = q.filter(Order.table_id == table_filter)
     total = q.count()
+    open_value = float(db.session.query(db.func.coalesce(db.func.sum(Order.total), 0))
+                       .filter(Order.owner_id == owner_id,
+                               Order.payment_status == "unpaid",
+                               Order.status != "cancelled").scalar() or 0)
     rows = (q.order_by(Order.created_at.desc())
               .offset((page - 1) * per_page).limit(per_page).all())
     return _no_store(app.make_response(render_template(
@@ -4433,6 +4455,7 @@ def owner_billing_open():
         orders=[_bill_dict(o) for o in rows],
         page=page, per_page=per_page, total=total,
         table_filter=table_filter,
+        open_value=round(open_value, 2),
         owner_username=logged_in_owner(),
     )))
 
