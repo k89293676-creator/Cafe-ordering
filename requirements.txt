@@ -30,7 +30,7 @@ python-dotenv~=1.0.1
 pywebpush~=2.0.0
 qrcode[pil]~=8.0.0
 razorpay~=1.4.2
-redis~=5.2.1
+redis~=7.4.0
 reportlab~=4.2.0
 sentry-sdk[flask]~=2.18.0
 sqlalchemy
