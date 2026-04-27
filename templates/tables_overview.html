@@ -279,7 +279,7 @@
     return h + 'h ' + (m % 60) + 'm';
   }
   function money(n) {
-    return Number(n || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+    return '₹' + Number(n || 0).toFixed(2);
   }
   function reasonLabel(r) {
     return ({ service: 'Call server', bill: 'Bill request', water: 'Water', help: 'Needs help' }[r] || r || 'service');

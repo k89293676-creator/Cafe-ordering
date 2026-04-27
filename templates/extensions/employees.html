@@ -35,7 +35,7 @@
 </div>
 
 <script>
-const fmt = n => new Intl.NumberFormat(undefined, {style:'currency', currency:'USD'}).format(n||0);
+const fmt = n => '₹' + Number(n||0).toFixed(2);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
 const today = new Date(); const back = new Date(); back.setDate(today.getDate()-30);

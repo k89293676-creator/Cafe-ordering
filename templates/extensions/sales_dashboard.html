@@ -42,7 +42,7 @@
 </div>
 
 <script>
-const fmt = n => new Intl.NumberFormat(undefined, {style:'currency', currency:'USD'}).format(n||0);
+const fmt = n => '₹' + Number(n||0).toFixed(2);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today = new Date();
 const lastMonth = new Date(); lastMonth.setDate(today.getDate() - 30);
