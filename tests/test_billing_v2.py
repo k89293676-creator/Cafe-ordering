@@ -38,30 +38,42 @@ from lib_billing_security import (
 # ---------------------------------------------------------------------------
 
 def test_parse_date_range_both_dates():
-    s, e = parse_date_range("2026-04-01", "2026-04-03")
+    s, e, label = parse_date_range("2026-04-01", "2026-04-03")
     assert s == datetime(2026, 4, 1, tzinfo=timezone.utc)
     # End is exclusive — the day *after* the inclusive "to"
     assert e == datetime(2026, 4, 4, tzinfo=timezone.utc)
+    assert "2026-04-01" in label and "2026-04-03" in label
 
 
 def test_parse_date_range_invalid_falls_back_to_today():
-    s, e = parse_date_range("garbage", "also-garbage", fallback_days=1)
+    s, e, label = parse_date_range("garbage", "also-garbage", fallback_days=1)
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     assert s == today
     assert e == today + timedelta(days=1)
+    assert label == today.strftime("%Y-%m-%d")
 
 
 def test_parse_date_range_only_from():
-    s, e = parse_date_range("2026-04-01", None)
+    s, e, _label = parse_date_range("2026-04-01", None)
     assert s == datetime(2026, 4, 1, tzinfo=timezone.utc)
     assert e == datetime(2026, 4, 2, tzinfo=timezone.utc)
 
 
 def test_parse_date_range_fallback_window_days():
-    s, e = parse_date_range(None, None, fallback_days=7)
+    s, e, _label = parse_date_range(None, None, fallback_days=7)
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     assert s == today - timedelta(days=6)
     assert e == today + timedelta(days=1)
+
+
+def test_parse_date_range_today_kwarg_anchors_fallback():
+    """Callers (the EOD route) pass an explicit ``today`` so the
+    fallback window is anchored to the cafe's local midnight rather
+    than UTC midnight."""
+    anchor = datetime(2026, 1, 15, tzinfo=timezone.utc)
+    s, e, _label = parse_date_range(None, None, fallback_days=1, today=anchor)
+    assert s == anchor
+    assert e == anchor + timedelta(days=1)
 
 
 # ---------------------------------------------------------------------------

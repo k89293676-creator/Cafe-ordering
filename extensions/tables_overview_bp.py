@@ -702,6 +702,27 @@ def api_walkin(table_id: str):
             "orderId": busy.id,
         }), 409
 
+    # Optional fields the new modal can post — name + phone help the
+    # cashier address the customer by name on the receipt and (if a
+    # phone matches an existing Customer record) credit loyalty points
+    # at settle-time. Party size is stored in ``notes`` because the
+    # Order model has no first-class column for it; surfacing it on
+    # the order detail page is enough for the floor staff today.
+    body = request.get_json(silent=True) or {}
+    cust_name = (str(body.get("customerName") or "")).strip()[:80] or "Walk-in"
+    cust_phone = (str(body.get("customerPhone") or "")).strip()[:32]
+    party_size = body.get("partySize")
+    try:
+        party_size = int(party_size) if party_size not in (None, "") else None
+        if party_size is not None and (party_size < 1 or party_size > 50):
+            party_size = None
+    except (TypeError, ValueError):
+        party_size = None
+    notes_parts: list[str] = []
+    if party_size:
+        notes_parts.append(f"Party of {party_size}")
+    notes = " · ".join(notes_parts)
+
     now = datetime.now(timezone.utc)
     order = Order(
         owner_id=owner_id,
@@ -710,14 +731,15 @@ def api_walkin(table_id: str):
         table_name=table.name,
         status="pending",
         payment_status="unpaid",
-        customer_name="Walk-in",
+        customer_name=cust_name,
         customer_email="",
-        customer_phone="",
+        customer_phone=cust_phone,
         items=[],
         modifiers={},
         subtotal=0,
         total=0,
         origin="walkin",
+        notes=notes,
         created_at=now,
         updated_at=now,
     )
