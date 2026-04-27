@@ -288,6 +288,7 @@
             <button class="btn" data-act="detail">Details</button>
             ${order ? '<button class="btn btn-primary" data-act="close" title="Complete the open order and resolve calls">Close table</button>' : ''}
             ${order ? '<button class="btn" data-act="transfer">Transfer</button>' : ''}
+            ${!order ? '<button class="btn" data-act="walkin">Walk-in Order</button>' : ''}
             ${calls.count ? '<button class="btn" data-act="clear">Clear calls</button>' : ''}
             <button class="btn" data-act="cleaning">${cleanBtnLabel}</button>
             ${order ? `<a class="btn" href="/owner/order/${order.id}/receipt" target="_blank" rel="noopener">Receipt</a>` : ''}
@@ -360,6 +361,18 @@
       finally { ev.target.disabled = false; }
     } else if (act === 'detail') {
       openDetail(id);
+    } else if (act === 'walkin') {
+      ev.target.disabled = true;
+      try {
+        const r = await postJson(`/api/owner/tables/${encodeURIComponent(id)}/walkin`);
+        if (r.ok && r.orderId) {
+          window.location = `/owner/billing/orders/${r.orderId}`;
+        } else {
+          alert('Failed to create walk-in order.');
+        }
+      } finally {
+        ev.target.disabled = false;
+      }
     }
   });
 

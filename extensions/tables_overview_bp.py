@@ -670,3 +670,39 @@ def api_cleaning(table_id: str):
     except Exception:
         pass
     return jsonify({"ok": True, "cleaning": _is_cleaning(owner_id, table_id)})
+
+
+@bp.route("/api/owner/tables/<table_id>/walkin", methods=["POST"], endpoint="api_walkin")
+@login_required
+def api_walkin(table_id: str):
+    """Create a new walk-in order for this table.
+
+    Allows the owner to start an order for a walk-in customer directly
+    from the table overview. The order starts empty; items can be added
+    later via the billing order detail page.
+    """
+    owner_id = logged_in_owner_id()
+    table = CafeTable.query.filter_by(id=table_id, owner_id=owner_id).first()
+    if not table:
+        abort(404)
+    now = datetime.now(timezone.utc)
+    order = Order(
+        owner_id=owner_id,
+        table_id=table_id,
+        table_name=table.name,
+        status="pending",
+        customer_name="Walk-in Customer",
+        items=[],
+        subtotal=0.0,
+        total=0.0,
+        created_at=now,
+        updated_at=now,
+    )
+    db.session.add(order)
+    db.session.commit()
+    try:
+        _notify_owner(owner_id, "order_created",
+                      {"id": order.id, "tableId": table_id, "status": "pending"})
+    except Exception:
+        pass
+    return jsonify({"ok": True, "orderId": order.id})
