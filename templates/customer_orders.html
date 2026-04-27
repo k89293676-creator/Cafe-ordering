@@ -41,6 +41,7 @@
   <h1>My Orders</h1>
   <div class="co-header-right">
     <span>Logged in as <strong>{{ customer.name or customer.email }}</strong></span>
+    <span>Loyalty Points: <strong>{{ points }}</strong></span>
     <a href="{{ url_for('customers.customer_logout') }}">Log out</a>
   </div>
 </header>

@@ -47,7 +47,10 @@
     .pill-voided { background:rgba(239,68,68,.18); color:#fca5a5; }
     .btn { display:inline-block; padding:.55rem 1rem; border-radius:8px; font-weight:600; font-size:.9rem; border:none; cursor:pointer; transition:opacity .15s; text-decoration:none; }
     .btn:hover { opacity:.9; text-decoration:none; }
-    .btn-primary { background:var(--primary); color:#0a0a0a; }
+    .btn-ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+    .btn-sm { padding:.45rem .8rem; font-size:.85rem; }
+    .alert { padding:.75rem 1rem; border-radius:8px; margin-bottom:1rem; }
+    .alert-ok { background:rgba(34,197,94,.1); color:#22c55e; border:1px solid rgba(34,197,94,.2); }
     .btn-success { background:var(--ok); color:#0a0a0a; }
     .btn-danger { background:var(--danger); color:#fff; }
     .btn-ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
@@ -68,6 +71,7 @@
     .empty { text-align:center; padding:3rem 1rem; color:var(--muted); }
   </style>
   {% block extrahead %}{% endblock %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="topbar">

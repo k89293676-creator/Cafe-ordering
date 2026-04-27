@@ -483,6 +483,7 @@ class Order(db.Model):
     customer_name = db.Column(db.Text, default="Guest")
     customer_email = db.Column(db.Text, default="")
     customer_phone = db.Column(db.Text, default="")
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=True)
     items = db.Column(db.JSON, nullable=False, default=list)
     modifiers = db.Column(db.JSON, default=dict)
     subtotal = db.Column(db.Numeric(10, 2), default=0)
@@ -862,6 +863,7 @@ def _init_db() -> None:
                 db.session.commit()
 
         add_column_if_missing("orders", "customer_phone TEXT DEFAULT ''", "customer_phone")
+        add_column_if_missing("orders", "customer_id INTEGER", "customer_id")
         add_column_if_missing("orders", "pickup_code TEXT DEFAULT ''", "pickup_code")
         add_column_if_missing("orders", "modifiers JSON", "modifiers")
         add_column_if_missing("orders", "notes TEXT DEFAULT ''", "notes")
@@ -1072,12 +1074,15 @@ def _assign_request_id() -> None:
 @app.after_request
 def extra_security_headers(response: Response) -> Response:
     response.headers["Server"] = "CafePortal"
-    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=(), payment=(), usb=(), interest-cohort=()"
     response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
     # Defence-in-depth: clickjacking, MIME sniffing, referrer leaks.
-    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     # Fallback CSP: Talisman owns CSP in production, but if Talisman ever
@@ -1574,6 +1579,17 @@ def place_order_in_db(order: dict) -> dict:
                 raise _QuotaExceeded()
 
     pickup_code = _generate_pickup_code()
+    customer_id = None
+    customer_email = order.get("customerEmail", "").strip().lower()
+    if customer_email:
+        from extensions.models import Customer
+        customer = Customer.query.filter_by(email=customer_email).first()
+        if customer:
+            customer_id = customer.id
+            # Add loyalty points: 1 point per ₹10 spent
+            points_earned = int(order.get("total", 0) // 10)
+            customer.points += points_earned
+            db.session.add(customer)
     record = Order(
         owner_id=order.get("ownerId"),
         cafe_id=order.get("cafeId"),
@@ -1582,6 +1598,7 @@ def place_order_in_db(order: dict) -> dict:
         customer_name=order.get("customerName", "Guest"),
         customer_email=order.get("customerEmail", ""),
         customer_phone=order.get("customerPhone", ""),
+        customer_id=customer_id,
         items=order.get("items", []),
         modifiers=order.get("modifiers", {}),
         subtotal=order.get("subtotal", order.get("total", 0)),
@@ -1614,7 +1631,7 @@ def _deduct_inventory(owner_id: int | None, items: list) -> None:
             qty = int(item.get("quantity", 1))
             if not item_id:
                 continue
-            ingredients = Ingredient.query.filter_by(owner_id=owner_id, menu_item_id=item_id).all()
+            ingredients = Ingredient.query.filter_by(owner_id=owner_id, menu_item_id=item_id).with_for_update().all()
             for ing in ingredients:
                 deduct = float(ing.qty_per_order or 1) * qty
                 ing.stock = max(0, float(ing.stock or 0) - deduct)
@@ -1653,7 +1670,7 @@ def _check_stock_available(owner_id: int | None, items: list) -> tuple[bool, str
             qty = int(item.get("quantity", 1))
             if not item_id:
                 continue
-            ingredients = Ingredient.query.filter_by(owner_id=owner_id, menu_item_id=item_id).all()
+            ingredients = Ingredient.query.filter_by(owner_id=owner_id, menu_item_id=item_id).with_for_update().all()
             for ing in ingredients:
                 needed = float(ing.qty_per_order or 1) * qty
                 if float(ing.stock or 0) < needed:
@@ -1667,8 +1684,23 @@ def _check_stock_available(owner_id: int | None, items: list) -> tuple[bool, str
 
 
 def _db_update_order_status(order_id: int, new_status: str) -> bool:
+    valid_statuses = {"pending", "preparing", "ready", "completed", "cancelled", "voided"}
+    if new_status not in valid_statuses:
+        return False
     order = db.session.get(Order, order_id)
     if not order:
+        return False
+    current = order.status
+    # Define valid transitions
+    invalid_transitions = {
+        ("completed", "pending"),
+        ("cancelled", "pending"),
+        ("voided", "pending"),
+        ("completed", "preparing"),
+        ("cancelled", "preparing"),
+        ("voided", "preparing"),
+    }
+    if (current, new_status) in invalid_transitions:
         return False
     order.status = new_status
     order.updated_at = datetime.now(timezone.utc)
@@ -2159,6 +2191,8 @@ def compute_order_summary(items: list[dict], owner_menu: dict | None = None) -> 
             quantity = max(int(float(entry.get("quantity", 1))), 1)
         except (TypeError, ValueError):
             abort(400, description=f"Invalid quantity for item {item_id!r}.")
+        if quantity > 100:
+            abort(400, description="Maximum quantity per item is 100.")
         menu_item = menu_items.get(item_id)
         if not menu_item:
             abort(400, description=f"Unknown item id: {item_id!r}")
@@ -5187,10 +5221,13 @@ def owner_billing_logs():
     total = q.count()
     logs = (q.order_by(BillingLog.created_at.desc())
               .offset((page - 1) * per_page).limit(per_page).all())
+    # Summary for chart
+    summary_q = db.session.query(BillingLog.action, db.func.count(BillingLog.id), db.func.sum(BillingLog.amount)).filter_by(owner_id=owner_id).group_by(BillingLog.action)
+    summary = {row[0]: {'count': row[1], 'amount': float(row[2] or 0)} for row in summary_q.all()}
     return _no_store(app.make_response(render_template(
         "owner_billing/logs.html",
         logs=logs, page=page, per_page=per_page, total=total,
-        action=action,
+        action=action, summary=summary,
         owner_username=logged_in_owner(),
     )))
 

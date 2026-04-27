@@ -117,4 +117,4 @@ def customer_orders():
             "createdAt": o.created_at.isoformat() if o.created_at else "",
         })
 
-    return render_template("customer_orders.html", customer=customer, orders=order_list)
+    return render_template("customer_orders.html", customer=customer, orders=order_list, points=customer.points)

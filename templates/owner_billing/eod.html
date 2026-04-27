@@ -47,6 +47,36 @@
         <tr style="border-top:2px solid var(--line);"><td><strong>Total</strong></td><td class="right mono"><strong>₹{{ '%.2f'|format(summary.by_mode.get('_total', 0)) }}</strong></td></tr>
       </tbody>
     </table>
+    <canvas id="eodChart" width="400" height="200" style="margin-top:1rem;"></canvas>
+    <script>
+      const eodCtx = document.getElementById('eodChart').getContext('2d');
+      const eodData = {{ summary.by_mode|tojson }};
+      delete eodData._total;
+      const eodChart = new Chart(eodCtx, {
+        type: 'pie',
+        data: {
+          labels: Object.keys(eodData),
+          datasets: [{
+            data: Object.values(eodData),
+            backgroundColor: [
+              '#22c55e',
+              '#f59e0b',
+              '#ef4444',
+              '#4f46e5',
+              '#06b6d4'
+            ]
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              position: 'bottom'
+            }
+          }
+        }
+      });
+    </script>
     <p class="muted" style="font-size:.82rem;margin-top:.75rem;">Count your cash drawer and any UPI/card terminal totals. Discrepancies should match the audit log of voids and refunds.</p>
   {% endif %}
 </div>

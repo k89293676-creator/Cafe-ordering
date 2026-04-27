@@ -4,6 +4,39 @@
 <h1>Billing Audit Log</h1>
 <p class="muted" style="margin-top:-.75rem;">Every settle, void, refund, and adjustment — append-only, IP &amp; request-ID stamped.</p>
 
+{% if summary %}
+<div class="panel" style="margin-bottom:1.5rem;">
+  <h2>Action Summary</h2>
+  <canvas id="logSummaryChart" width="600" height="200"></canvas>
+  <script>
+    const logCtx = document.getElementById('logSummaryChart').getContext('2d');
+    const logSummaryChart = new Chart(logCtx, {
+      type: 'doughnut',
+      data: {
+        labels: {{ summary.keys()|list|tojson }},
+        datasets: [{
+          data: {{ summary.values()|map(attribute='count')|list|tojson }},
+          backgroundColor: [
+            '#22c55e',
+            '#ef4444',
+            '#f59e0b',
+            '#4f46e5'
+          ]
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: 'bottom'
+          }
+        }
+      }
+    });
+  </script>
+</div>
+{% endif %}
+
 <div style="display:flex;gap:.5rem;margin-bottom:1.25rem;flex-wrap:wrap;">
   <a class="btn btn-ghost btn-sm {{ 'btn-primary' if not action }}" href="{{ url_for('owner_billing_logs') }}">All</a>
   <a class="btn btn-ghost btn-sm {{ 'btn-primary' if action == 'settled' }}" href="?action=settled">Settled</a>
