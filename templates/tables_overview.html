@@ -55,10 +55,22 @@
     .toolbar { display:flex; align-items:center; gap: 10px; margin-bottom: 14px;
       flex-wrap: wrap; }
     .filter-pill { padding: .4rem .85rem; border-radius: 999px; border: 1px solid var(--line);
-      background: #fff; font-size: .82rem; cursor: pointer; }
+      background: #fff; font-size: .82rem; cursor: pointer; display:inline-flex;
+      align-items:center; gap:.4rem; }
+    .filter-pill .pill-count { background: rgba(31,20,8,.08); color: var(--ink);
+      font-weight: 700; font-size: .72rem; padding: 1px 7px; border-radius: 999px;
+      min-width: 18px; text-align: center; }
     .filter-pill.active { background: var(--ink); color: #fff; border-color: var(--ink); }
-    .search { flex: 1; min-width: 180px; padding: .5rem .8rem; border-radius: 8px;
+    .filter-pill.active .pill-count { background: rgba(255,255,255,.18); color:#fff; }
+    .filter-pill[data-filter="needs_attention"] .pill-count.has { background:#fee2e2; color:var(--attention); }
+    .filter-pill[data-filter="ready_to_serve"]  .pill-count.has { background:#dbeafe; color:var(--ready); }
+    .search { flex: 1; min-width: 160px; padding: .5rem .8rem; border-radius: 8px;
       border: 1px solid var(--line); background: #fff; font-size: .9rem; }
+    .sort-select { padding: .5rem .65rem; border-radius: 8px; border: 1px solid var(--line);
+      background: #fff; font-size: .85rem; color: var(--ink); cursor: pointer; }
+    .kbd-hint { font-size:.72rem; color: var(--muted); }
+    .kbd-hint kbd { background: #fff; border:1px solid var(--line); border-radius: 4px;
+      padding: 1px 5px; font-family: ui-monospace, Menlo, monospace; font-size: .68rem; }
 
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
       gap: 14px; }
@@ -84,6 +96,10 @@
     .row .k { color: var(--muted); }
     .order-line { background: #fdf6e8; border: 1px dashed #e7d4ad; border-radius: 10px;
       padding: 8px 10px; font-size: .82rem; }
+    .order-line.stuck { background: #fff1f2; border-color: #fca5a5; color: var(--attention); }
+    .stuck-pill { display:inline-block; background: var(--attention); color:#fff;
+      padding: 1px 6px; border-radius: 4px; font-size: .65rem; font-weight: 700;
+      letter-spacing: .04em; margin-left: 4px; vertical-align: middle; }
     .calls-line { background: #fff1f2; border: 1px dashed #fecaca; border-radius: 10px;
       padding: 8px 10px; font-size: .82rem; color: var(--attention); }
     .note { font-size: .82rem; color: var(--muted); font-style: italic;
@@ -162,13 +178,19 @@
     </div>
 
     <div class="toolbar">
-      <button class="filter-pill active" data-filter="all">All</button>
-      <button class="filter-pill" data-filter="needs_attention">Needs attention</button>
-      <button class="filter-pill" data-filter="ready_to_serve">Ready</button>
-      <button class="filter-pill" data-filter="occupied">Occupied</button>
-      <button class="filter-pill" data-filter="cleaning">Cleaning</button>
-      <button class="filter-pill" data-filter="free">Free</button>
-      <input type="search" class="search" id="search" placeholder="Search tables…" />
+      <button class="filter-pill active" data-filter="all" title="Press 1">All <span class="pill-count" data-count="all">0</span></button>
+      <button class="filter-pill" data-filter="needs_attention" title="Press 2">Needs attention <span class="pill-count" data-count="needs_attention">0</span></button>
+      <button class="filter-pill" data-filter="ready_to_serve" title="Press 3">Ready <span class="pill-count" data-count="ready_to_serve">0</span></button>
+      <button class="filter-pill" data-filter="occupied" title="Press 4">Occupied <span class="pill-count" data-count="occupied">0</span></button>
+      <button class="filter-pill" data-filter="cleaning" title="Press 5">Cleaning <span class="pill-count" data-count="cleaning">0</span></button>
+      <button class="filter-pill" data-filter="free" title="Press 6">Free <span class="pill-count" data-count="free">0</span></button>
+      <input type="search" class="search" id="search" placeholder="Search tables… (/)" />
+      <select id="sort-select" class="sort-select" title="Sort tables">
+        <option value="status">Sort: Priority</option>
+        <option value="oldest">Sort: Oldest activity</option>
+        <option value="name">Sort: Name</option>
+      </select>
+      <span class="kbd-hint"><kbd>1</kbd>–<kbd>6</kbd> filter · <kbd>/</kbd> search · <kbd>r</kbd> refresh</span>
     </div>
 
     <div id="grid" class="grid"></div>
@@ -266,9 +288,20 @@
   const search = document.getElementById('search');
   const auto = document.getElementById('auto-refresh');
   let activeFilter = 'all';
+  let activeSort = 'status';   // status | oldest | name
   let lastData = null;
   let timer = null;
   let currentTableId = null;
+
+  // Loud → quiet ordering used for the default "Priority" sort. Keeps
+  // the floor staff focused on the cards that actually need a human.
+  const STATUS_RANK = {
+    needs_attention: 0,
+    ready_to_serve:  1,
+    occupied:        2,
+    cleaning:        3,
+    free:            4,
+  };
 
   function fmtAge(s) {
     if (!s) return '0s';
@@ -312,11 +345,41 @@
     document.getElementById('sum-clean').textContent    = lastData.summary.cleaning || 0;
     meta.textContent = `${lastData.summary.total} tables · updated ${new Date(lastData.fetchedAt).toLocaleTimeString()}`;
 
+    // Update the inline counts on each filter pill so the floor staff
+    // can see "Needs attention (2)" without scanning the summary cards.
+    const counts = lastData.summary || {};
+    document.querySelectorAll('.filter-pill .pill-count').forEach(el => {
+      const key = el.dataset.count;
+      const n = (key === 'all') ? (counts.total || 0) : (counts[key] || 0);
+      el.textContent = n;
+      el.classList.toggle('has', n > 0);
+    });
+
     const q = (search.value || '').toLowerCase().trim();
-    const filtered = lastData.tables.filter(t => {
+    let filtered = lastData.tables.filter(t => {
       if (activeFilter !== 'all' && t.status !== activeFilter) return false;
       if (q && !(t.name || '').toLowerCase().includes(q) && !(t.id || '').toLowerCase().includes(q)) return false;
       return true;
+    });
+
+    // Stable sort — secondary key is name so equal-priority cards
+    // never visibly swap places between refreshes.
+    filtered.sort((a, b) => {
+      if (activeSort === 'name') {
+        return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true });
+      }
+      if (activeSort === 'oldest') {
+        // Older activity (smaller timestamp) first; missing → bottom.
+        const ax = a.lastActivity ? Date.parse(a.lastActivity) : Infinity;
+        const bx = b.lastActivity ? Date.parse(b.lastActivity) : Infinity;
+        if (ax !== bx) return ax - bx;
+        return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true });
+      }
+      // Default: status priority.
+      const ra = STATUS_RANK[a.status] ?? 99;
+      const rb = STATUS_RANK[b.status] ?? 99;
+      if (ra !== rb) return ra - rb;
+      return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true });
     });
 
     if (!filtered.length) { grid.innerHTML = ''; empty.style.display = 'block'; return; }
@@ -325,8 +388,9 @@
     grid.innerHTML = filtered.map(t => {
       const order = t.openOrder;
       const calls = t.openCalls;
+      const stuckHtml = order && order.stuck ? '<span class="stuck-pill">⚠ STUCK</span>' : '';
       const orderHtml = order
-        ? `<div class="order-line"><b>Order #${Number(order.id)||0}</b> · ${escapeHtml(order.status)}<br>
+        ? `<div class="order-line${order.stuck ? ' stuck' : ''}"><b>Order #${Number(order.id)||0}</b> · ${escapeHtml(order.status)}${stuckHtml}<br>
            ${Number(order.itemsCount)||0} item${order.itemsCount === 1 ? '' : 's'} · ${money(order.total)} · ${fmtAge(order.ageSeconds)}
            ${order.customerName ? '<br>👤 ' + escapeHtml(order.customerName) : ''}</div>`
         : '';
@@ -386,15 +450,42 @@
   }
 
   // Filter buttons
-  document.querySelectorAll('.filter-pill').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      activeFilter = btn.dataset.filter;
-      render();
+  function setFilter(filter) {
+    activeFilter = filter;
+    document.querySelectorAll('.filter-pill').forEach(b => {
+      b.classList.toggle('active', b.dataset.filter === filter);
     });
+    render();
+  }
+  document.querySelectorAll('.filter-pill').forEach(btn => {
+    btn.addEventListener('click', () => setFilter(btn.dataset.filter));
   });
   search.addEventListener('input', render);
+
+  // Sort dropdown — UX request from busy-shift staff who wanted to
+  // surface the oldest table at the top (stale walk-ins).
+  const sortSelect = document.getElementById('sort-select');
+  sortSelect.addEventListener('change', () => {
+    activeSort = sortSelect.value || 'status';
+    render();
+  });
+
+  // Keyboard shortcuts: 1-6 swap filter, "/" focuses search, "r"
+  // refreshes. Skipped while typing in any input/textarea.
+  const FILTER_KEYS = ['all','needs_attention','ready_to_serve','occupied','cleaning','free'];
+  document.addEventListener('keydown', (ev) => {
+    const tag = (ev.target && ev.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    if (ev.key >= '1' && ev.key <= '6') {
+      const f = FILTER_KEYS[Number(ev.key) - 1];
+      if (f) { setFilter(f); ev.preventDefault(); }
+    } else if (ev.key === '/') {
+      search.focus(); search.select(); ev.preventDefault();
+    } else if (ev.key === 'r' || ev.key === 'R') {
+      load(); ev.preventDefault();
+    }
+  });
 
   async function postJson(url, body) {
     return fetch(url, {

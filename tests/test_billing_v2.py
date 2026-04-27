@@ -12,6 +12,7 @@ import pytest
 from lib_billing import (
     aging_bucket_for,
     billing_health_snapshot,
+    compute_bill_totals,
     drawer_variance,
     parse_date_range,
     revenue_sparkline,
@@ -377,3 +378,44 @@ def test_constant_time_eq():
     assert constant_time_eq("abc", "abd") is False
     assert constant_time_eq("", "") is True
     assert constant_time_eq(None, None) is True  # defensive
+
+
+# ---------------------------------------------------------------------------
+# compute_bill_totals — non-negative input clamping
+# ---------------------------------------------------------------------------
+
+def test_compute_bill_totals_clamps_negative_pct_to_zero():
+    """A negative tax/service-charge rate must NEVER push the grand
+    total below the subtotal — that would mean the till is paying the
+    customer. Hostile or mis-configured inputs are silently zeroed."""
+    t = compute_bill_totals(subtotal=100, service_charge_pct=-5, tax_pct=-18, tip=0)
+    assert t.subtotal == 100.0
+    assert t.service_charge == 0.0
+    assert t.tax == 0.0
+    assert t.total == 100.0
+
+
+def test_compute_bill_totals_clamps_negative_flat_to_zero():
+    t = compute_bill_totals(subtotal=200, service_charge_flat=-50, tax_flat=-10, tip=-5)
+    assert t.service_charge == 0.0
+    assert t.tax == 0.0
+    assert t.tip == 0.0
+    assert t.total == 200.0
+
+
+def test_compute_bill_totals_normal_case_unchanged():
+    """Sanity: the new clamping has no effect on legitimate inputs."""
+    t = compute_bill_totals(subtotal=1000, service_charge_pct=10, tax_pct=5, tip=20)
+    # base 1000 + sc 100 = 1100, tax_base = 1000 + 100 + 20 = 1120 → tax 56
+    assert t.service_charge == 100.0
+    assert t.tax == 56.0
+    assert t.tip == 20.0
+    assert t.total == 1176.0
+
+
+def test_compute_bill_totals_discount_caps_to_subtotal():
+    """A discount larger than the subtotal must collapse to the subtotal,
+    never produce a negative base — already covered, regression-locked."""
+    t = compute_bill_totals(subtotal=50, discount=999)
+    assert t.discount == 50.0
+    assert t.total == 0.0

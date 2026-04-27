@@ -49,6 +49,13 @@ def _money(x) -> float:
         return 0.0
 
 
+def _nonneg(x) -> float:
+    """``_money`` clamped to ≥0. Used to defuse negative pct / flat inputs
+    that would otherwise produce a *credit* on the bill — a class of bug
+    that's silent in the math but catastrophic at the till."""
+    return max(0.0, _money(x))
+
+
 def compute_bill_totals(*, subtotal, discount=0, service_charge_pct=0,
                         tax_pct=0, tip=0,
                         service_charge_flat=0, tax_flat=0) -> BillTotals:
@@ -59,25 +66,32 @@ def compute_bill_totals(*, subtotal, discount=0, service_charge_pct=0,
     is added on top. Same for tax. Discount is always subtracted *before*
     service charge / tax — owners hate paying tax on a discount they
     just gave away.
+
+    All inputs are clamped to be non-negative; a hostile / buggy caller
+    can't sneak a negative tax rate past us to print a bill that *pays*
+    the customer.
     """
     sub = _money(subtotal)
     disc = max(0.0, min(_money(discount), sub))
     base_after_discount = max(0.0, sub - disc)
+    tip_amt = _nonneg(tip)
 
-    sc_pct_amt = _money(base_after_discount * (_money(service_charge_pct) / 100.0))
-    service_charge = _money(sc_pct_amt + _money(service_charge_flat))
+    sc_pct = _nonneg(service_charge_pct)
+    sc_pct_amt = _money(base_after_discount * (sc_pct / 100.0))
+    service_charge = _money(sc_pct_amt + _nonneg(service_charge_flat))
 
-    tax_base = base_after_discount + service_charge + _money(tip)
-    tax_pct_amt = _money(tax_base * (_money(tax_pct) / 100.0))
-    tax = _money(tax_pct_amt + _money(tax_flat))
+    tx_pct = _nonneg(tax_pct)
+    tax_base = base_after_discount + service_charge + tip_amt
+    tax_pct_amt = _money(tax_base * (tx_pct / 100.0))
+    tax = _money(tax_pct_amt + _nonneg(tax_flat))
 
-    total = _money(base_after_discount + service_charge + tax + _money(tip))
+    total = _money(base_after_discount + service_charge + tax + tip_amt)
     return BillTotals(
         subtotal=sub,
         discount=disc,
         service_charge=service_charge,
         tax=tax,
-        tip=_money(tip),
+        tip=tip_amt,
         total=total,
     )
 

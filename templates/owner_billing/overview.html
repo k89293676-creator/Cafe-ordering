@@ -60,8 +60,13 @@
 
 {% if sparkline and sparkline.labels %}
 <div class="panel" style="margin-bottom:1.5rem;">
-  <h2 style="margin-top:0;">Last 7 days &mdash; Net Revenue</h2>
-  <p class="muted" style="font-size:.88rem;margin-top:-.25rem;">Total: <strong>₹{{ '%.2f'|format(sparkline.total_net) }}</strong> · Peak day: <strong>₹{{ '%.2f'|format(sparkline.peak) }}</strong></p>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
+    <div>
+      <h2 style="margin-top:0;">Last 7 days &mdash; Net Revenue</h2>
+      <p class="muted" style="font-size:.88rem;margin-top:-.25rem;">Total: <strong>₹{{ '%.2f'|format(sparkline.total_net) }}</strong> · Peak day: <strong>₹{{ '%.2f'|format(sparkline.peak) }}</strong> · Avg/day: <strong>₹{{ '%.2f'|format(sparkline.total_net / (sparkline.labels|length) if sparkline.labels|length else 0) }}</strong></p>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="export-7d-csv" title="Download 7-day breakdown as CSV">⬇ Export CSV</button>
+  </div>
   <canvas id="revenueChart" width="700" height="200"></canvas>
   <script>
     const ctx = document.getElementById('revenueChart').getContext('2d');
@@ -131,29 +136,44 @@
         {% endfor %}
       </tbody>
     </table>
-    <canvas id="paymentChart" width="400" height="200" style="margin-top:1rem;"></canvas>
+    <canvas id="paymentChart" width="400" height="220" style="margin-top:1rem;max-height:260px;"></canvas>
     <script>
+      // Donut over pie — leaves room for a center label and reads
+      // better at the small sizes the overview page uses. Palette is
+      // long enough to cover every non-deprecated mode without the
+      // browser cycling colours and confusing two methods.
+      const PAYMENT_PALETTE = [
+        '#22c55e', '#f59e0b', '#ef4444', '#4f46e5', '#06b6d4',
+        '#ec4899', '#a855f7', '#84cc16', '#0ea5e9', '#f97316'
+      ];
       const paymentCtx = document.getElementById('paymentChart').getContext('2d');
+      const paymentLabels = {{ overview.per_mode.keys()|list|tojson }};
+      const paymentValues = {{ overview.per_mode.values()|list|tojson }};
       const paymentChart = new Chart(paymentCtx, {
-        type: 'pie',
+        type: 'doughnut',
         data: {
-          labels: {{ overview.per_mode.keys()|list|tojson }},
+          labels: paymentLabels,
           datasets: [{
-            data: {{ overview.per_mode.values()|list|tojson }},
-            backgroundColor: [
-              '#22c55e',
-              '#f59e0b',
-              '#ef4444',
-              '#4f46e5',
-              '#06b6d4'
-            ]
+            data: paymentValues,
+            backgroundColor: paymentLabels.map((_, i) => PAYMENT_PALETTE[i % PAYMENT_PALETTE.length]),
+            borderColor: '#0a0a0a',
+            borderWidth: 2,
           }]
         },
         options: {
           responsive: true,
+          maintainAspectRatio: false,
+          cutout: '62%',
           plugins: {
-            legend: {
-              position: 'bottom'
+            legend: { position: 'bottom', labels: { color: '#f5f5f5' } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const sum = paymentValues.reduce((a, b) => a + b, 0) || 1;
+                  const v = ctx.parsed || 0;
+                  return ` ${ctx.label}: ₹${v.toFixed(2)} (${(v/sum*100).toFixed(1)}%)`;
+                }
+              }
             }
           }
         }
@@ -188,7 +208,54 @@
 {% endblock %}
 {% block extrabody %}
 <script>
-  // Auto-refresh the overview every 10s during a busy service
-  setTimeout(() => location.reload(), 10000);
+  // Auto-refresh every 10s during a busy service — but ONLY while the
+  // tab is visible. Previously this fired regardless and would page
+  // through hours of stale state when the owner came back from lunch.
+  (function () {
+    let timer = null;
+    function start() {
+      if (timer) return;
+      timer = setTimeout(() => { window.location.reload(); }, 10000);
+    }
+    function stop() {
+      if (timer) { clearTimeout(timer); timer = null; }
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') start(); else stop();
+    });
+    if (document.visibilityState === 'visible') start();
+  })();
+
+  // CSV export for the 7-day revenue breakdown — operators have asked
+  // for this to drop into their bookkeeper's spreadsheet without a
+  // round-trip to the EOD page.
+  (function () {
+    const btn = document.getElementById('export-7d-csv');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const labels    = {{ sparkline.labels|tojson if sparkline and sparkline.labels else '[]' }};
+      const gross     = {{ sparkline.gross|tojson  if sparkline and sparkline.labels else '[]' }};
+      const net       = {{ sparkline.net|tojson    if sparkline and sparkline.labels else '[]' }};
+      const refundPct = {{ sparkline.refund_pct|tojson if sparkline and sparkline.labels else '[]' }};
+      if (!labels.length) return;
+      const rows = [['Day', 'Gross (INR)', 'Refund %', 'Net (INR)']];
+      labels.forEach((d, i) => {
+        rows.push([d, (gross[i] || 0).toFixed(2),
+                  (refundPct[i] || 0).toFixed(2),
+                  (net[i] || 0).toFixed(2)]);
+      });
+      const csv = rows.map(r => r.map(c => {
+        const s = String(c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url; a.download = `revenue-7d-${stamp}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    });
+  })();
 </script>
 {% endblock %}

@@ -23,6 +23,7 @@ data grows.
 """
 from __future__ import annotations
 
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from threading import Lock
@@ -56,6 +57,49 @@ ACTIVE_ORDER_STATUSES = ("pending", "confirmed", "preparing", "ready")
 # A call older than this with no acknowledgement escalates the table to
 # "needs attention" so it visually pops on the grid.
 CALL_ESCALATION_SECONDS = 5 * 60
+
+# Per-status "this is taking too long" thresholds. When an active order
+# crosses these, the table card flips to ``needs_attention`` and the
+# order line shows a ⚠ stuck badge. Tunable via env so a brunch place
+# (slow ticket times are fine) doesn't get the same alarm cadence as a
+# coffee bar.
+def _env_seconds(name: str, default_s: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default_s
+    try:
+        # Accept either seconds or "Nm" / "Nh" suffixes for readability.
+        if raw.lower().endswith("m"):
+            return max(0, int(float(raw[:-1]) * 60))
+        if raw.lower().endswith("h"):
+            return max(0, int(float(raw[:-1]) * 3600))
+        return max(0, int(float(raw)))
+    except ValueError:
+        return default_s
+
+
+# Thresholds resolved once at module import. Restart the worker after
+# changing any env var (consistent with the rest of the app's config
+# model).
+STUCK_PREPARING_SECONDS = _env_seconds("TABLES_STUCK_PREPARING_SECONDS", 20 * 60)
+STUCK_READY_SECONDS = _env_seconds("TABLES_STUCK_READY_SECONDS", 10 * 60)
+STUCK_PENDING_SECONDS = _env_seconds("TABLES_STUCK_PENDING_SECONDS", 5 * 60)
+
+
+def _order_is_stuck(open_order, age_seconds: int) -> bool:
+    """Return True when an active order has been sitting in the same
+    status longer than the configured threshold for that status. Used
+    by ``_classify`` and to surface a per-card warning badge."""
+    if not open_order:
+        return False
+    status = (getattr(open_order, "status", "") or "").lower()
+    if status == "preparing":
+        return age_seconds >= STUCK_PREPARING_SECONDS
+    if status == "ready":
+        return age_seconds >= STUCK_READY_SECONDS
+    if status in ("pending", "confirmed"):
+        return age_seconds >= STUCK_PENDING_SECONDS
+    return False
 
 # Ephemeral per-shift state: "Birthday party — go slow" sticky notes
 # and "needs cleaning" flags. We deliberately do NOT persist these
@@ -221,6 +265,11 @@ def _classify(open_order, open_calls: list[TableCall], now: datetime,
             return "needs_attention"
         if _age_seconds(c.created_at, now) > CALL_ESCALATION_SECONDS and c.status == "open":
             return "needs_attention"
+    # An order that's been sitting too long in its current state
+    # escalates the table even when no diner has explicitly called for
+    # help — catches kitchen backlog before customers complain.
+    if open_order and _order_is_stuck(open_order, _age_seconds(open_order.created_at, now)):
+        return "needs_attention"
     if open_order and open_order.status == "ready":
         return "ready_to_serve"
     if open_order or open_calls:
@@ -324,14 +373,18 @@ def api_overview():
 
         order_payload = None
         if order:
+            order_age_s = _age_seconds(order.created_at, now)
             order_payload = {
                 "id": order.id,
                 "status": order.status,
                 "total": float(order.total or 0),
                 "itemsCount": _items_count(order.items),
-                "ageSeconds": _age_seconds(order.created_at, now),
+                "ageSeconds": order_age_s,
                 "customerName": order.customer_name or "",
                 "createdAt": _iso(order.created_at),
+                # Lets the front-end show a ⚠ Stuck pill without
+                # having to re-derive the threshold rules in JS.
+                "stuck": _order_is_stuck(order, order_age_s),
             }
 
         latest_call = calls[-1] if calls else None

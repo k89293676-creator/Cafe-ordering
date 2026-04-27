@@ -2,6 +2,27 @@
 
 A web-based cafe ordering system built with Python and Flask.
 
+## Recent changes — April 27, 2026
+
+- **Tables overview UX:** filter pills now show live counts; new keyboard
+  shortcuts (`1`–`6` filter, `/` focus search, `r` refresh); sort menu
+  (Priority / Oldest activity / Name); cards show a ⚠ STUCK pill when
+  an order is sitting too long in its status.
+- **Stuck-order business logic:** `extensions/tables_overview_bp.py` now
+  flips a table to `needs_attention` when an active order exceeds env-tunable
+  thresholds — `TABLES_STUCK_PREPARING_SECONDS` (default 20m),
+  `TABLES_STUCK_READY_SECONDS` (10m), `TABLES_STUCK_PENDING_SECONDS` (5m).
+- **Billing overview UX:** payment-mode chart upgraded to a 10-colour
+  donut with %-of-revenue tooltips; 7-day chart gains an inline CSV
+  export and an "Avg/day" callout; auto-reload now pauses while the
+  tab is hidden (was reloading every 10s in the background).
+- **Billing math hardening:** `compute_bill_totals` now clamps every
+  pct / flat input to ≥0 so a buggy or hostile caller can't sneak a
+  negative tax rate past us and produce a "till owes the customer" total.
+- **Tests:** new pure-function suite for stuck-order classification
+  (`tests/test_tables_overview_stuck.py`); 4 new regression tests in
+  `tests/test_billing_v2.py` covering the negative-input clamping.
+
 ## Overview
 
 Customers can browse the cafe menu and place orders from their table via QR codes or online. The app includes an Owner Portal for managing menus, tracking orders, importing menus, and generating table-specific QR codes.
