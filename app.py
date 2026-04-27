@@ -7544,25 +7544,51 @@ def kitchen_orders_json():
 @app.route("/api/kitchen/orders/<int:order_id>/status", methods=["POST"])
 @login_required
 def kitchen_update_order_status(order_id: int):
-    """JSON endpoint so the kitchen view can advance order status without a full page reload."""
+    """JSON endpoint so the kitchen view can advance order status without a full page reload.
+
+    Returns the freshly-patched order so the client can update its card in
+    place (no need for a second poll). Idempotent: posting the same status
+    a second time returns ``ok=True`` with ``noChange=True`` instead of
+    erroring, which makes the UI safe against double-clicks on a flaky
+    network.
+    """
     owner_id = logged_in_owner_id()
     payload = request.get_json(silent=True) or {}
     new_status = str(payload.get("status", "")).strip()[:32]
     allowed = {"pending", "confirmed", "preparing", "ready", "completed", "cancelled"}
     if new_status not in allowed:
-        return jsonify(error="Invalid status"), 400
+        return jsonify(error="Invalid status",
+                       allowed=sorted(allowed)), 400
+
     order = _db_get_order(order_id)
     if not order:
         return jsonify(error="Order not found"), 404
     if order.get("ownerId") != owner_id:
         abort(403)
+
     prev_status = order.get("status", "pending")
+
+    # Idempotent fast-path — same target as current. Don't re-fire the
+    # inventory restore or the websocket notifications.
+    if prev_status == new_status:
+        return jsonify(ok=True, noChange=True,
+                       orderId=order_id, status=new_status,
+                       order=order)
+
     _db_update_order_status(order_id, new_status)
     if new_status == "cancelled" and prev_status != "cancelled":
         _restore_inventory(order)
     _notify_owner(owner_id, "order_updated", {"id": order_id, "status": new_status})
     _notify_order_status(order_id, new_status)
-    return jsonify(ok=True, orderId=order_id, status=new_status)
+
+    # Re-fetch the freshly-updated order so the response carries the new
+    # ``updated_at`` and any side-effect fields the client might want.
+    fresh = _db_get_order(order_id) or {}
+    fresh["status"] = new_status  # belt-and-braces
+
+    return jsonify(ok=True, noChange=False,
+                   orderId=order_id, status=new_status,
+                   prevStatus=prev_status, order=fresh)
 
 
 # ---------------------------------------------------------------------------

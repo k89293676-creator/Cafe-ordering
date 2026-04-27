@@ -12,6 +12,7 @@
     :root {
       --k-bg: #0f1318;
       --k-card: #1f2937;
+      --k-card-2: #283344;
       --k-border: #374151;
       --k-text: #f9fafb;
       --k-muted: #9ca3af;
@@ -22,47 +23,196 @@
     }
     body { background: var(--k-bg); color: var(--k-text); }
 
-    /* ── Kitchen cards ── */
+    /* ── Layout ──────────────────────────────────────────────────────────── */
+    #main-wrap   { display: flex; height: calc(100vh - 56px); overflow: hidden; }
+    #orders-wrap { flex: 1; overflow-y: auto; padding: 1rem; min-width: 0; }
+
+    /* CSS grid for uniform card alignment regardless of content height. */
+    #orders-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1rem;
+      align-items: stretch;
+    }
+
+    /* ── Filter / sort bar ───────────────────────────────────────────────── */
+    #filter-bar {
+      display: flex; align-items: center; flex-wrap: wrap;
+      gap: .5rem; padding: .25rem 0 1rem;
+    }
+    .filter-pill {
+      background: var(--k-card); border: 1px solid var(--k-border); color: var(--k-text);
+      padding: .35rem .8rem; border-radius: 999px; font-size: .78rem; font-weight: 600;
+      cursor: pointer; transition: background .15s, border-color .15s;
+      display: inline-flex; align-items: center; gap: .35rem; user-select: none;
+    }
+    .filter-pill:hover { background: var(--k-card-2); }
+    .filter-pill.active {
+      background: var(--k-blue); border-color: var(--k-blue); color: #fff;
+    }
+    .filter-pill .count {
+      background: rgba(0,0,0,.25); border-radius: 999px;
+      padding: 0 .45rem; font-size: .68rem; min-width: 1.1rem; text-align: center;
+    }
+    .filter-pill.active .count { background: rgba(255,255,255,.25); }
+    #sort-sel {
+      background: var(--k-card); color: var(--k-text); border: 1px solid var(--k-border);
+      border-radius: 8px; font-size: .78rem; padding: .35rem .55rem;
+    }
+    #filter-bar .spacer { flex: 1; }
+
+    /* ── Kitchen cards ───────────────────────────────────────────────────── */
     .kitchen-card {
       background: var(--k-card); border: 1px solid var(--k-border); border-radius: 14px;
-      padding: 1.1rem 1.15rem; transition: border-color .25s, box-shadow .25s;
+      padding: 1rem 1.1rem; transition: border-color .25s, box-shadow .25s;
       position: relative; overflow: hidden;
+      display: flex; flex-direction: column; height: 100%;
     }
     .kitchen-card.urgent { border-color: var(--k-yellow); box-shadow: 0 0 0 1px rgba(245,158,11,.4); }
-    .kitchen-card.late   { border-color: var(--k-red); box-shadow: 0 0 0 1px rgba(239,68,68,.5), 0 0 20px rgba(239,68,68,.25); animation: pulse 1.6s ease-in-out infinite; }
-    @keyframes pulse { 0%,100% { box-shadow:0 0 0 1px rgba(239,68,68,.5), 0 0 20px rgba(239,68,68,.25); } 50% { box-shadow:0 0 0 1px rgba(239,68,68,.7), 0 0 28px rgba(239,68,68,.45); } }
-    .kitchen-card.flash { animation: flash .9s ease-out; }
-    @keyframes flash { 0% { background: #10b981; } 100% { background: var(--k-card); } }
+    .kitchen-card.late {
+      border-color: var(--k-red);
+      box-shadow: 0 0 0 1px rgba(239,68,68,.5), 0 0 20px rgba(239,68,68,.25);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%,100% { box-shadow: 0 0 0 1px rgba(239,68,68,.5), 0 0 20px rgba(239,68,68,.25); }
+      50%     { box-shadow: 0 0 0 1px rgba(239,68,68,.7), 0 0 28px rgba(239,68,68,.45); }
+    }
+    .kitchen-card.flash    { animation: flash .9s ease-out; }
+    @keyframes flash       { 0% { background: var(--k-green); } 100% { background: var(--k-card); } }
+    .kitchen-card.updating { opacity: .75; pointer-events: none; }
+    .kitchen-card.removing { animation: removeCard .35s ease-in forwards; }
+    @keyframes removeCard  { to { opacity: 0; transform: scale(.96); } }
 
-    .status-badge { font-size:.72rem; font-weight:700; padding:.25rem .65rem; border-radius:999px; letter-spacing:.04em; text-transform:uppercase; }
-    .status-pending    { background:#fef3c7; color:#92400e; }
-    .status-confirmed  { background:#dbeafe; color:#1e40af; }
-    .status-preparing  { background:#fde68a; color:#92400e; }
-    .status-ready      { background:#a7f3d0; color:#065f46; }
+    .card-head {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      gap: .75rem; margin-bottom: .6rem;
+    }
+    .card-title-wrap { min-width: 0; flex: 1; }
+    .card-title-wrap h5 {
+      margin: 0; font-size: 1.05rem; line-height: 1.25;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .card-meta-wrap   { display: flex; flex-direction: column; align-items: flex-end; gap: .35rem; flex-shrink: 0; }
 
-    .order-item-row { padding:.4rem 0; border-bottom: 1px solid var(--k-border); }
+    .status-badge {
+      font-size: .7rem; font-weight: 700; padding: .25rem .65rem; border-radius: 999px;
+      letter-spacing: .04em; text-transform: uppercase; white-space: nowrap;
+    }
+    .status-pending    { background: #fef3c7; color: #92400e; }
+    .status-confirmed  { background: #dbeafe; color: #1e40af; }
+    .status-preparing  { background: #fde68a; color: #92400e; }
+    .status-ready      { background: #a7f3d0; color: #065f46; }
+    .status-completed  { background: #d1fae5; color: #064e3b; }
+    .status-cancelled  { background: #fee2e2; color: #991b1b; }
+
+    .age-pill {
+      display: inline-flex; align-items: center; gap: .3rem;
+      font-size: .72rem; font-weight: 700; padding: .2rem .55rem; border-radius: 999px;
+      background: rgba(255,255,255,.08); color: #cbd5e1;
+    }
+    .age-pill.warn { background: rgba(245,158,11,.18); color: #fbbf24; }
+    .age-pill.bad  { background: rgba(239,68,68,.22); color: #fca5a5; }
+
+    /* Items: scrollable when very long, action row stays pinned at bottom. */
+    .card-items {
+      margin-bottom: .75rem; flex: 1 1 auto; min-height: 0;
+      max-height: 28rem; overflow-y: auto;
+    }
+    .order-item-row {
+      padding: .4rem 0; border-bottom: 1px solid var(--k-border);
+      display: flex; align-items: center; gap: .5rem;
+    }
     .order-item-row:last-child { border-bottom: none; }
+    .order-item-row .item-main { flex: 1; min-width: 0; }
+    .order-item-row .item-main .item-name { display: block; }
+    .order-item-row .item-price { color: var(--k-muted); font-size: .82rem; flex-shrink: 0; }
 
-    .age-pill { display:inline-flex; align-items:center; gap:.3rem; font-size:.72rem; font-weight:700; padding:.2rem .55rem; border-radius:999px; background:rgba(255,255,255,.08); color:#cbd5e1; }
-    .age-pill.warn { background:rgba(245,158,11,.18); color:#fbbf24; }
-    .age-pill.bad  { background:rgba(239,68,68,.22); color:#fca5a5; }
+    /* Item-level prep checkboxes — kitchen ticks off plated items. */
+    .prep-check {
+      width: 1.05rem; height: 1.05rem; flex-shrink: 0; cursor: pointer; accent-color: var(--k-green);
+    }
+    .order-item-row.plated .item-name { text-decoration: line-through; color: var(--k-muted); }
+    .order-item-row.plated .item-price { text-decoration: line-through; }
 
-    .topbar-stats { display:flex; gap:.5rem; flex-wrap:wrap; }
-    .stat-pill { background: var(--k-card); border:1px solid var(--k-border); padding:.4rem .8rem; border-radius:999px; font-size:.78rem; color:#cbd5e1; }
-    .stat-pill strong { color:#fff; font-weight:700; }
+    /* ── Action buttons (alignment-stable) ───────────────────────────────── */
+    .card-actions {
+      display: flex; gap: .4rem; flex-wrap: wrap;
+      padding-top: .5rem; border-top: 1px solid var(--k-border);
+    }
+    .card-actions .btn-stage {
+      flex: 1 1 auto;
+      min-width: 7.5rem;
+      height: 2.3rem;
+      padding: 0 .85rem;
+      font-weight: 700; font-size: .78rem; border-radius: 8px;
+      display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
+    }
+    .card-actions .btn-stage.btn-cancel {
+      flex: 0 0 auto; min-width: 2.6rem; padding: 0 .65rem;
+    }
+    .card-actions .btn-stage.btn-print {
+      flex: 0 0 auto; min-width: 2.6rem; padding: 0 .65rem;
+    }
+    .btn-stage[disabled] { opacity: .85; cursor: wait; }
+    .btn-stage .spinner-border-sm { width: 1rem; height: 1rem; border-width: .15em; }
 
-    .conn-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background: var(--k-green); margin-right:.4rem; box-shadow:0 0 0 3px rgba(16,185,129,.2); }
-    .conn-dot.off { background: var(--k-red); box-shadow:0 0 0 3px rgba(239,68,68,.2); }
+    .card-footer-row {
+      display: flex; justify-content: space-between; align-items: center;
+      color: var(--k-muted); font-size: .78rem; margin-top: .5rem;
+    }
+    .card-footer-row strong { color: var(--k-text); font-weight: 700; }
 
-    .btn-stage { font-weight:700; font-size:.78rem; padding:.4rem .8rem; border-radius:8px; }
-    .sound-toggle.muted { opacity:.5; }
+    /* ── Top-bar stats ───────────────────────────────────────────────────── */
+    .topbar-stats { display: flex; gap: .5rem; flex-wrap: wrap; }
+    .stat-pill {
+      background: var(--k-card); border: 1px solid var(--k-border);
+      padding: .4rem .8rem; border-radius: 999px; font-size: .78rem; color: #cbd5e1;
+    }
+    .stat-pill strong { color: #fff; font-weight: 700; }
 
-    /* ── Table calls sidebar ── */
+    .conn-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--k-green); margin-right: .4rem;
+      box-shadow: 0 0 0 3px rgba(16,185,129,.2);
+    }
+    .conn-dot.off { background: var(--k-red); box-shadow: 0 0 0 3px rgba(239,68,68,.2); }
+    .conn-dot.stale { background: var(--k-yellow); box-shadow: 0 0 0 3px rgba(245,158,11,.2); }
+
+    .sound-toggle.muted { opacity: .5; }
+
+    /* ── Empty state ─────────────────────────────────────────────────────── */
+    .empty-state {
+      grid-column: 1 / -1;
+      text-align: center; padding: 3rem 1rem;
+    }
+    .empty-state i { font-size: 4rem; }
+
+    /* ── Toasts ──────────────────────────────────────────────────────────── */
+    #toast-stack {
+      position: fixed; bottom: 1rem; right: 1rem; z-index: 9999;
+      display: flex; flex-direction: column; gap: .5rem; pointer-events: none;
+    }
+    .k-toast {
+      background: var(--k-card); border: 1px solid var(--k-border);
+      border-left: 4px solid var(--k-blue); color: var(--k-text);
+      padding: .65rem .9rem; border-radius: 8px; font-size: .85rem;
+      box-shadow: 0 6px 18px rgba(0,0,0,.4); pointer-events: auto;
+      max-width: 24rem; animation: toastIn .25s ease-out;
+    }
+    .k-toast.error   { border-left-color: var(--k-red); }
+    .k-toast.success { border-left-color: var(--k-green); }
+    .k-toast.warn    { border-left-color: var(--k-yellow); }
+    @keyframes toastIn {
+      from { transform: translateY(8px); opacity: 0; }
+      to   { transform: translateY(0);   opacity: 1; }
+    }
+
+    /* ── Table calls sidebar (unchanged) ─────────────────────────────────── */
     #tc-sidebar {
       width: 280px; min-width: 260px; flex-shrink: 0;
       background: #161d26; border-left: 1px solid var(--k-border);
-      display: flex; flex-direction: column;
-      overflow: hidden;
+      display: flex; flex-direction: column; overflow: hidden;
     }
     #tc-sidebar-head {
       padding: .75rem 1rem; background: #0f172a;
@@ -74,58 +224,63 @@
       background: var(--k-card); border: 1px solid var(--k-border); border-radius: 10px;
       padding: .65rem .75rem; margin-bottom: .5rem; cursor: default;
     }
-    .tc-item.tc-open   { border-left: 3px solid var(--k-red); }
-    .tc-item.tc-acked  { border-left: 3px solid var(--k-yellow); opacity: .85; }
-    .tc-item-head { display: flex; justify-content: space-between; align-items: baseline; gap:.5rem; }
-    .tc-item-table { font-weight: 700; font-size: .9rem; }
-    .tc-item-time { font-size: .68rem; color: var(--k-muted); }
-    .tc-item-reason { font-size: .8rem; color: #cbd5e1; margin: .2rem 0; }
-    .tc-item-note { font-size: .72rem; color: var(--k-muted); font-style: italic; }
-    .tc-item-age { font-size: .68rem; font-weight: 700; }
+    .tc-item.tc-open  { border-left: 3px solid var(--k-red); }
+    .tc-item.tc-acked { border-left: 3px solid var(--k-yellow); opacity: .85; }
+    .tc-item-head    { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
+    .tc-item-table   { font-weight: 700; font-size: .9rem; }
+    .tc-item-time    { font-size: .68rem; color: var(--k-muted); }
+    .tc-item-reason  { font-size: .8rem; color: #cbd5e1; margin: .2rem 0; }
+    .tc-item-note    { font-size: .72rem; color: var(--k-muted); font-style: italic; }
+    .tc-item-age     { font-size: .68rem; font-weight: 700; }
     .tc-item-age.warn { color: #fbbf24; }
     .tc-item-age.bad  { color: #fca5a5; }
     .tc-act-row { display: flex; gap: .3rem; margin-top: .4rem; }
     .tc-act-btn { flex: 1; border: 0; border-radius: 7px; padding: .3rem .5rem; font-size: .72rem; font-weight: 700; cursor: pointer; }
-    .tc-act-btn.ack  { background:#fef3c7; color:#92400e; }
-    .tc-act-btn.res  { background:#dcfce7; color:#065f46; }
+    .tc-act-btn.ack { background: #fef3c7; color: #92400e; }
+    .tc-act-btn.res { background: #dcfce7; color: #065f46; }
     .tc-act-btn:disabled { opacity: .5; cursor: not-allowed; }
     .tc-empty { color: var(--k-muted); text-align: center; padding: 2rem 1rem; font-size: .82rem; }
-
-    /* ── New call flash ── */
-    @keyframes tcFlash { 0%,100%{background:var(--k-card)} 50%{background:rgba(239,68,68,.22)} }
+    @keyframes tcFlash { 0%,100% { background: var(--k-card); } 50% { background: rgba(239,68,68,.22); } }
     .tc-item.new-flash { animation: tcFlash 1s ease-out 2; }
 
-    /* ── Layout ── */
-    #main-wrap { display: flex; height: calc(100vh - 56px); overflow: hidden; }
-    #orders-wrap { flex: 1; overflow-y: auto; padding: 1rem; }
-
+    /* ── Responsive ──────────────────────────────────────────────────────── */
     @media (max-width: 768px) {
       #tc-sidebar { display: none; }
       #tc-mobile-btn { display: flex !important; }
+      #orders-grid { grid-template-columns: 1fr; }
     }
     #tc-mobile-btn { display: none; }
 
+    /* ── Print: only the printing-card is shown, full width. ─────────────── */
     @media print {
-      body { background:#fff; color:#000; }
-      .no-print { display:none !important; }
-      .kitchen-card { background:#fff; border:1px solid #ccc; color:#000; }
-      .order-item-row { border-bottom-color:#eee; }
-      #tc-sidebar { display: none; }
+      body * { visibility: hidden; }
+      .kitchen-card.printing,
+      .kitchen-card.printing * { visibility: visible; }
+      .kitchen-card.printing {
+        position: absolute; top: 0; left: 0; width: 100%;
+        background: #fff; color: #000; border: none; box-shadow: none;
+      }
+      .kitchen-card.printing .card-actions,
+      .kitchen-card.printing .prep-check { display: none !important; }
+      .kitchen-card.printing .order-item-row,
+      .kitchen-card.printing .card-footer-row,
+      .kitchen-card.printing .item-price,
+      .kitchen-card.printing .text-muted { color: #000 !important; }
     }
   </style>
 </head>
 <body>
 
-<!-- ── Top bar ── -->
-<div class="container-fluid py-2 px-3 no-print" style="background:#0f172a;border-bottom:1px solid #1e293b;">
+<!-- ── Top bar ─────────────────────────────────────────────────────────── -->
+<div class="container-fluid py-2 px-3 no-print" style="background: #0f172a; border-bottom: 1px solid #1e293b;">
   <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
     <div class="d-flex align-items-center gap-3 flex-wrap">
       <a href="{{ url_for('owner_dashboard') }}" class="btn btn-sm btn-outline-light"><i class="bi bi-arrow-left"></i></a>
       <h4 class="mb-0 text-white"><i class="bi bi-fire me-2 text-warning"></i>Kitchen</h4>
-      <span class="age-pill">
+      <span class="age-pill" id="conn-pill" title="Live polling status">
         <span id="conn-dot" class="conn-dot"></span>
         <span id="conn-label">Live</span>
-        · every 10s
+        <span class="text-muted" id="conn-detail">· every 10s</span>
       </span>
     </div>
 
@@ -140,61 +295,45 @@
     </div>
 
     <div class="d-flex gap-2">
+      <button id="onetap-btn" class="btn btn-sm btn-outline-light" title="One-tap accept (skip 'confirmed' step)">
+        <i class="bi bi-lightning-charge-fill"></i>
+      </button>
       <button id="sound-btn" class="btn btn-sm btn-outline-light sound-toggle" title="Toggle alert sound">
         <i class="bi bi-volume-up-fill"></i>
       </button>
-      <button onclick="window.print()" class="btn btn-sm btn-outline-light no-print">
-        <i class="bi bi-printer"></i>
-      </button>
-      <button onclick="loadOrders(true)" class="btn btn-sm btn-success">
+      <button onclick="loadOrders(true)" class="btn btn-sm btn-success" title="Refresh (R)">
         <i class="bi bi-arrow-clockwise"></i>
       </button>
     </div>
   </div>
 </div>
 
-<!-- ── Main split layout ── -->
+<!-- ── Main split layout ───────────────────────────────────────────────── -->
 <div id="main-wrap">
 
   <!-- Orders grid -->
   <div id="orders-wrap">
-    <div id="orders-grid" class="row g-3">
-      {% if orders %}
-        {% for order in orders %}
-        <div class="col-md-6 col-xl-4" data-order-id="{{ order.id }}">
-          <div class="kitchen-card">
-            <div class="d-flex justify-content-between align-items-start mb-2">
-              <div>
-                <h5 class="mb-0 text-white">#{{ order.id }} — {{ order.tableName or '—' }}</h5>
-                <small class="text-muted">{{ order.customerName or 'Guest' }}</small>
-              </div>
-              <span class="status-badge status-{{ order.status }}">{{ order.status|upper }}</span>
-            </div>
-            <div class="mb-3">
-              {% for item in order['items'] %}
-              <div class="order-item-row d-flex justify-content-between">
-                <span class="fw-bold text-white">{{ item.quantity }}× {{ item.name }}</span>
-                <span class="text-muted small">₹{{ "%.0f"|format(item.lineTotal) }}</span>
-              </div>
-              {% endfor %}
-            </div>
-            {% if order.notes %}
-            <div class="alert alert-warning py-1 px-2 small mb-2">
-              <i class="bi bi-chat-left-text me-1"></i>{{ order.notes }}
-            </div>
-            {% endif %}
-          </div>
-        </div>
-        {% endfor %}
-      {% else %}
-        <div class="col-12">
-          <div class="text-center py-5">
-            <i class="bi bi-check-circle text-success" style="font-size:4rem;"></i>
-            <h4 class="mt-3 text-white">All clear!</h4>
-            <p class="text-muted">No active orders right now.</p>
-          </div>
-        </div>
-      {% endif %}
+    <!-- Filter / sort bar -->
+    <div id="filter-bar" class="no-print">
+      <button class="filter-pill active" data-filter="all">All <span class="count" data-count="all">0</span></button>
+      <button class="filter-pill" data-filter="pending">Pending <span class="count" data-count="pending">0</span></button>
+      <button class="filter-pill" data-filter="confirmed">Confirmed <span class="count" data-count="confirmed">0</span></button>
+      <button class="filter-pill" data-filter="preparing">Preparing <span class="count" data-count="preparing">0</span></button>
+      <button class="filter-pill" data-filter="ready">Ready <span class="count" data-count="ready">0</span></button>
+      <div class="spacer"></div>
+      <label class="text-muted small me-1" for="sort-sel">Sort</label>
+      <select id="sort-sel" title="Sort orders">
+        <option value="oldest">Oldest first</option>
+        <option value="newest">Newest first</option>
+        <option value="table">By table</option>
+      </select>
+    </div>
+
+    <div id="orders-grid">
+      <div class="empty-state" id="loading-state">
+        <div class="spinner-border text-secondary" role="status"></div>
+        <p class="text-muted mt-3 mb-0">Loading orders…</p>
+      </div>
     </div>
   </div>
 
@@ -203,14 +342,14 @@
     <div id="tc-sidebar-head">
       <div class="d-flex align-items-center gap-2">
         <i class="bi bi-bell-fill text-warning"></i>
-        <span style="font-size:.88rem;font-weight:700;">Table Calls</span>
-        <span id="tc-badge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;padding:0 .45rem;font-size:.65rem;font-weight:700;">0</span>
+        <span style="font-size: .88rem; font-weight: 700;">Table Calls</span>
+        <span id="tc-badge" style="display: none; background: #ef4444; color: #fff; border-radius: 999px; padding: 0 .45rem; font-size: .65rem; font-weight: 700;">0</span>
       </div>
       <div class="d-flex gap-1">
         <button id="tc-sound-btn" class="btn btn-sm btn-outline-secondary sound-toggle py-0 px-2" title="Toggle call sound">
-          <i class="bi bi-volume-up-fill" style="font-size:.75rem;"></i>
+          <i class="bi bi-volume-up-fill" style="font-size: .75rem;"></i>
         </button>
-        <select id="tc-filter-sel" class="form-select form-select-sm py-0" style="width:auto;font-size:.72rem;background:#0f172a;color:#fff;border-color:#374151;">
+        <select id="tc-filter-sel" class="form-select form-select-sm py-0" style="width: auto; font-size: .72rem; background: #0f172a; color: #fff; border-color: #374151;">
           <option value="open">Open</option>
           <option value="acknowledged">Acked</option>
           <option value="resolved">Resolved</option>
@@ -223,27 +362,30 @@
   </div>
 </div>
 
+<!-- Toasts -->
+<div id="toast-stack" aria-live="polite" aria-atomic="true"></div>
+
 <!-- Order card template -->
 <template id="card-template">
-  <div class="col-md-6 col-xl-4">
+  <div class="kitchen-card-col" data-order-id="">
     <div class="kitchen-card">
-      <div class="d-flex justify-content-between align-items-start mb-2">
-        <div>
-          <h5 class="mb-0 text-white card-title"></h5>
+      <div class="card-head">
+        <div class="card-title-wrap">
+          <h5 class="text-white card-title"></h5>
           <small class="text-muted card-customer"></small>
           <div class="card-pickup mt-1"></div>
         </div>
-        <div class="d-flex flex-column align-items-end gap-1">
+        <div class="card-meta-wrap">
           <span class="status-badge card-status"></span>
           <span class="age-pill card-age"><i class="bi bi-clock"></i><span class="card-age-text"></span></span>
         </div>
       </div>
-      <div class="card-items mb-3"></div>
+      <div class="card-items"></div>
       <div class="card-notes"></div>
-      <div class="d-flex gap-1 flex-wrap no-print card-actions"></div>
-      <div class="text-muted small mt-2 d-flex justify-content-between">
+      <div class="card-actions no-print"></div>
+      <div class="card-footer-row">
         <span><i class="bi bi-clock me-1"></i><span class="card-time"></span></span>
-        <span>Total: <strong class="text-white card-total"></strong></span>
+        <span>Total: <strong class="card-total"></strong></span>
       </div>
     </div>
   </div>
@@ -253,28 +395,41 @@
 <script>
   const CSRF = '{{ csrf_token() }}';
 
-  // ── Status flow ─────────────────────────────────────────────────────────────
-  const STATUS_FLOW = {
-    pending:   { next: 'confirmed', cls: 'btn-outline-primary',  label: 'Confirm'    },
-    confirmed: { next: 'preparing', cls: 'btn-outline-warning',  label: 'Start prep' },
-    preparing: { next: 'ready',     cls: 'btn-outline-success',  label: 'Mark ready' },
-    ready:     { next: 'completed', cls: 'btn-success',          label: 'Complete'   },
+  // ── Status flow ────────────────────────────────────────────────────────
+  // Default ("fine grain") = pending → confirmed → preparing → ready → completed
+  // One-tap mode collapses the first two: pending → preparing → ready → completed
+  const STATUS_FLOW_FINE = {
+    pending:   { next: 'confirmed', cls: 'btn-outline-primary',  label: 'Confirm',    icon: 'bi-check2' },
+    confirmed: { next: 'preparing', cls: 'btn-outline-warning',  label: 'Start prep', icon: 'bi-fire' },
+    preparing: { next: 'ready',     cls: 'btn-outline-success',  label: 'Mark ready', icon: 'bi-check2-circle' },
+    ready:     { next: 'completed', cls: 'btn-success',          label: 'Complete',   icon: 'bi-check-circle-fill' },
+  };
+  const STATUS_FLOW_ONETAP = {
+    pending:   { next: 'preparing', cls: 'btn-primary',          label: 'Accept & start', icon: 'bi-lightning-charge-fill' },
+    confirmed: { next: 'preparing', cls: 'btn-outline-warning',  label: 'Start prep',     icon: 'bi-fire' },
+    preparing: { next: 'ready',     cls: 'btn-outline-success',  label: 'Mark ready',     icon: 'bi-check2-circle' },
+    ready:     { next: 'completed', cls: 'btn-success',          label: 'Complete',       icon: 'bi-check-circle-fill' },
   };
 
-  // ── State ───────────────────────────────────────────────────────────────────
-  let lastOrderIds = new Set({{ (orders|map(attribute='id')|list if orders else [])|tojson }});
+  // ── State ──────────────────────────────────────────────────────────────
+  let ordersById   = new Map();   // canonical local cache → id → order
+  let lastOrderIds = new Set();
   let lastCallIds  = new Set();
   let firstLoad    = true;
+  let lastFetchAt  = 0;           // ms epoch of last successful /orders fetch
   let soundOn      = localStorage.getItem('kitchen-sound') !== '0';
   let tcSoundOn    = localStorage.getItem('kitchen-tc-sound') !== '0';
+  let onetapOn     = localStorage.getItem('kitchen-onetap') === '1';
+  let curFilter    = localStorage.getItem('kitchen-filter') || 'all';
+  let curSort      = localStorage.getItem('kitchen-sort')   || 'oldest';
   let ageTick      = null;
   let ageBase      = {};
   let tcAgeTick    = null;
-  let tcCallTimes  = {};   // id → createdAt ms
+  let tcCallTimes  = {};
 
-  // ── Sound helpers ───────────────────────────────────────────────────────────
+  // ── Sound helpers ──────────────────────────────────────────────────────
   let audioCtx = null;
-  function chime(freqs = [[880,0],[1175,250]]) {
+  function chime(freqs = [[880, 0], [1175, 250]]) {
     try {
       audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
       freqs.forEach(([freq, delay]) => {
@@ -288,13 +443,12 @@
           o.start(); o.stop(audioCtx.currentTime + 0.55);
         }, delay);
       });
-    } catch(_) {}
+    } catch (_) {}
   }
-  function orderChime()  { if (soundOn)   chime([[880,0],[1175,250]]); }
-  function callChime()   { if (tcSoundOn) chime([[660,0],[880,80],[1100,180]]); }
+  function orderChime() { if (soundOn)   chime([[880, 0], [1175, 250]]); }
+  function callChime()  { if (tcSoundOn) chime([[660, 0], [880, 80], [1100, 180]]); }
 
-  // ── Browser notifications ───────────────────────────────────────────────────
-  // Request permission on first user interaction (required by Chrome)
+  // ── Browser notifications ──────────────────────────────────────────────
   document.addEventListener('click', function _once() {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
@@ -303,8 +457,8 @@
   }, { once: true });
 
   const TC_REASON = {
-    service:'🛎️ Service', bill:'💳 Bill', water:'💧 Water refill',
-    help:'❓ Help needed', cutlery:'🍴 Cutlery',
+    service: '🛎️ Service', bill: '💳 Bill', water: '💧 Water refill',
+    help: '❓ Help needed', cutlery: '🍴 Cutlery',
   };
   function showCallNotification(call) {
     if ('Notification' in window && Notification.permission === 'granted') {
@@ -319,9 +473,22 @@
     }
   }
 
-  // ── Sound toggle buttons ────────────────────────────────────────────────────
+  // ── Toast helper ───────────────────────────────────────────────────────
+  function toast(msg, type = 'info', timeout = 3500) {
+    const stack = document.getElementById('toast-stack');
+    if (!stack) return;
+    const t = document.createElement('div');
+    t.className = 'k-toast ' + (type || '');
+    t.textContent = msg;
+    stack.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateY(8px)'; t.style.transition = 'all .25s'; }, timeout - 250);
+    setTimeout(() => { t.remove(); }, timeout);
+  }
+
+  // ── Top-bar buttons ────────────────────────────────────────────────────
   const soundBtn   = document.getElementById('sound-btn');
   const tcSoundBtn = document.getElementById('tc-sound-btn');
+  const onetapBtn  = document.getElementById('onetap-btn');
 
   function refreshSoundBtn() {
     soundBtn.classList.toggle('muted', !soundOn);
@@ -333,8 +500,17 @@
     tcSoundBtn.classList.toggle('muted', !tcSoundOn);
     tcSoundBtn.style.opacity = tcSoundOn ? '1' : '.4';
   }
+  function refreshOnetapBtn() {
+    onetapBtn.classList.toggle('btn-warning', onetapOn);
+    onetapBtn.classList.toggle('btn-outline-light', !onetapOn);
+    onetapBtn.title = onetapOn
+      ? 'One-tap accept ON — pending orders go straight to preparing'
+      : 'One-tap accept OFF — full pending → confirmed → preparing flow';
+  }
   refreshSoundBtn();
   refreshTcSoundBtn();
+  refreshOnetapBtn();
+
   soundBtn.addEventListener('click', () => {
     soundOn = !soundOn;
     localStorage.setItem('kitchen-sound', soundOn ? '1' : '0');
@@ -347,8 +523,15 @@
     refreshTcSoundBtn();
     if (tcSoundOn) callChime();
   });
+  onetapBtn.addEventListener('click', () => {
+    onetapOn = !onetapOn;
+    localStorage.setItem('kitchen-onetap', onetapOn ? '1' : '0');
+    refreshOnetapBtn();
+    rerender();   // action buttons change immediately
+    toast(onetapOn ? 'One-tap accept enabled' : 'Full accept flow restored', 'info', 1800);
+  });
 
-  // ── Time helpers ────────────────────────────────────────────────────────────
+  // ── Time helpers ───────────────────────────────────────────────────────
   function fmtAge(s) {
     s = Math.max(0, Math.round(s));
     const m = Math.floor(s / 60), sec = s % 60;
@@ -356,157 +539,279 @@
     if (m < 60) return m + 'm' + (sec ? ' ' + sec + 's' : '');
     return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
   }
-  function ageCardClass(s) { return s > 900 ? 'late' : s > 480 ? 'urgent' : ''; }
-  function ageBadgeClass(s) { return s > 900 ? 'bad' : s > 480 ? 'warn' : ''; }
-  function tcAgeClass(ms) { const s = ms/1000; return s > 300 ? 'bad' : s > 120 ? 'warn' : ''; }
+  function ageCardClass(s)  { return s > 900 ? 'late' : s > 480 ? 'urgent' : ''; }
+  function ageBadgeClass(s) { return s > 900 ? 'bad'  : s > 480 ? 'warn'   : ''; }
+  function tcAgeClass(ms)   { const s = ms / 1000; return s > 300 ? 'bad' : s > 120 ? 'warn' : ''; }
 
-  // ── Escape ──────────────────────────────────────────────────────────────────
+  // ── Escape ─────────────────────────────────────────────────────────────
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, c =>
-      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  // ── Order action buttons HTML ───────────────────────────────────────────────
+  // ── Action buttons (alignment-stable; min-width keeps spinner on the same footprint) ──
   function actionsHTML(order) {
+    const flow = (onetapOn ? STATUS_FLOW_ONETAP : STATUS_FLOW_FINE)[order.status];
     const parts = [];
-    const flow = STATUS_FLOW[order.status];
     if (flow) {
       parts.push(
         `<button class="btn btn-sm ${flow.cls} btn-stage" ` +
-        `data-oid="${order.id}" data-status="${flow.next}">${flow.label} →</button>`
+        `data-oid="${order.id}" data-status="${flow.next}" ` +
+        `data-prev="${order.status}" title="Advance order #${order.id}">` +
+        `<i class="bi ${flow.icon}"></i><span>${esc(flow.label)}</span></button>`
       );
     }
+    // Print KOT (Kitchen Order Ticket)
+    parts.push(
+      `<button class="btn btn-sm btn-outline-light btn-stage btn-print" ` +
+      `data-print-oid="${order.id}" title="Print Kitchen Order Ticket">` +
+      `<i class="bi bi-printer"></i></button>`
+    );
     if (order.status !== 'completed' && order.status !== 'cancelled') {
       parts.push(
-        `<button class="btn btn-sm btn-outline-danger btn-stage" ` +
-        `data-oid="${order.id}" data-status="cancelled" ` +
-        `data-confirm="Cancel order #${order.id}?"><i class="bi bi-x"></i></button>`
+        `<button class="btn btn-sm btn-outline-danger btn-stage btn-cancel" ` +
+        `data-oid="${order.id}" data-status="cancelled" data-prev="${order.status}" ` +
+        `data-confirm="Cancel order #${order.id}? This restores inventory." ` +
+        `title="Cancel order"><i class="bi bi-x-lg"></i></button>`
       );
     }
     return parts.join('');
   }
 
-  // ── Order status update ─────────────────────────────────────────────────────
+  // ── Optimistic status update + KOT print, delegated on the grid root ───
   document.getElementById('orders-grid').addEventListener('click', async (e) => {
+    // KOT print
+    const printBtn = e.target.closest('[data-print-oid]');
+    if (printBtn) {
+      const col = document.querySelector(`[data-order-id="${printBtn.dataset.printOid}"]`);
+      const card = col && col.querySelector('.kitchen-card');
+      if (!card) return;
+      card.classList.add('printing');
+      const after = () => { card.classList.remove('printing'); window.removeEventListener('afterprint', after); };
+      window.addEventListener('afterprint', after);
+      window.print();
+      return;
+    }
+
+    // Status advance
     const btn = e.target.closest('[data-oid][data-status]');
     if (!btn) return;
     if (btn.dataset.confirm && !confirm(btn.dataset.confirm)) return;
+
+    const oid       = Number(btn.dataset.oid);
+    const newStatus = btn.dataset.status;
+    const prev      = btn.dataset.prev || (ordersById.get(oid) || {}).status;
+    const order     = ordersById.get(oid);
+    if (!order) return;
+
+    // ── Optimistic patch ────────────────────────────────────────────────
+    order.status = newStatus;
+    const col  = document.querySelector(`[data-order-id="${oid}"]`);
+    const card = col && col.querySelector('.kitchen-card');
+    if (card) card.classList.add('updating');
+
+    // Prepare button state without changing footprint
     btn.disabled = true;
-    const original = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    const originalHTML = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+
     try {
-      const r = await fetch(`/api/kitchen/orders/${btn.dataset.oid}/status`, {
-        method: 'POST', credentials: 'same-origin',
+      const r = await fetch(`/api/kitchen/orders/${oid}/status`, {
+        method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-        body: JSON.stringify({ status: btn.dataset.status }),
+        body: JSON.stringify({ status: newStatus }),
       });
-      if (!r.ok) throw new Error(r.status);
-      await loadOrders(true);
-    } catch(_) {
+      if (!r.ok) {
+        let detail = '';
+        try { detail = (await r.json()).error || ''; } catch (_) {}
+        throw new Error(detail || ('HTTP ' + r.status));
+      }
+      const data = await r.json();
+      if (data.order) ordersById.set(oid, data.order);
+
+      // Terminal states fade out — non-terminal just re-render the card.
+      if (newStatus === 'completed' || newStatus === 'cancelled') {
+        if (card) card.classList.add('removing');
+        setTimeout(() => {
+          ordersById.delete(oid);
+          rerender();
+        }, 320);
+      } else {
+        rerender();
+      }
+      toast(`Order #${oid} → ${newStatus}`, 'success', 1800);
+    } catch (err) {
+      // ── Rollback ──────────────────────────────────────────────────────
+      order.status = prev;
+      if (card) card.classList.remove('updating');
       btn.disabled = false;
-      btn.innerHTML = original;
-      alert('Could not update status — please try again.');
+      btn.innerHTML = originalHTML;
+      toast(`Could not update #${oid}: ${err.message}`, 'error', 4000);
     }
   });
 
-  // ── Render orders ───────────────────────────────────────────────────────────
-  function renderOrders(orders) {
-    const grid = document.getElementById('orders-grid');
+  // ── Item-level prep checkboxes (sessionStorage-scoped) ─────────────────
+  function platedKey(orderId) { return 'k-plated-' + orderId; }
+  function platedSet(orderId) {
+    try { return new Set(JSON.parse(sessionStorage.getItem(platedKey(orderId)) || '[]')); }
+    catch (_) { return new Set(); }
+  }
+  function savePlated(orderId, set) {
+    try { sessionStorage.setItem(platedKey(orderId), JSON.stringify([...set])); } catch (_) {}
+  }
+  document.getElementById('orders-grid').addEventListener('change', (e) => {
+    const cb = e.target.closest('input.prep-check');
+    if (!cb) return;
+    const oid  = Number(cb.dataset.oid);
+    const idx  = cb.dataset.idx;
+    const set  = platedSet(oid);
+    if (cb.checked) set.add(idx); else set.delete(idx);
+    savePlated(oid, set);
+    cb.closest('.order-item-row').classList.toggle('plated', cb.checked);
+  });
 
-    if (!orders.length) {
-      if (ageTick) { clearInterval(ageTick); ageTick = null; }
-      grid.innerHTML = `
-        <div class="col-12">
-          <div class="text-center py-5">
-            <i class="bi bi-check-circle text-success" style="font-size:4rem;"></i>
-            <h4 class="mt-3 text-white">All clear!</h4>
-            <p class="text-muted">No active orders right now.</p>
-          </div>
-        </div>`;
+  // ── Filter / sort ──────────────────────────────────────────────────────
+  function setFilter(f) {
+    curFilter = f;
+    localStorage.setItem('kitchen-filter', f);
+    document.querySelectorAll('.filter-pill').forEach(p =>
+      p.classList.toggle('active', p.dataset.filter === f));
+    rerender();
+  }
+  document.querySelectorAll('.filter-pill').forEach(p =>
+    p.addEventListener('click', () => setFilter(p.dataset.filter)));
+  document.getElementById('sort-sel').value = curSort;
+  document.getElementById('sort-sel').addEventListener('change', (e) => {
+    curSort = e.target.value;
+    localStorage.setItem('kitchen-sort', curSort);
+    rerender();
+  });
+  // Apply initial active pill
+  document.querySelectorAll('.filter-pill').forEach(p =>
+    p.classList.toggle('active', p.dataset.filter === curFilter));
+
+  function sortedOrders(list) {
+    const arr = list.slice();
+    if (curSort === 'newest') {
+      arr.sort((a, b) => (b.ageSeconds || 0) - (a.ageSeconds || 0) === 0
+        ? (a.id - b.id)
+        : (a.ageSeconds || 0) - (b.ageSeconds || 0));
+      arr.reverse();
+    } else if (curSort === 'table') {
+      arr.sort((a, b) => String(a.tableName || '').localeCompare(String(b.tableName || ''), undefined, { numeric: true }));
     } else {
-      grid.innerHTML = '';
-      const tpl = document.getElementById('card-template');
-      orders.forEach(o => {
-        const node = tpl.content.cloneNode(true);
-        const col  = node.querySelector('.col-md-6');
-        const card = node.querySelector('.kitchen-card');
-        col.dataset.orderId = o.id;
-        const ac = ageCardClass(o.ageSeconds);
-        if (ac) card.classList.add(ac);
-
-        node.querySelector('.card-title').textContent = `#${o.id} — ${o.tableName || '—'}`;
-        const bits = [o.customerName || 'Guest'];
-        if (o.customerPhone) bits.push(`📞 ${o.customerPhone}`);
-        node.querySelector('.card-customer').textContent = bits.join(' · ');
-
-        if (o.pickupCode) {
-          node.querySelector('.card-pickup').innerHTML =
-            `<span class="badge bg-warning text-dark fw-bold fs-6">📦 ${esc(o.pickupCode)}</span>`;
-        }
-
-        const sb = node.querySelector('.card-status');
-        sb.classList.add('status-' + o.status);
-        sb.textContent = o.status.toUpperCase();
-
-        const ab = node.querySelector('.card-age');
-        const bc = ageBadgeClass(o.ageSeconds);
-        if (bc) ab.classList.add(bc);
-        node.querySelector('.card-age-text').textContent = fmtAge(o.ageSeconds);
-
-        const itemsHtml = (o.items || []).map(it => `
-          <div class="order-item-row d-flex justify-content-between">
-            <span class="fw-bold text-white">${it.quantity}× ${esc(it.name)}</span>
-            <span class="text-muted small">₹${Number(it.lineTotal||0).toFixed(0)}</span>
-          </div>
-          ${it.size  ? `<div class="text-muted small ps-2">Size: ${esc(it.size)}</div>` : ''}
-          ${it.notes ? `<div class="text-warning small ps-2">📝 ${esc(it.notes)}</div>` : ''}
-          ${(it.modifiers && it.modifiers.length)
-            ? `<div class="text-muted small ps-2">+ ${it.modifiers.map(m => {
-                const p = Number(m.priceDelta ?? m.price ?? 0);
-                return esc(m.name) + (p ? ` <span class="text-info">(+₹${p.toFixed(0)})</span>` : '');
-              }).join(', ')}</div>` : ''}
-        `).join('');
-        node.querySelector('.card-items').innerHTML = itemsHtml;
-
-        if (o.notes) {
-          node.querySelector('.card-notes').innerHTML =
-            `<div class="alert alert-warning py-1 px-2 small mb-2">` +
-            `<i class="bi bi-chat-left-text me-1"></i>${esc(o.notes)}</div>`;
-        }
-        node.querySelector('.card-actions').innerHTML = actionsHTML(o);
-        node.querySelector('.card-time').textContent  = (o.createdAt || '').slice(11, 16) || '—';
-        node.querySelector('.card-total').textContent = '₹' + Number(o.total || 0).toFixed(0);
-        grid.appendChild(node);
-      });
+      arr.sort((a, b) => (b.ageSeconds || 0) - (a.ageSeconds || 0));
     }
+    return arr;
+  }
 
-    // Stats
-    const counts = { pending:0, confirmed:0, preparing:0, ready:0 };
-    orders.forEach(o => { if (o.status in counts) counts[o.status]++; });
-    document.getElementById('stat-active').textContent    = orders.length;
+  // ── Stat counts (always reflects unfiltered cache) ─────────────────────
+  function updateStatsAndCounts() {
+    const all = [...ordersById.values()];
+    const counts = { all: all.length, pending: 0, confirmed: 0, preparing: 0, ready: 0 };
+    all.forEach(o => { if (o.status in counts) counts[o.status]++; });
+
+    document.querySelectorAll('[data-count]').forEach(el => {
+      el.textContent = counts[el.dataset.count] ?? 0;
+    });
+
+    document.getElementById('stat-active').textContent    = counts.all;
     document.getElementById('stat-pending').textContent   = counts.pending;
     document.getElementById('stat-preparing').textContent = counts.preparing;
     document.getElementById('stat-ready').textContent     = counts.ready;
-    document.title = (orders.length ? `(${orders.length}) ` : '') + 'Kitchen';
-
-    // New order detection
-    const currentIds = new Set(orders.map(o => o.id));
-    if (!firstLoad) {
-      const newIds = [...currentIds].filter(id => !lastOrderIds.has(id));
-      if (newIds.length) {
-        orderChime();
-        newIds.forEach(id => {
-          const card = grid.querySelector(`[data-order-id="${id}"] .kitchen-card`);
-          if (card) card.classList.add('flash');
-        });
-      }
-    }
-    lastOrderIds = currentIds;
-    firstLoad = false;
-    startAgeTick(orders);
+    document.title = (counts.all ? `(${counts.all}) ` : '') + 'Kitchen';
   }
 
-  // ── Age ticker ──────────────────────────────────────────────────────────────
+  // ── Render orders from local cache ─────────────────────────────────────
+  function rerender() {
+    const grid = document.getElementById('orders-grid');
+    let visible = [...ordersById.values()];
+    if (curFilter !== 'all') visible = visible.filter(o => o.status === curFilter);
+    visible = sortedOrders(visible);
+
+    updateStatsAndCounts();
+
+    if (!visible.length) {
+      if (ageTick) { clearInterval(ageTick); ageTick = null; }
+      const reason = ordersById.size
+        ? `No orders match the "${curFilter}" filter.`
+        : 'No active orders right now.';
+      grid.innerHTML = `
+        <div class="empty-state">
+          <i class="bi bi-check-circle text-success"></i>
+          <h4 class="mt-3 text-white">All clear!</h4>
+          <p class="text-muted mb-0">${esc(reason)}</p>
+        </div>`;
+      return;
+    }
+
+    grid.innerHTML = '';
+    const tpl = document.getElementById('card-template');
+    visible.forEach(o => {
+      const node = tpl.content.cloneNode(true);
+      const col  = node.querySelector('.kitchen-card-col');
+      const card = node.querySelector('.kitchen-card');
+      col.dataset.orderId = o.id;
+      const ac = ageCardClass(o.ageSeconds);
+      if (ac) card.classList.add(ac);
+
+      node.querySelector('.card-title').textContent = `#${o.id} — ${o.tableName || '—'}`;
+      const bits = [o.customerName || 'Guest'];
+      if (o.customerPhone) bits.push(`📞 ${o.customerPhone}`);
+      node.querySelector('.card-customer').textContent = bits.join(' · ');
+
+      if (o.pickupCode) {
+        node.querySelector('.card-pickup').innerHTML =
+          `<span class="badge bg-warning text-dark fw-bold fs-6">📦 ${esc(o.pickupCode)}</span>`;
+      }
+
+      const sb = node.querySelector('.card-status');
+      sb.classList.add('status-' + o.status);
+      sb.textContent = o.status.toUpperCase();
+
+      const ab = node.querySelector('.card-age');
+      const bc = ageBadgeClass(o.ageSeconds);
+      if (bc) ab.classList.add(bc);
+      node.querySelector('.card-age-text').textContent = fmtAge(o.ageSeconds);
+
+      const plated = platedSet(o.id);
+      const itemsHtml = (o.items || []).map((it, idx) => {
+        const isPlated = plated.has(String(idx));
+        return `
+          <div class="order-item-row${isPlated ? ' plated' : ''}">
+            <input type="checkbox" class="prep-check" data-oid="${o.id}" data-idx="${idx}"
+                   ${isPlated ? 'checked' : ''} title="Mark plated"/>
+            <div class="item-main">
+              <span class="fw-bold text-white item-name">${it.quantity}× ${esc(it.name)}</span>
+              ${it.size  ? `<div class="text-muted small ps-1">Size: ${esc(it.size)}</div>` : ''}
+              ${it.notes ? `<div class="text-warning small ps-1">📝 ${esc(it.notes)}</div>` : ''}
+              ${(it.modifiers && it.modifiers.length)
+                ? `<div class="text-muted small ps-1">+ ${it.modifiers.map(m => {
+                    const p = Number(m.priceDelta ?? m.price ?? 0);
+                    return esc(m.name) + (p ? ` <span class="text-info">(+₹${p.toFixed(0)})</span>` : '');
+                  }).join(', ')}</div>` : ''}
+            </div>
+            <span class="item-price">₹${Number(it.lineTotal || 0).toFixed(0)}</span>
+          </div>`;
+      }).join('');
+      node.querySelector('.card-items').innerHTML = itemsHtml;
+
+      if (o.notes) {
+        node.querySelector('.card-notes').innerHTML =
+          `<div class="alert alert-warning py-1 px-2 small mb-2">` +
+          `<i class="bi bi-chat-left-text me-1"></i>${esc(o.notes)}</div>`;
+      }
+      node.querySelector('.card-actions').innerHTML = actionsHTML(o);
+      node.querySelector('.card-time').textContent  = (o.createdAt || '').slice(11, 16) || '—';
+      node.querySelector('.card-total').textContent = '₹' + Number(o.total || 0).toFixed(0);
+      grid.appendChild(node);
+    });
+
+    startAgeTick(visible);
+  }
+
+  // ── Age ticker ─────────────────────────────────────────────────────────
   function startAgeTick(orders) {
     if (ageTick) clearInterval(ageTick);
     ageBase = {};
@@ -534,40 +839,87 @@
           if (cc) card.classList.add(cc);
         }
       });
+      // Stale-data check (every tick is fine — it's a tiny calculation)
+      checkStaleConn();
     }, 1000);
   }
 
-  // ── Connection indicator ────────────────────────────────────────────────────
-  function setConn(ok) {
-    document.getElementById('conn-dot').classList.toggle('off', !ok);
-    document.getElementById('conn-label').textContent = ok ? 'Live' : 'Offline';
+  // ── Connection / stale indicator ───────────────────────────────────────
+  function setConn(state, detail) {
+    const dot   = document.getElementById('conn-dot');
+    const label = document.getElementById('conn-label');
+    const det   = document.getElementById('conn-detail');
+    dot.classList.remove('off', 'stale');
+    if (state === 'off')   { dot.classList.add('off');   label.textContent = 'Offline'; }
+    else if (state === 'stale') { dot.classList.add('stale'); label.textContent = 'Stale'; }
+    else                   {                              label.textContent = 'Live'; }
+    if (det) det.textContent = detail || '· every 10s';
+  }
+  function checkStaleConn() {
+    if (!lastFetchAt) return;
+    const ageMs = Date.now() - lastFetchAt;
+    if (ageMs > 30000) setConn('stale', `· last update ${fmtAge(ageMs/1000)} ago`);
   }
 
-  // ── Load orders ─────────────────────────────────────────────────────────────
+  // ── Load orders ────────────────────────────────────────────────────────
   async function loadOrders(force = false) {
     if (!force && document.hidden) return;
     try {
       const r = await fetch('/api/kitchen/orders', { credentials: 'same-origin' });
       if (!r.ok) throw new Error(r.status);
-      renderOrders((await r.json()).orders || []);
-      setConn(true);
-    } catch(_) {
-      setConn(false);
+      const data = await r.json();
+      const orders = data.orders || [];
+
+      // Refresh canonical cache.
+      ordersById = new Map(orders.map(o => [o.id, o]));
+      lastFetchAt = Date.now();
+      setConn('ok');
+
+      // New-order detection (chime + flash)
+      const currentIds = new Set(orders.map(o => o.id));
+      if (!firstLoad) {
+        const newIds = [...currentIds].filter(id => !lastOrderIds.has(id));
+        if (newIds.length) {
+          orderChime();
+          rerender();   // need DOM to exist before flashing
+          newIds.forEach(id => {
+            const card = document.querySelector(`[data-order-id="${id}"] .kitchen-card`);
+            if (card) card.classList.add('flash');
+          });
+        } else {
+          rerender();
+        }
+      } else {
+        rerender();
+      }
+      lastOrderIds = currentIds;
+      firstLoad = false;
+    } catch (_) {
+      setConn('off');
     }
   }
 
-  // ── TABLE CALLS sidebar ─────────────────────────────────────────────────────
-  const REASON_LABEL = {
-    service:'🛎️ Service', bill:'💳 Bill', water:'💧 Water refill',
-    help:'❓ Help needed', cutlery:'🍴 Cutlery',
-  };
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────
+  document.addEventListener('keydown', (e) => {
+    if (e.target.matches('input, textarea, select')) return;
+    if (e.key === 'r' || e.key === 'R') { e.preventDefault(); loadOrders(true); }
+    else if (e.key === '1') setFilter('all');
+    else if (e.key === '2') setFilter('pending');
+    else if (e.key === '3') setFilter('confirmed');
+    else if (e.key === '4') setFilter('preparing');
+    else if (e.key === '5') setFilter('ready');
+  });
 
+  // ── TABLE CALLS sidebar (unchanged behaviour) ──────────────────────────
+  const REASON_LABEL = {
+    service: '🛎️ Service', bill: '💳 Bill', water: '💧 Water refill',
+    help: '❓ Help needed', cutlery: '🍴 Cutlery',
+  };
   function fmtTime(iso) {
     if (!iso) return '';
     const d = new Date(iso);
-    return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
-
   function startTcAgeTick() {
     if (tcAgeTick) clearInterval(tcAgeTick);
     tcAgeTick = setInterval(() => {
@@ -582,25 +934,23 @@
       });
     }, 1000);
   }
-
+  let tcFirstLoad = true;
   async function loadTableCalls() {
     const list = document.getElementById('tc-sidebar-list');
     const filterSel = document.getElementById('tc-filter-sel');
     const status = filterSel ? filterSel.value : 'open';
     try {
-      const r = await fetch(`/api/owner/table-calls?status=${status}`, { credentials:'same-origin' });
+      const r = await fetch(`/api/owner/table-calls?status=${status}`, { credentials: 'same-origin' });
       if (!r.ok) return;
       const { calls } = await r.json();
 
-      // Badge / stats
       const openCount = status === 'open' ? calls.length : 0;
       const badge = document.getElementById('tc-badge');
       const statCalls = document.getElementById('stat-calls');
       if (badge) { badge.textContent = openCount; badge.style.display = openCount ? 'inline-block' : 'none'; }
       if (statCalls) statCalls.textContent = openCount;
 
-      // Detect new calls → chime + browser notification
-      if (!firstLoad) {
+      if (!tcFirstLoad) {
         const currentCallIds = new Set(calls.map(c => c.id));
         const newCallIds = [...currentCallIds].filter(id => !lastCallIds.has(id));
         if (newCallIds.length) {
@@ -610,13 +960,14 @@
             if (call) showCallNotification(call);
             setTimeout(() => {
               const el = document.querySelector(`[data-tc-id="${id}"]`);
-              if (el) { el.classList.add('new-flash'); }
+              if (el) el.classList.add('new-flash');
             }, 100);
           });
         }
         lastCallIds = currentCallIds;
       } else {
         lastCallIds = new Set(calls.map(c => c.id));
+        tcFirstLoad = false;
       }
 
       if (!calls.length) {
@@ -656,7 +1007,6 @@
           </div>`;
       }).join('');
 
-      // Wire action buttons
       list.querySelectorAll('.tc-act-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           btn.disabled = true;
@@ -665,30 +1015,25 @@
             await fetch(`/api/owner/table-calls/${btn.dataset.tcid}/${btn.dataset.action}`, {
               method: 'POST', headers: { 'X-CSRFToken': CSRF }
             });
-          } catch(_) {}
+          } catch (_) {}
           loadTableCalls();
         });
       });
-
       startTcAgeTick();
-    } catch(e) {
-      list.innerHTML = `<div class="tc-empty" style="color:#fca5a5;">Failed to load calls</div>`;
+    } catch (e) {
+      list.innerHTML = `<div class="tc-empty" style="color: #fca5a5;">Failed to load calls</div>`;
     }
   }
-
-  // Filter selector
   document.getElementById('tc-filter-sel').addEventListener('change', () => loadTableCalls());
-
-  // Mobile calls button opens dashboard table-calls tab
   document.getElementById('tc-mobile-btn').addEventListener('click', () => {
     window.location.href = '{{ url_for("owner_dashboard") }}#table-calls';
   });
 
-  // ── Boot ────────────────────────────────────────────────────────────────────
+  // ── Boot ───────────────────────────────────────────────────────────────
   loadOrders(true);
   loadTableCalls();
-  setInterval(loadOrders,      10000);
-  setInterval(loadTableCalls,  12000);
+  setInterval(loadOrders,     10000);
+  setInterval(loadTableCalls, 12000);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) { loadOrders(true); loadTableCalls(); }
   });
