@@ -30,6 +30,7 @@ from flask import (
     Response,
     abort,
     flash,
+    g,
     jsonify,
     make_response,
     redirect,
@@ -3411,6 +3412,27 @@ def _inject_impersonation_state() -> dict:
         }
     except Exception:  # pragma: no cover
         return {"is_impersonating": False, "impersonator_username": ""}
+
+
+@app.context_processor
+def _inject_cafe_name() -> dict:
+    """Surface ``cafe_name`` to every template so the billing layout (and
+    anything else using a shared header) can display the owner's brand
+    instead of a hard-coded string. Cheap — short-circuits when no owner
+    is in session, and only hits the DB once per request."""
+    try:
+        owner_id = session.get("owner_id")
+        if not owner_id:
+            return {"cafe_name": ""}
+        cached = getattr(g, "_cafe_name_cached", None)
+        if cached is not None:
+            return {"cafe_name": cached}
+        owner = db.session.get(Owner, owner_id)
+        name = (owner.cafe_name if owner and owner.cafe_name else "") or ""
+        g._cafe_name_cached = name
+        return {"cafe_name": name}
+    except Exception:  # pragma: no cover
+        return {"cafe_name": ""}
 
 
 @app.route("/owner/login/totp", methods=["GET", "POST"])

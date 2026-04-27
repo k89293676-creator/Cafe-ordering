@@ -1,46 +1,339 @@
 {% extends "owner_billing/_base.html" %}
 {% block title %}Open Tabs{% endblock %}
 {% block content %}
-<h1>Open Tabs <span class="muted" style="font-size:1rem;font-weight:400;">({{ total }} unsettled)</span></h1>
+<div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:1rem;margin-bottom:1rem;">
+  <div>
+    <h1 style="margin:0;">Open Tabs</h1>
+    <p class="muted" style="margin:.25rem 0 0;">Unsettled bills — settle, view detail, or void from here.</p>
+  </div>
+  <div style="display:flex;gap:.5rem;align-items:center;">
+    <button id="csvBtn" class="btn btn-ghost btn-sm" type="button" title="Download visible rows as CSV">⬇ CSV</button>
+    <label style="display:inline-flex;align-items:center;gap:.4rem;color:var(--muted);font-size:.82rem;">
+      <input type="checkbox" id="autoRefresh" checked /> Auto-refresh
+    </label>
+  </div>
+</div>
 
-<form method="GET" style="display:flex;gap:.5rem;margin-bottom:1.25rem;align-items:center;flex-wrap:wrap;">
-  <input type="text" name="table" placeholder="Filter by table id…" value="{{ table_filter }}"
-         style="flex:0 0 240px;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:.55rem .75rem;border-radius:7px;" />
-  <button class="btn btn-primary btn-sm" type="submit">Filter</button>
-  {% if table_filter %}<a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_open') }}">Clear</a>{% endif %}
-</form>
+<!-- Top stat strip -->
+<div class="grid grid-stats" style="margin-bottom:1rem;">
+  <div class="stat primary">
+    <div class="label">Open Value</div>
+    <div class="value">₹{{ '%.2f'|format(open_value) }}</div>
+    <div class="sub">{{ total }} unsettled bill{{ '' if total == 1 else 's' }}</div>
+  </div>
+  <div class="stat" id="statRecent">
+    <div class="label">Last 30 min</div>
+    <div class="value mono">—</div>
+    <div class="sub">Fresh tabs</div>
+  </div>
+  <div class="stat warn" id="statWarm">
+    <div class="label">30 m – 2 h</div>
+    <div class="value mono">—</div>
+    <div class="sub">Warming up</div>
+  </div>
+  <div class="stat danger" id="statAged">
+    <div class="label">Aged ≥ 2 h</div>
+    <div class="value mono">—</div>
+    <div class="sub">Needs attention</div>
+  </div>
+</div>
+
+<!-- Filter + search toolbar -->
+<div class="panel" style="padding:.85rem 1rem;margin-bottom:1rem;display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;">
+  <div role="tablist" aria-label="Age filter" style="display:flex;gap:.35rem;flex-wrap:wrap;">
+    <button class="btn btn-ghost btn-sm age-pill active" data-age="all">All <span class="pill pill-fresh" data-count="all">0</span></button>
+    <button class="btn btn-ghost btn-sm age-pill"        data-age="recent">≤ 30m <span class="pill pill-fresh" data-count="recent">0</span></button>
+    <button class="btn btn-ghost btn-sm age-pill"        data-age="warm">30m – 2h <span class="pill pill-warm" data-count="warm">0</span></button>
+    <button class="btn btn-ghost btn-sm age-pill"        data-age="aged">≥ 2h <span class="pill pill-aged" data-count="aged">0</span></button>
+  </div>
+  <div style="flex:1;min-width:160px;">
+    <input id="search" type="search" placeholder="Search table or customer (press /)…"
+           style="width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:.5rem .75rem;border-radius:7px;font:inherit;" />
+  </div>
+  <select id="sortSelect" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:.5rem .65rem;border-radius:7px;font:inherit;">
+    <option value="newest">Sort: Newest first</option>
+    <option value="oldest">Sort: Oldest first</option>
+    <option value="amount_desc">Sort: Amount ↓</option>
+    <option value="amount_asc">Sort: Amount ↑</option>
+    <option value="table">Sort: Table</option>
+  </select>
+  {% if table_filter %}
+    <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_open') }}" title="Clear table filter">
+      Clear: <span class="mono">{{ table_filter }}</span> ✕
+    </a>
+  {% endif %}
+</div>
 
 {% if not orders %}
-  <div class="empty">No open tabs right now. Time for a coffee. ☕</div>
-{% else %}
-  <div class="panel" style="padding:0;overflow-x:auto;">
-    <table>
-      <thead><tr><th>#</th><th>Table</th><th>Customer</th><th>Items</th><th class="right">Subtotal</th><th class="right">Total</th><th>Created</th><th></th></tr></thead>
-      <tbody>
-        {% for o in orders %}
-          <tr>
-            <td class="mono">#{{ o.id }}</td>
-            <td><strong>{{ o.tableName or '—' }}</strong></td>
-            <td>{{ o.customerName }}</td>
-            <td class="muted">{{ o['items']|length }} item{{ '' if o['items']|length == 1 else 's' }}</td>
-            <td class="right mono">₹{{ '%.2f'|format(o.subtotal) }}</td>
-            <td class="right mono"><strong>₹{{ '%.2f'|format(o.total) }}</strong></td>
-            <td class="muted mono">{{ o.createdAt[:19] if o.createdAt else '—' }}</td>
-            <td><a class="btn btn-primary btn-sm" href="{{ url_for('owner_billing_order_detail', order_id=o.id) }}">Settle →</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="panel empty">
+    <div style="font-size:2.2rem;line-height:1;">✨</div>
+    <p style="margin:.6rem 0 .25rem;font-size:1.05rem;color:var(--text);">No open tabs</p>
+    <p class="muted" style="margin:0;">All bills are settled — enjoy the calm.</p>
   </div>
+{% else %}
 
-  {% if total > per_page %}
-    <div style="margin-top:1rem;display:flex;justify-content:space-between;align-items:center;">
-      <span class="muted">Page {{ page }} of {{ ((total - 1) // per_page) + 1 }}</span>
-      <span>
-        {% if page > 1 %}<a class="btn btn-ghost btn-sm" href="?page={{ page - 1 }}{% if table_filter %}&table={{ table_filter }}{% endif %}">← Prev</a>{% endif %}
-        {% if page * per_page < total %}<a class="btn btn-ghost btn-sm" href="?page={{ page + 1 }}{% if table_filter %}&table={{ table_filter }}{% endif %}">Next →</a>{% endif %}
-      </span>
+  <!-- Card grid -->
+  <div id="cardGrid" class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));"></div>
+  <p id="emptyHint" class="muted" style="display:none;text-align:center;padding:1.5rem 0;">No tabs match this filter.</p>
+
+  <!-- Pagination -->
+  {% set total_pages = ((total - 1) // per_page) + 1 if total else 1 %}
+  {% if total_pages > 1 %}
+    <div style="display:flex;justify-content:center;align-items:center;gap:1rem;margin-top:1.25rem;">
+      {% if page > 1 %}<a class="btn btn-ghost btn-sm" href="?page={{ page - 1 }}{% if table_filter %}&table={{ table_filter }}{% endif %}">← Prev</a>{% endif %}
+      <span class="muted" style="font-size:.85rem;">Page {{ page }} of {{ total_pages }} · {{ total }} total</span>
+      {% if page < total_pages %}<a class="btn btn-ghost btn-sm" href="?page={{ page + 1 }}{% if table_filter %}&table={{ table_filter }}{% endif %}">Next →</a>{% endif %}
     </div>
   {% endif %}
 {% endif %}
+
+<style>
+  .age-pill.active { background:var(--primary); color:#0a0a0a; border-color:var(--primary); }
+  .age-pill .pill { margin-left:.3rem; }
+  .age-pill.active .pill { background:rgba(0,0,0,.18); color:#0a0a0a; }
+
+  .tab-card {
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:1rem 1.1rem; display:flex; flex-direction:column; gap:.6rem;
+    transition:border-color .15s, transform .08s;
+  }
+  .tab-card:hover { border-color:var(--line-2); }
+  .tab-card.aged   { border-left:3px solid var(--danger); }
+  .tab-card.warm   { border-left:3px solid var(--warn); }
+  .tab-card.recent { border-left:3px solid var(--ok); }
+  .tab-card .tc-head { display:flex; justify-content:space-between; align-items:flex-start; gap:.5rem; }
+  .tab-card .tc-id { font-weight:700; font-size:1.05rem; }
+  .tab-card .tc-table { color:var(--muted); font-size:.85rem; margin-top:.1rem; }
+  .tab-card .tc-amount { font-size:1.4rem; font-weight:700; color:var(--primary); font-variant-numeric:tabular-nums; }
+  .tab-card .tc-meta { display:flex; justify-content:space-between; font-size:.82rem; color:var(--muted); }
+  .tab-card .tc-actions { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.25rem; }
+  .tab-card .tc-actions .btn { flex:1; min-width:0; }
+</style>
+{% endblock %}
+
+{% block extrabody %}
+<script>
+  // ---- Server-rendered seed ----
+  const ORDERS = {{ orders|tojson }};
+  const csrf = document.querySelector('meta[name="csrf-token"]').content;
+
+  let activeAge = 'all';
+  let activeSort = 'newest';
+  let queryStr = '';
+
+  // ---- Helpers ----
+  const fmt = n => '₹' + (Number(n) || 0).toFixed(2);
+  function ageBucket(iso) {
+    if (!iso) return 'recent';
+    const ageMs = Date.now() - new Date(iso).getTime();
+    const ageMin = ageMs / 60000;
+    if (ageMin >= 120) return 'aged';
+    if (ageMin >= 30)  return 'warm';
+    return 'recent';
+  }
+  function ageLabel(iso) {
+    if (!iso) return 'just now';
+    const ageMs = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(ageMs / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    return h + 'h ' + (m % 60) + 'm ago';
+  }
+  function escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
+  // ---- Render the card grid in place (purely client-side filter/sort) ----
+  function render() {
+    const grid = document.getElementById('cardGrid');
+    const empty = document.getElementById('emptyHint');
+    if (!grid) return;
+
+    // Update bucket counts (from full ORDERS list, not filtered).
+    const buckets = { all: ORDERS.length, recent: 0, warm: 0, aged: 0 };
+    ORDERS.forEach(o => { buckets[ageBucket(o.createdAt)]++; });
+    document.querySelectorAll('[data-count]').forEach(el => {
+      el.textContent = buckets[el.dataset.count] || 0;
+    });
+    document.querySelector('#statRecent .value').textContent = buckets.recent;
+    document.querySelector('#statWarm .value').textContent   = buckets.warm;
+    document.querySelector('#statAged .value').textContent   = buckets.aged;
+
+    let rows = ORDERS.slice();
+    if (activeAge !== 'all') rows = rows.filter(o => ageBucket(o.createdAt) === activeAge);
+    if (queryStr) {
+      const q = queryStr.toLowerCase();
+      rows = rows.filter(o =>
+        String(o.tableId || '').toLowerCase().includes(q) ||
+        String(o.tableName || '').toLowerCase().includes(q) ||
+        String(o.customerName || '').toLowerCase().includes(q) ||
+        String(o.id).includes(q)
+      );
+    }
+    rows.sort((a, b) => {
+      switch (activeSort) {
+        case 'oldest':      return (a.createdAt || '').localeCompare(b.createdAt || '');
+        case 'amount_desc': return (b.balanceDue || 0) - (a.balanceDue || 0);
+        case 'amount_asc':  return (a.balanceDue || 0) - (b.balanceDue || 0);
+        case 'table':       return String(a.tableId || '').localeCompare(String(b.tableId || ''), undefined, { numeric: true });
+        case 'newest':
+        default:            return (b.createdAt || '').localeCompare(a.createdAt || '');
+      }
+    });
+
+    if (!rows.length) { grid.innerHTML = ''; empty.style.display = ''; return; }
+    empty.style.display = 'none';
+
+    grid.innerHTML = rows.map(o => {
+      const bucket = ageBucket(o.createdAt);
+      const itemsCount = (o.items || []).reduce((n, it) => n + (Number(it.quantity) || 1), 0);
+      const detailUrl = '/owner/billing/orders/' + o.id;
+      const customer = o.customerName || 'Walk-in';
+      const tableLabel = o.tableName || o.tableId || 'No table';
+      return `
+        <div class="tab-card ${bucket}" data-id="${o.id}">
+          <div class="tc-head">
+            <div>
+              <div class="tc-id">#${o.id}</div>
+              <div class="tc-table">${escHtml(tableLabel)} · ${escHtml(customer)}</div>
+            </div>
+            <span class="pill pill-${bucket === 'aged' ? 'aged' : bucket === 'warm' ? 'warm' : 'fresh'}">${ageLabel(o.createdAt)}</span>
+          </div>
+          <div class="tc-amount">${fmt(o.balanceDue ?? o.total)}</div>
+          <div class="tc-meta">
+            <span>${itemsCount} item${itemsCount === 1 ? '' : 's'}</span>
+            <span>Bill ${fmt(o.total)}</span>
+          </div>
+          <div class="tc-actions">
+            <a class="btn btn-ghost btn-sm" href="${detailUrl}">View →</a>
+            <button class="btn btn-primary btn-sm js-quick-cash" data-id="${o.id}" data-amt="${o.balanceDue ?? o.total}"
+                    title="Settle as full cash payment immediately">⚡ Cash ${fmt(o.balanceDue ?? o.total)}</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ---- Filter / search / sort wiring ----
+  document.querySelectorAll('.age-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.age-pill').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeAge = btn.dataset.age;
+      render();
+    });
+  });
+  document.getElementById('search').addEventListener('input', e => {
+    queryStr = e.target.value.trim();
+    render();
+  });
+  document.getElementById('sortSelect').addEventListener('change', e => {
+    activeSort = e.target.value;
+    render();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === '/' && document.activeElement.tagName !== 'INPUT'
+        && document.activeElement.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      const s = document.getElementById('search');
+      if (s) { s.focus(); s.select(); }
+    }
+  });
+
+  // ---- One-tap cash settle ----
+  // Uses the existing settle endpoint, which already handles locking,
+  // invoice numbering, audit logging. We just submit a single-line cash
+  // payment via fetch so the cashier never leaves the open-tabs page.
+  document.addEventListener('click', async ev => {
+    const btn = ev.target.closest('.js-quick-cash');
+    if (!btn) return;
+    const orderId = btn.dataset.id;
+    const amount = btn.dataset.amt;
+    if (!confirm('Settle bill #' + orderId + ' as full cash ' + fmt(amount) + '?')) return;
+
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Settling…';
+    try {
+      const fd = new FormData();
+      fd.append('csrf_token', csrf);
+      fd.append('payment_method', 'cash');
+      fd.append('payment_amount', amount);
+      const r = await fetch('/owner/billing/orders/' + orderId + '/settle', {
+        method: 'POST',
+        body: fd,
+        headers: { 'X-CSRFToken': csrf },
+        credentials: 'same-origin',
+        redirect: 'follow',
+      });
+      // The settle endpoint redirects to the invoice page on success
+      // (HTTP 302). fetch follows it; final status will be 200 or HTML.
+      if (r.ok) {
+        window.billToast('Bill #' + orderId + ' settled (cash).', 'ok');
+        // Optimistically remove the card and shrink ORDERS so the
+        // bucket counts and stat tiles refresh without a round trip.
+        const idx = ORDERS.findIndex(o => String(o.id) === String(orderId));
+        if (idx >= 0) ORDERS.splice(idx, 1);
+        render();
+      } else {
+        window.billToast('Could not settle bill #' + orderId + ' (HTTP ' + r.status + '). Open the bill to see why.', 'error');
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    } catch (e) {
+      window.billToast('Network error settling bill #' + orderId + '.', 'error');
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
+
+  // ---- CSV export of currently visible cards ----
+  document.getElementById('csvBtn').addEventListener('click', () => {
+    const visible = Array.from(document.querySelectorAll('.tab-card')).map(c => {
+      const id = c.dataset.id;
+      const o = ORDERS.find(x => String(x.id) === String(id));
+      if (!o) return null;
+      return [o.id, o.tableName || o.tableId || '', o.customerName || '', o.total, o.balanceDue ?? o.total, o.createdAt || ''];
+    }).filter(Boolean);
+    if (!visible.length) { window.billToast('Nothing to export.', 'warn'); return; }
+    const header = ['order_id', 'table', 'customer', 'total', 'balance_due', 'created_at'];
+    const csv = [header, ...visible].map(r =>
+      r.map(v => {
+        const s = String(v == null ? '' : v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',')
+    ).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'open_tabs_' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+  });
+
+  // ---- Auto-refresh (gentle: full page reload every 60s when checked
+  // and the tab is visible). Pauses on hidden tabs so background work
+  // doesn't pile up on Railway. ----
+  let refreshTimer = null;
+  function scheduleRefresh() {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    if (!document.getElementById('autoRefresh').checked) return;
+    refreshTimer = setTimeout(() => {
+      if (!document.hidden && document.getElementById('autoRefresh').checked) location.reload();
+      else scheduleRefresh();
+    }, 60_000);
+  }
+  document.getElementById('autoRefresh').addEventListener('change', scheduleRefresh);
+  document.addEventListener('visibilitychange', scheduleRefresh);
+
+  render();
+  scheduleRefresh();
+
+  // Re-render every 30s so age pills refresh without a network round trip.
+  setInterval(render, 30_000);
+</script>
 {% endblock %}

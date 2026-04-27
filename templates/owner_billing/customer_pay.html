@@ -4,40 +4,184 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Pay Order #{{ order.id }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/static/css/styles.css" />
   <style>
-    body { background:#0a0a0a; color:#f5f5f5; font-family:'Inter',system-ui,sans-serif; margin:0; }
-    .wrap { max-width:480px; margin:3rem auto; padding:2rem; background:#141414; border-radius:14px; border:1px solid #2a2a2a; }
-    h1 { font-family:'Playfair Display',serif; font-size:1.6rem; margin:0 0 1rem; }
-    .total { font-size:2rem; font-weight:700; color:#f59e0b; margin:.5rem 0 1.5rem; }
-    .muted { color:#9a9a9a; font-size:.88rem; }
-    .btn { background:#f59e0b; color:#0a0a0a; border:none; padding:.85rem 1.5rem; border-radius:8px; font-weight:600; cursor:pointer; font-size:1rem; width:100%; }
-    .btn:disabled { opacity:.5; cursor:not-allowed; }
-    .badge { display:inline-block; padding:.2rem .55rem; border-radius:6px; background:#2a2a2a; font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; }
+    body {
+      background:#0a0a0a; color:#f5f5f5; margin:0;
+      font-family:'Inter',system-ui,sans-serif;
+      min-height:100vh; display:flex; align-items:flex-start; justify-content:center;
+      padding:2rem 1rem;
+    }
+    .wrap {
+      width:100%; max-width:480px;
+      background:#141414; border-radius:16px; border:1px solid #2a2a2a;
+      overflow:hidden; box-shadow:0 24px 60px -20px rgba(0,0,0,.6);
+    }
+    .head {
+      padding:1.5rem 1.6rem 1rem; border-bottom:1px solid #2a2a2a;
+      display:flex; justify-content:space-between; align-items:flex-start; gap:.75rem;
+    }
+    .head h1 {
+      font-family:'Playfair Display',serif; font-size:1.4rem; margin:0;
+    }
+    .head .subline { color:#9a9a9a; font-size:.85rem; margin-top:.2rem; }
+    .badge {
+      display:inline-block; padding:.22rem .6rem; border-radius:99px;
+      background:#2a2a2a; font-size:.7rem; text-transform:uppercase;
+      letter-spacing:.06em; font-weight:600; white-space:nowrap;
+    }
     .badge.live { background:#fbbf24; color:#0a0a0a; }
-    #status { margin-top:1rem; min-height:1.5rem; }
+
+    /* ── Order summary block ───────────────────────────── */
+    .summary { padding:1rem 1.6rem; }
+    .summary h2 {
+      font-size:.72rem; text-transform:uppercase; letter-spacing:.08em;
+      color:#9a9a9a; margin:0 0 .6rem; font-weight:600;
+    }
+    .summary .lines { font-size:.88rem; }
+    .summary .line {
+      display:flex; justify-content:space-between; gap:.5rem;
+      padding:.3rem 0; border-bottom:1px dashed #2a2a2a;
+    }
+    .summary .line:last-child { border-bottom:none; }
+    .summary .line .name { color:#d4d4d4; flex:1; }
+    .summary .line .qty  { color:#9a9a9a; margin-right:.5rem; font-variant-numeric:tabular-nums; }
+    .summary .line .amt  { color:#f5f5f5; font-variant-numeric:tabular-nums; min-width:5rem; text-align:right; }
+
+    /* ── Bill totals ───────────────────────────────────── */
+    .totals { padding:.5rem 1.6rem 1rem; border-top:1px solid #2a2a2a; font-size:.88rem; }
+    .totals .line { display:flex; justify-content:space-between; padding:.18rem 0; color:#9a9a9a; }
+    .totals .line.total {
+      color:#f5f5f5; font-size:1.5rem; font-weight:700;
+      border-top:1px solid #2a2a2a; margin-top:.4rem; padding-top:.6rem;
+    }
+    .totals .line.total .amt { color:#f59e0b; }
+
+    /* ── Pay button + status ───────────────────────────── */
+    .pay-zone { padding:1rem 1.6rem 1.6rem; }
+    .btn {
+      background:#f59e0b; color:#0a0a0a; border:none;
+      padding:.95rem 1.5rem; border-radius:10px; font-weight:700; font-size:1rem;
+      cursor:pointer; width:100%; transition:background .15s, transform .08s;
+    }
+    .btn:hover { background:#d97706; }
+    .btn:active { transform:translateY(1px); }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .secure {
+      text-align:center; color:#7a7a7a; font-size:.75rem; margin-top:.85rem;
+    }
+    .secure svg { vertical-align:-3px; margin-right:.25rem; }
+
+    #status { margin-top:1rem; min-height:1.5rem; font-size:.9rem; text-align:center; }
     #status.error { color:#ef4444; }
-    #status.ok { color:#22c55e; }
-    #status.info { color:#9a9a9a; }
+    #status.ok    { color:#22c55e; font-weight:600; }
+    #status.info  { color:#9a9a9a; }
+
+    .paid-msg {
+      text-align:center; padding:1.25rem;
+      background:rgba(34,197,94,.08); border:1px solid rgba(34,197,94,.3);
+      border-radius:10px; color:#86efac;
+    }
+    .paid-msg .check { font-size:2rem; line-height:1; margin-bottom:.4rem; }
+
+    /* Steps progress strip — gives the customer a sense of where they
+       are in the flow, especially after returning from a hosted checkout. */
+    .steps {
+      display:flex; gap:.4rem; padding:0 1.6rem 1rem;
+      font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:#7a7a7a;
+    }
+    .steps .step { flex:1; display:flex; flex-direction:column; gap:.3rem; align-items:center; }
+    .steps .dot {
+      width:100%; height:3px; background:#2a2a2a; border-radius:2px;
+    }
+    .steps .step.active .dot { background:#f59e0b; }
+    .steps .step.done .dot   { background:#22c55e; }
+    .steps .step.active .label { color:#f5f5f5; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <span class="badge {% if mode == 'live' %}live{% endif %}">{{ mode }} mode</span>
-    <h1>Order #{{ order.id }}</h1>
-    <div class="total">₹{{ '%.2f' % (payment.amount or 0) }}</div>
-    <div class="muted">Pay securely with {{ provider.title() }}.</div>
+    <div class="head">
+      <div>
+        <h1>Order #{{ order.id }}</h1>
+        <div class="subline">
+          {% if order.tableName or order.table_name %}Table {{ order.tableName or order.table_name }} · {% endif %}
+          Pay securely with {{ provider.title() }}
+        </div>
+      </div>
+      <span class="badge {% if mode == 'live' %}live{% endif %}">{{ mode }} mode</span>
+    </div>
 
-    {% if payment.status == 'succeeded' %}
-      <p style="color:#22c55e;font-weight:600;margin-top:1rem;">
-        ✓ Payment received. Thank you!
-      </p>
-    {% else %}
-      <button id="pay-btn" class="btn" style="margin-top:1.25rem;">
-        Pay ₹{{ '%.2f' % (payment.amount or 0) }}
-      </button>
-      <div id="status"></div>
+    <!-- Step strip: review → pay → confirm. Even a one-tap hosted
+         checkout benefits from the visual reassurance. -->
+    <div class="steps">
+      <div class="step done"><div class="dot"></div><div class="label">Review</div></div>
+      <div class="step {{ 'done' if payment.status == 'succeeded' else 'active' }}"><div class="dot"></div><div class="label">Pay</div></div>
+      <div class="step {{ 'done' if payment.status == 'succeeded' else '' }}"><div class="dot"></div><div class="label">Confirm</div></div>
+    </div>
+
+    {# Order line items — `order` here is the raw SQLA Order model, whose
+       JSON columns expose snake_case attrs. Each line guard tolerates
+       legacy/dict shapes too. #}
+    {% set items = order.items if order.items else [] %}
+    {% if items %}
+      <div class="summary">
+        <h2>Order details</h2>
+        <div class="lines">
+          {% for it in items %}
+            <div class="line">
+              <span class="qty">{{ it.quantity or 1 }}×</span>
+              <span class="name">{{ it.name or 'Item' }}</span>
+              <span class="amt">₹{{ '%.2f'|format((it.price or 0) * (it.quantity or 1)) }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
     {% endif %}
+
+    <div class="totals">
+      {% if order.subtotal %}
+        <div class="line"><span>Subtotal</span><span class="amt">₹{{ '%.2f'|format(order.subtotal or 0) }}</span></div>
+      {% endif %}
+      {% if order.discount %}
+        <div class="line"><span>Discount</span><span class="amt" style="color:#86efac;">−₹{{ '%.2f'|format(order.discount or 0) }}</span></div>
+      {% endif %}
+      {% if order.service_charge %}
+        <div class="line"><span>Service charge</span><span class="amt">₹{{ '%.2f'|format(order.service_charge or 0) }}</span></div>
+      {% endif %}
+      {% if order.tax %}
+        <div class="line"><span>Tax</span><span class="amt">₹{{ '%.2f'|format(order.tax or 0) }}</span></div>
+      {% endif %}
+      {% if order.tip %}
+        <div class="line"><span>Tip</span><span class="amt">₹{{ '%.2f'|format(order.tip or 0) }}</span></div>
+      {% endif %}
+      <div class="line total">
+        <span>Amount due</span>
+        <span class="amt">₹{{ '%.2f' % (payment.amount or 0) }}</span>
+      </div>
+    </div>
+
+    <div class="pay-zone">
+      {% if payment.status == 'succeeded' %}
+        <div class="paid-msg">
+          <div class="check">✓</div>
+          <div style="font-weight:600;font-size:1.05rem;">Payment received</div>
+          <div style="color:#9a9a9a;font-size:.85rem;margin-top:.3rem;">Thank you! You can close this window.</div>
+        </div>
+      {% else %}
+        <button id="pay-btn" class="btn">
+          Pay ₹{{ '%.2f' % (payment.amount or 0) }}
+        </button>
+        <div id="status"></div>
+        <div class="secure">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Secured by {{ provider.title() }} · {{ mode }} mode
+        </div>
+      {% endif %}
+    </div>
   </div>
 
 {% if payment.status != 'succeeded' %}
@@ -96,6 +240,7 @@
       btn.addEventListener('click', () => {
         status.className = 'info';
         status.textContent = 'Redirecting to Stripe…';
+        btn.disabled = true;
         window.location.assign(url);
       });
     })();
@@ -178,6 +323,7 @@
       btn.addEventListener('click', () => {
         status.className = 'info';
         status.textContent = 'Opening Cashfree…';
+        btn.disabled = true;
         cashfree.checkout({
           paymentSessionId: sessionId,
           returnUrl: returnUrl,

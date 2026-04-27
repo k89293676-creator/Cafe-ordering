@@ -418,7 +418,8 @@
           ${noteHtml}
           <div class="actions-row">
             <button class="btn" data-act="detail">Details</button>
-            ${order ? '<button class="btn btn-primary" data-act="close" title="Complete the open order and resolve calls">Close table</button>' : ''}
+            ${order ? `<a class="btn btn-primary" href="/owner/billing/orders/${order.id}" title="Open this table's bill in the billing module">💳 Bill ${money(order.total)}</a>` : ''}
+            ${order ? '<button class="btn" data-act="close" title="Complete the open order and resolve calls">Close table</button>' : ''}
             ${order ? '<button class="btn" data-act="transfer">Transfer</button>' : ''}
             ${!order ? '<button class="btn" data-act="walkin">Walk-in Order</button>' : ''}
             ${calls.count ? '<button class="btn" data-act="clear">Clear calls</button>' : ''}

@@ -1,21 +1,26 @@
 {% extends "owner_billing/_base.html" %}
 {% block title %}Bill #{{ order.id }}{% endblock %}
 {% block content %}
-<h1>Bill #{{ order.id }}
-  {% if order.paymentStatus == 'unpaid' %}<span class="pill pill-unpaid">Unpaid</span>
-  {% elif order.paymentStatus == 'paid' %}<span class="pill pill-paid">Paid</span>
-  {% elif order.paymentStatus == 'refunded' %}<span class="pill pill-refunded">Refunded</span>
-  {% elif order.paymentStatus == 'voided' %}<span class="pill pill-voided">Voided</span>
-  {% endif %}
-</h1>
-<p class="muted" style="margin-top:-.75rem;">
-  Table <strong>{{ order.tableName or '—' }}</strong> ·
-  Customer <strong>{{ order.customerName }}</strong>
-  {% if order.customerPhone %} · {{ order.customerPhone }}{% endif %}
-  {% if order.invoiceNumber %} · Invoice <span class="mono">{{ order.invoiceNumber }}</span>{% endif %}
-</p>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-bottom:.5rem;">
+  <div>
+    <h1 style="margin:0;">Bill #{{ order.id }}
+      {% if order.paymentStatus == 'unpaid' %}<span class="pill pill-unpaid">Unpaid</span>
+      {% elif order.paymentStatus == 'paid' %}<span class="pill pill-paid">Paid</span>
+      {% elif order.paymentStatus == 'refunded' %}<span class="pill pill-refunded">Refunded</span>
+      {% elif order.paymentStatus == 'voided' %}<span class="pill pill-voided">Voided</span>
+      {% endif %}
+    </h1>
+    <p class="muted" style="margin:.25rem 0 0;">
+      Table <strong>{{ order.tableName or '—' }}</strong> ·
+      Customer <strong>{{ order.customerName }}</strong>
+      {% if order.customerPhone %} · {{ order.customerPhone }}{% endif %}
+      {% if order.invoiceNumber %} · Invoice <span class="mono">{{ order.invoiceNumber }}</span>{% endif %}
+    </p>
+  </div>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_open') }}">← Back to open tabs</a>
+</div>
 
-<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:1.25rem;">
+<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:1.25rem;align-items:start;">
   <!-- LEFT: items + adjustments -->
   <div>
     <div class="panel" style="margin-bottom:1rem;">
@@ -52,9 +57,9 @@
     <div class="panel" style="margin-bottom:1rem;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;">
         <h2 style="margin:0;">Add Items from Menu</h2>
-        <input type="search" id="menuFilter" placeholder="Search menu…"
+        <input type="search" id="menuFilter" placeholder="Search menu… (press /)"
                aria-label="Search menu items"
-               style="max-width:14rem;padding:.4rem .6rem;border:1px solid var(--line);border-radius:.4rem;" />
+               style="max-width:14rem;background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:.4rem .6rem;border-radius:7px;font:inherit;" />
       </div>
       {% if menu_categories %}
         <p class="muted" style="font-size:.82rem;margin:.4rem 0 .8rem;">
@@ -126,8 +131,8 @@
   </div>
 
   <!-- RIGHT: totals + actions -->
-  <div>
-    <div class="panel" style="margin-bottom:1rem;">
+  <div style="position:sticky;top:120px;display:flex;flex-direction:column;gap:1rem;">
+    <div class="panel">
       <h2 style="margin-top:0;">Bill Total</h2>
       <table>
         <tr><td>Subtotal</td><td class="right mono">₹{{ '%.2f'|format(totals.subtotal) }}</td></tr>
@@ -135,34 +140,48 @@
         {% if totals.service_charge %}<tr><td>Service Charge</td><td class="right mono">₹{{ '%.2f'|format(totals.service_charge) }}</td></tr>{% endif %}
         {% if totals.tax %}<tr><td>{{ settings.tax_label or 'Tax' }}</td><td class="right mono">₹{{ '%.2f'|format(totals.tax) }}</td></tr>{% endif %}
         {% if totals.tip %}<tr><td>Tip</td><td class="right mono">₹{{ '%.2f'|format(totals.tip) }}</td></tr>{% endif %}
-        <tr style="border-top:2px solid var(--line);"><td><strong>Grand Total</strong></td><td class="right mono"><strong style="font-size:1.2rem;color:var(--primary);">₹{{ '%.2f'|format(totals.total) }}</strong></td></tr>
+        <tr style="border-top:2px solid var(--line);"><td><strong>Grand Total</strong></td><td class="right mono"><strong style="font-size:1.25rem;color:var(--primary);">₹{{ '%.2f'|format(totals.total) }}</strong></td></tr>
         {% if order.refundAmount %}<tr><td>Refunded</td><td class="right mono" style="color:var(--danger);">−₹{{ '%.2f'|format(order.refundAmount) }}</td></tr>{% endif %}
       </table>
     </div>
 
     {% if order.paymentStatus == 'unpaid' %}
-    <div class="panel" style="margin-bottom:1rem;">
+    <div class="panel">
       <h2 style="margin-top:0;">Settle Payment</h2>
+
+      <!-- Quick-amount chips: pre-fill the active row's amount field. -->
+      <div id="quickAmounts" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.85rem;">
+        <button type="button" class="btn btn-ghost btn-sm js-quick" data-amt="{{ '%.2f'|format(totals.total) }}" title="Exact bill total">Exact ₹{{ '%.2f'|format(totals.total) }}</button>
+        {% set _round = ((totals.total + 9) // 10) * 10 %}
+        {% if _round > totals.total %}
+          <button type="button" class="btn btn-ghost btn-sm js-quick" data-amt="{{ '%.2f'|format(_round) }}" title="Round up to nearest ₹10 (extra becomes change)">Round ₹{{ '%.0f'|format(_round) }}</button>
+        {% endif %}
+        <button type="button" class="btn btn-ghost btn-sm js-quick" data-amt="100"  >₹100</button>
+        <button type="button" class="btn btn-ghost btn-sm js-quick" data-amt="200"  >₹200</button>
+        <button type="button" class="btn btn-ghost btn-sm js-quick" data-amt="500"  >₹500</button>
+        <button type="button" class="btn btn-ghost btn-sm js-quick" data-amt="1000" >₹1000</button>
+      </div>
+
       <form method="POST" action="{{ url_for('owner_billing_settle', order_id=order.id) }}" id="settleForm">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-        <div id="paymentRows">
-          <div class="row payment-row">
-            <div class="field">
-              <label>Method</label>
-              <select name="payment_method">
-                {% for m in valid_methods %}<option value="{{ m }}">{{ m|title }}</option>{% endfor %}
-              </select>
-            </div>
-            <div class="field">
-              <label>Amount (₹)</label>
-              <input type="number" name="payment_amount" step="0.01" min="0" value="{{ '%.2f'|format(totals.total) }}" />
-            </div>
+        <div id="paymentRows"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-top:.4rem;">
+          <button type="button" class="btn btn-ghost btn-sm" id="addRowBtn">+ Split payment</button>
+          <div class="muted" style="font-size:.82rem;">
+            Paid <span id="paidLive" class="mono" style="color:var(--text);">₹0.00</span> /
+            <span id="dueLabel" class="mono" style="color:var(--text);">₹{{ '%.2f'|format(totals.total) }}</span>
+            <span id="balanceWarn" style="margin-left:.5rem;"></span>
           </div>
         </div>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="addPaymentRow()">+ Split payment</button>
-        <button class="btn btn-success" type="submit" style="float:right;">Settle ₹{{ '%.2f'|format(totals.total) }}</button>
+        <button class="btn btn-success" type="submit" id="settleBtn" style="margin-top:.85rem;width:100%;">
+          Settle ₹{{ '%.2f'|format(totals.total) }}
+        </button>
+        <p class="muted" style="font-size:.78rem;margin:.6rem 0 0;text-align:center;">
+          Press <kbd style="background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:.75rem;">Enter</kbd> when totals balance to settle instantly.
+        </p>
       </form>
     </div>
+
     <div class="panel">
       <h2 style="margin-top:0;color:var(--danger);">Void Bill</h2>
       <form method="POST" action="{{ url_for('owner_billing_void', order_id=order.id) }}" onsubmit="return confirm('Void this entire bill? This is logged and cannot be undone.');">
@@ -176,7 +195,7 @@
       </form>
     </div>
     {% elif order.paymentStatus in ('paid', 'refunded') %}
-    <div class="panel" style="margin-bottom:1rem;">
+    <div class="panel">
       <h2 style="margin-top:0;">Payment Received</h2>
       <p>Settled at <span class="mono">{{ order.paidAt[:19] if order.paidAt else '—' }}</span> UTC</p>
       <table>
@@ -208,7 +227,54 @@
     {% endif %}
   </div>
 </div>
+
+<style>
+  /* Settle UI: visual method buttons + per-row remove */
+  .pay-row {
+    display:grid; grid-template-columns: 1fr auto; gap:.6rem;
+    border:1px solid var(--line); border-radius:10px; padding:.7rem .8rem;
+    margin-bottom:.6rem; background:var(--panel-2);
+  }
+  .pay-row .row-amt {
+    display:flex; align-items:center; gap:.4rem;
+  }
+  .pay-row .row-amt .currency {
+    color:var(--muted); font-size:.85rem;
+  }
+  .pay-row .row-amt input[type="number"] {
+    width:8rem; background:var(--bg); border:1px solid var(--line); color:var(--text);
+    padding:.4rem .55rem; border-radius:6px; font:inherit; text-align:right;
+  }
+  .pay-row .row-amt input.ref {
+    width:7rem; background:var(--bg); border:1px solid var(--line); color:var(--text);
+    padding:.4rem .55rem; border-radius:6px; font:inherit; font-size:.82rem;
+  }
+  .pay-row .row-rm {
+    background:transparent; border:none; color:var(--muted); cursor:pointer;
+    font-size:1.1rem; padding:0 .25rem; align-self:center;
+  }
+  .pay-row .row-rm:hover { color:var(--danger); }
+  .pay-row .methods {
+    display:flex; flex-wrap:wrap; gap:.3rem; margin-bottom:.5rem;
+  }
+  .pay-row .method-btn {
+    background:var(--panel); color:var(--text); border:1px solid var(--line);
+    padding:.3rem .65rem; border-radius:99px; cursor:pointer; font-size:.78rem;
+    transition:all .12s;
+  }
+  .pay-row .method-btn:hover { border-color:var(--line-2); }
+  .pay-row .method-btn.active {
+    background:var(--primary); color:#0a0a0a; border-color:var(--primary); font-weight:600;
+  }
+  #balanceWarn.over   { color:var(--ok); }
+  #balanceWarn.under  { color:var(--warn); }
+  @media (max-width:900px) {
+    [style*="grid-template-columns:1.4fr 1fr"] { grid-template-columns:1fr !important; }
+    [style*="position:sticky"] { position:static !important; }
+  }
+</style>
 {% endblock %}
+
 {% block extrabody %}
 <script>
   // Reveal the password field once the refund amount crosses the
@@ -272,16 +338,138 @@
     });
   })();
 
-  function addPaymentRow() {
-    const wrap = document.getElementById('paymentRows');
-    const methods = {{ valid_methods|tojson }};
-    const opts = methods.map(m => `<option value="${m}">${m[0].toUpperCase() + m.slice(1)}</option>`).join('');
-    const div = document.createElement('div');
-    div.className = 'row payment-row';
-    div.innerHTML = `
-      <div class="field"><label>Method</label><select name="payment_method">${opts}</select></div>
-      <div class="field"><label>Amount (₹)</label><input type="number" name="payment_amount" step="0.01" min="0" value="0.00"/></div>`;
-    wrap.appendChild(div);
-  }
+  // ── Settle UI — visual method chips, quick amounts, live balance, ──
+  //    per-row remove, loading state on submit. The form submits the
+  //    same field names as before (payment_method[], payment_amount[],
+  //    payment_reference[]) so the existing backend keeps working.
+  (function () {
+    const wrap     = document.getElementById('paymentRows');
+    if (!wrap) return; // not in unpaid mode
+
+    const methods  = {{ valid_methods|tojson }};
+    const total    = {{ totals.total|tojson }};
+    const btnSubmit = document.getElementById('settleBtn');
+    const paidLive  = document.getElementById('paidLive');
+    const balWarn   = document.getElementById('balanceWarn');
+    const fmt       = n => '₹' + (Number(n) || 0).toFixed(2);
+
+    // Friendly icon hints for the method chips.
+    const ICON = {
+      cash: '💵', upi: '📱', card: '💳', wallet: '👛',
+      netbanking: '🏦', due: '📋', complimentary: '🎁', other: '•',
+    };
+
+    function makeRow(opts) {
+      const m = (opts && opts.method) || 'cash';
+      const amt = (opts && opts.amount != null) ? opts.amount : '';
+      const div = document.createElement('div');
+      div.className = 'pay-row';
+      const left = document.createElement('div');
+      left.innerHTML = `
+        <div class="methods">
+          ${methods.map(x => `<button type="button" class="method-btn${x === m ? ' active' : ''}" data-method="${x}">${ICON[x] || ''} ${x[0].toUpperCase() + x.slice(1)}</button>`).join('')}
+        </div>
+        <div class="row-amt">
+          <span class="currency">₹</span>
+          <input type="number" name="payment_amount" step="0.01" min="0" placeholder="0.00" value="${amt === '' ? '' : Number(amt).toFixed(2)}" />
+          <input type="text" name="payment_reference" class="ref" placeholder="Ref / txn #" maxlength="64" />
+          <input type="hidden" name="payment_method" value="${m}" />
+        </div>`;
+      const rm = document.createElement('button');
+      rm.type = 'button'; rm.className = 'row-rm'; rm.title = 'Remove this payment'; rm.textContent = '×';
+      div.appendChild(left); div.appendChild(rm);
+
+      // Wire method chips to update the hidden `payment_method` value.
+      left.querySelectorAll('.method-btn').forEach(b => {
+        b.addEventListener('click', () => {
+          left.querySelectorAll('.method-btn').forEach(x => x.classList.remove('active'));
+          b.classList.add('active');
+          left.querySelector('input[name="payment_method"]').value = b.dataset.method;
+        });
+      });
+      rm.addEventListener('click', () => {
+        // Always keep at least one row visible.
+        if (wrap.querySelectorAll('.pay-row').length <= 1) {
+          window.billToast && window.billToast('At least one payment row is required.', 'warn');
+          return;
+        }
+        div.remove();
+        recompute();
+      });
+      left.querySelector('input[name="payment_amount"]').addEventListener('input', recompute);
+      return div;
+    }
+
+    function recompute() {
+      let paid = 0;
+      wrap.querySelectorAll('input[name="payment_amount"]').forEach(i => {
+        paid += parseFloat(i.value || '0') || 0;
+      });
+      paidLive.textContent = fmt(paid);
+      const diff = +(paid - total).toFixed(2);
+      balWarn.classList.remove('over', 'under');
+      if (Math.abs(diff) < 0.01) {
+        balWarn.textContent = '✓ balanced';
+        balWarn.style.color = 'var(--ok)';
+        btnSubmit.textContent = 'Settle ' + fmt(total);
+        btnSubmit.disabled = false;
+      } else if (diff > 0) {
+        balWarn.textContent = 'change due ' + fmt(diff);
+        balWarn.classList.add('over');
+        btnSubmit.textContent = 'Settle ' + fmt(total) + ' (change ' + fmt(diff) + ')';
+        btnSubmit.disabled = false;
+      } else {
+        balWarn.textContent = 'short ' + fmt(-diff);
+        balWarn.classList.add('under');
+        btnSubmit.textContent = 'Need ' + fmt(-diff) + ' more';
+        btnSubmit.disabled = true;
+      }
+    }
+
+    // Seed: one row, cash, full total.
+    wrap.appendChild(makeRow({ method: 'cash', amount: total }));
+    recompute();
+
+    // Quick-amount chips fill the LAST (most-recently-added) row.
+    document.querySelectorAll('.js-quick').forEach(b => {
+      b.addEventListener('click', () => {
+        const inputs = wrap.querySelectorAll('input[name="payment_amount"]');
+        const last = inputs[inputs.length - 1];
+        if (!last) return;
+        last.value = Number(b.dataset.amt).toFixed(2);
+        last.focus();
+        last.dispatchEvent(new Event('input'));
+      });
+    });
+
+    document.getElementById('addRowBtn').addEventListener('click', () => {
+      // Default the new row's amount to the remaining balance so the
+      // cashier can split fast: e.g. ₹500 cash + ₹120 UPI in 2 taps.
+      let paid = 0;
+      wrap.querySelectorAll('input[name="payment_amount"]').forEach(i => {
+        paid += parseFloat(i.value || '0') || 0;
+      });
+      const remaining = Math.max(0, +(total - paid).toFixed(2));
+      wrap.appendChild(makeRow({ method: 'cash', amount: remaining || '' }));
+      recompute();
+    });
+
+    // Loading state while the settle POST is in flight — prevents
+    // double-clicks from racing to the server during a rush. The
+    // backend is idempotent (locks the row + checks paid status) but
+    // killing the click is friendlier UX.
+    document.getElementById('settleForm').addEventListener('submit', () => {
+      btnSubmit.disabled = true;
+      const original = btnSubmit.textContent;
+      btnSubmit.textContent = 'Settling…';
+      // Re-enable after 8s in case the redirect is slow / cancelled.
+      setTimeout(() => {
+        if (btnSubmit.textContent === 'Settling…') {
+          btnSubmit.disabled = false;
+          btnSubmit.textContent = original;
+        }
+      }, 8000);
+    });
+  })();
 </script>
 {% endblock %}
