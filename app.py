@@ -4529,6 +4529,29 @@ def owner_billing_order_detail(order_id: int):
     refunded_today = _refund_total_today(owner_id)
     cap_amount = round(gross_today * (cap_pct / 100.0), 2) if cap_pct > 0 else 0.0
     refund_cap_remaining = round(max(0.0, cap_amount - refunded_today), 2)
+    # Owner's menu, used by the "Add Items" picker on unpaid bills so
+    # the cashier can build a walk-in tab line by line without leaving
+    # the billing screen. Filtered to available items only — sold-out
+    # dishes can't be added by accident.
+    menu_categories = []
+    if order.payment_status == "unpaid":
+        menu_record = db.session.get(Menu, owner_id)
+        for cat in ((menu_record.data or {}).get("categories", []) if menu_record else []):
+            visible_items = [
+                {
+                    "id": it.get("id"),
+                    "name": it.get("name") or "Unnamed",
+                    "price": float(it.get("price") or 0),
+                }
+                for it in (cat.get("items") or [])
+                if it.get("id") and it.get("available", True)
+            ]
+            if visible_items:
+                menu_categories.append({
+                    "id": cat.get("id"),
+                    "name": cat.get("name") or "Menu",
+                    "items": visible_items,
+                })
     return _no_store(app.make_response(render_template(
         "owner_billing/order_detail.html",
         order=_bill_dict(order),
@@ -4542,6 +4565,7 @@ def owner_billing_order_detail(order_id: int):
         refund_stepup_required=stepup_required_for_refund(bill_total - already_refunded),
         stepup_fresh=is_stepup_session_fresh(session.get("billing_stepup_at")),
         refund_cap_remaining=refund_cap_remaining,
+        menu_categories=menu_categories,
     )))
 
 
@@ -4622,6 +4646,171 @@ def owner_billing_adjust(order_id: int):
                           "tax": totals.tax, "tip": totals.tip, "total": totals.total})
     _invalidate_billing_cache(owner_id)
     flash(f"Bill updated. New total ₹{totals.total:.2f}.", "billing_ok")
+    return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+
+def _recompute_order_totals(order: "Order", owner_id: int) -> None:
+    """Re-derive subtotal from line totals and re-apply the owner's
+    current service-charge / tax percentages so the bill stays coherent
+    after items are added or removed mid-tab.
+
+    Existing discount is capped to the new subtotal (so removing items
+    can never push the discount above what's left to discount); existing
+    tip is preserved verbatim — the cashier set it deliberately.
+    """
+    settings = _settings_for(owner_id)
+    items = order.items or []
+    subtotal = round(sum(
+        float(line.get("lineTotal") or
+              (float(line.get("price") or 0) * int(line.get("quantity") or 1)))
+        for line in items
+    ), 2)
+    discount = max(0.0, min(float(order.discount or 0), subtotal))
+    totals = compute_bill_totals(
+        subtotal=subtotal,
+        discount=discount,
+        service_charge_pct=float(settings.service_charge_percent or 0),
+        tax_pct=float(settings.tax_rate_percent or 0),
+        tip=float(order.tip or 0),
+    )
+    order.subtotal = subtotal
+    order.discount = totals.discount
+    order.service_charge = totals.service_charge
+    order.tax = totals.tax
+    order.tip = totals.tip
+    order.total = totals.total
+
+
+@app.route("/owner/billing/orders/<int:order_id>/items/add", methods=["POST"])
+@login_required
+@limiter.limit("120 per minute")
+def owner_billing_add_item(order_id: int):
+    """Add a menu item to an unpaid bill — used by the walk-in / manual
+    order-entry flow so the cashier can build a tab line by line right
+    from the billing screen. If the item is already on the bill (and has
+    no per-line modifiers/notes that would make it a distinct line),
+    quantities are merged so the printed receipt stays compact."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    owner_id = logged_in_owner_id()
+    order = _load_owner_order(order_id, owner_id, lock=True)
+    if order.payment_status != "unpaid":
+        flash("Cannot add items to a settled bill.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    item_id = (request.form.get("item_id") or "").strip()
+    try:
+        qty = int(request.form.get("quantity", 1) or 1)
+    except (TypeError, ValueError):
+        qty = 1
+    qty = max(1, min(qty, 100))
+
+    if not item_id:
+        flash("Pick a menu item to add.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    # Look up the item from THIS owner's menu only — never let an owner
+    # add a line from another tenant's menu by guessing IDs.
+    menu_record = db.session.get(Menu, owner_id)
+    menu_item = None
+    for cat in ((menu_record.data or {}).get("categories", []) if menu_record else []):
+        for it in (cat.get("items") or []):
+            if it.get("id") == item_id:
+                menu_item = it
+                break
+        if menu_item:
+            break
+    if not menu_item:
+        flash("That item is no longer on the menu.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+    if not menu_item.get("available", True):
+        flash(f"'{menu_item.get('name')}' is currently unavailable.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    price = float(menu_item.get("price") or 0)
+    name = str(menu_item.get("name") or item_id)
+    items = list(order.items or [])
+    # Merge into an existing plain line if one matches — keeps receipts tidy.
+    merged = False
+    for line in items:
+        if (line.get("id") == item_id
+                and not line.get("modifiers")
+                and not (line.get("notes") or "").strip()
+                and not (line.get("size") or "").strip()
+                and not (line.get("extras") or "").strip()):
+            line["quantity"] = int(line.get("quantity") or 1) + qty
+            line["lineTotal"] = round(price * line["quantity"], 2)
+            merged = True
+            break
+    if not merged:
+        items.append({
+            "id": item_id, "name": name, "price": price,
+            "quantity": qty, "modifiers": [],
+            "size": "", "extras": "", "notes": "",
+            "lineTotal": round(price * qty, 2),
+        })
+    order.items = items
+    flag_modified(order, "items")  # JSON column needs an explicit dirty flag
+    _recompute_order_totals(order, owner_id)
+    order.updated_at = datetime.now(timezone.utc)
+    # Inventory deduction for the new units (mirrors place_order_in_db).
+    try:
+        _deduct_inventory(owner_id, [{"id": item_id, "quantity": qty}])
+    except Exception:
+        pass  # never block billing on a stock-tracking hiccup
+    db.session.commit()
+    _billing_log(owner_id=owner_id, order_id=order.id, action="item_added",
+                 amount=round(price * qty, 2),
+                 payload={"item_id": item_id, "name": name, "quantity": qty,
+                          "unit_price": price, "new_total": float(order.total or 0)})
+    _invalidate_billing_cache(owner_id)
+    flash(f"Added {qty}× {name}. New total ₹{float(order.total or 0):.2f}.",
+          "billing_ok")
+    return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+
+@app.route("/owner/billing/orders/<int:order_id>/items/<int:idx>/remove",
+           methods=["POST"])
+@login_required
+@limiter.limit("120 per minute")
+def owner_billing_remove_item(order_id: int, idx: int):
+    """Remove a single line from an unpaid bill. Refuses to leave the bill
+    empty — the cashier should void the bill instead of stripping it to
+    zero items, which would otherwise break the kitchen ticket and audit."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    owner_id = logged_in_owner_id()
+    order = _load_owner_order(order_id, owner_id, lock=True)
+    if order.payment_status != "unpaid":
+        flash("Cannot remove items from a settled bill.", "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    items = list(order.items or [])
+    if not (0 <= idx < len(items)):
+        flash("That line no longer exists — it may have already been removed.",
+              "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+    if len(items) <= 1:
+        flash("A bill must keep at least one item. Add a replacement first, "
+              "or void the bill if you want to cancel it entirely.",
+              "billing_error")
+        return redirect(url_for("owner_billing_order_detail", order_id=order_id))
+
+    removed = items.pop(idx)
+    order.items = items
+    flag_modified(order, "items")
+    _recompute_order_totals(order, owner_id)
+    order.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    _billing_log(owner_id=owner_id, order_id=order.id, action="item_removed",
+                 amount=float(removed.get("lineTotal") or 0),
+                 payload={"item_id": removed.get("id"),
+                          "name": removed.get("name"),
+                          "quantity": removed.get("quantity"),
+                          "new_total": float(order.total or 0)})
+    _invalidate_billing_cache(owner_id)
+    flash(f"Removed {removed.get('name', 'item')}. New total ₹{float(order.total or 0):.2f}.",
+          "billing_ok")
     return redirect(url_for("owner_billing_order_detail", order_id=order_id))
 
 

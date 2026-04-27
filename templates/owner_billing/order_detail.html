@@ -21,7 +21,7 @@
     <div class="panel" style="margin-bottom:1rem;">
       <h2 style="margin-top:0;">Items</h2>
       <table>
-        <thead><tr><th>Item</th><th class="right">Qty</th><th class="right">Price</th><th class="right">Line Total</th></tr></thead>
+        <thead><tr><th>Item</th><th class="right">Qty</th><th class="right">Price</th><th class="right">Line Total</th>{% if order.paymentStatus == 'unpaid' %}<th></th>{% endif %}</tr></thead>
         <tbody>
           {% for item in order['items'] %}
             <tr>
@@ -29,6 +29,18 @@
               <td class="right mono">{{ item.quantity or 1 }}</td>
               <td class="right mono">₹{{ '%.2f'|format(item.price or 0) }}</td>
               <td class="right mono">₹{{ '%.2f'|format(item.lineTotal or (item.price or 0) * (item.quantity or 1)) }}</td>
+              {% if order.paymentStatus == 'unpaid' %}
+                <td class="right">
+                  <form method="POST" action="{{ url_for('owner_billing_remove_item', order_id=order.id, idx=loop.index0) }}"
+                        style="display:inline;margin:0;"
+                        onsubmit="return confirm('Remove {{ item.name|e }} from this bill?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <button class="btn btn-ghost btn-sm" type="submit"
+                            title="Remove this line"
+                            style="color:var(--danger);padding:.2rem .5rem;">×</button>
+                  </form>
+                </td>
+              {% endif %}
             </tr>
           {% endfor %}
         </tbody>
@@ -37,6 +49,51 @@
     </div>
 
     {% if order.paymentStatus == 'unpaid' %}
+    <div class="panel" style="margin-bottom:1rem;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;">
+        <h2 style="margin:0;">Add Items from Menu</h2>
+        <input type="search" id="menuFilter" placeholder="Search menu…"
+               aria-label="Search menu items"
+               style="max-width:14rem;padding:.4rem .6rem;border:1px solid var(--line);border-radius:.4rem;" />
+      </div>
+      {% if menu_categories %}
+        <p class="muted" style="font-size:.82rem;margin:.4rem 0 .8rem;">
+          Tap an item to add it to this tab. Quantities merge automatically — tap again to add another, or use the × on the line above to remove.
+        </p>
+        <div id="menuPicker" style="margin-top:.5rem;">
+          {% for cat in menu_categories %}
+            <div class="menu-cat" data-cat-name="{{ cat.name|lower }}" style="margin-bottom:1rem;">
+              <h3 style="font-size:.95rem;margin:.6rem 0 .4rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">{{ cat.name }}</h3>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(11rem,1fr));gap:.5rem;">
+                {% for it in cat['items'] %}
+                  <form method="POST" action="{{ url_for('owner_billing_add_item', order_id=order.id) }}"
+                        class="menu-item" data-item-name="{{ it.name|lower }}"
+                        style="margin:0;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="item_id" value="{{ it.id }}" />
+                    <input type="hidden" name="quantity" value="1" />
+                    <button type="submit"
+                            class="btn btn-ghost"
+                            style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.55rem .65rem;line-height:1.2;"
+                            title="Add 1× {{ it.name }} (₹{{ '%.2f'|format(it.price) }}) to this tab">
+                      <span style="font-weight:600;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ it.name }}</span>
+                      <span class="mono" style="font-size:.82rem;color:var(--muted);white-space:nowrap;">₹{{ '%.2f'|format(it.price) }}</span>
+                    </button>
+                  </form>
+                {% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+          <p id="menuFilterEmpty" class="muted" style="display:none;font-size:.85rem;text-align:center;padding:.6rem;">No items match your search.</p>
+        </div>
+      {% else %}
+        <p class="muted" style="font-size:.85rem;">
+          You haven't published any available menu items yet.
+          <a href="{{ url_for('owner_panel') }}#menu">Add some →</a>
+        </p>
+      {% endif %}
+    </div>
+
     <div class="panel">
       <h2 style="margin-top:0;">Adjust Bill</h2>
       <form method="POST" action="{{ url_for('owner_billing_adjust', order_id=order.id) }}">
@@ -175,6 +232,44 @@
     }
     amt.addEventListener('input', toggle);
     toggle();
+  })();
+
+  // Live filter the menu picker as the cashier types — matches against
+  // both the item name and the parent category, hides categories that
+  // end up with zero matches, and shows an empty-state hint if nothing
+  // matches at all. Pure DOM, no requests.
+  (function () {
+    const input = document.getElementById('menuFilter');
+    const picker = document.getElementById('menuPicker');
+    if (!input || !picker) return;
+    const cats = picker.querySelectorAll('.menu-cat');
+    const empty = document.getElementById('menuFilterEmpty');
+    input.addEventListener('input', function () {
+      const q = (input.value || '').trim().toLowerCase();
+      let anyVisible = false;
+      cats.forEach(function (cat) {
+        const catName = cat.getAttribute('data-cat-name') || '';
+        let catHasMatch = false;
+        cat.querySelectorAll('.menu-item').forEach(function (it) {
+          const name = it.getAttribute('data-item-name') || '';
+          const match = !q || name.includes(q) || catName.includes(q);
+          it.style.display = match ? '' : 'none';
+          if (match) catHasMatch = true;
+        });
+        cat.style.display = catHasMatch ? '' : 'none';
+        if (catHasMatch) anyVisible = true;
+      });
+      if (empty) empty.style.display = anyVisible ? 'none' : '';
+    });
+    // Slash key focuses the search box — quick keyboard pivot during a rush.
+    document.addEventListener('keydown', function (e) {
+      if (e.key === '/' && document.activeElement.tagName !== 'INPUT'
+          && document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        input.focus();
+        input.select();
+      }
+    });
   })();
 
   function addPaymentRow() {
