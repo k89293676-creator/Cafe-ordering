@@ -68,4 +68,5 @@ class Customer(db.Model):
     name = db.Column(db.Text, default="")
     phone = db.Column(db.Text, default="")
     password_hash = db.Column(db.Text, nullable=False)
+    points = db.Column(db.Integer, default=0, server_default="0")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())

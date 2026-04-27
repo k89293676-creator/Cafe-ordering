@@ -44,18 +44,41 @@
 <div class="panel" style="margin-bottom:1.5rem;">
   <h2 style="margin-top:0;">Last 7 days &mdash; Net Revenue</h2>
   <p class="muted" style="font-size:.88rem;margin-top:-.25rem;">Total: <strong>₹{{ '%.2f'|format(sparkline.total_net) }}</strong> · Peak day: <strong>₹{{ '%.2f'|format(sparkline.peak) }}</strong></p>
-  <svg viewBox="0 0 700 140" preserveAspectRatio="none" style="width:100%;height:140px;display:block;">
-    {% set peak = sparkline.peak if sparkline.peak > 0 else 1 %}
-    {% set bar_w = 700 / sparkline.labels|length %}
-    {% for n in sparkline.net %}
-      {% set h = (n / peak) * 110 %}
-      {% set x = loop.index0 * bar_w %}
-      {% set y = 130 - h %}
-      <rect x="{{ x + 4 }}" y="{{ y }}" width="{{ bar_w - 8 }}" height="{{ h }}"
-            fill="{% if loop.last %}#f59e0b{% else %}#22c55e{% endif %}" opacity="0.85" rx="3"/>
-      <text x="{{ x + bar_w/2 }}" y="138" fill="#9a9a9a" font-size="9" text-anchor="middle" font-family="ui-monospace,monospace">{{ sparkline.labels[loop.index0][-5:] }}</text>
-    {% endfor %}
-  </svg>
+  <canvas id="revenueChart" width="700" height="200"></canvas>
+  <script>
+    const ctx = document.getElementById('revenueChart').getContext('2d');
+    const revenueChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: {{ sparkline.labels|tojson }},
+        datasets: [{
+          label: 'Net Revenue (₹)',
+          data: {{ sparkline.net|tojson }},
+          backgroundColor: 'rgba(34, 197, 94, 0.8)',
+          borderColor: 'rgba(34, 197, 94, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: function(value) {
+                return '₹' + value.toFixed(0);
+              }
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            display: false
+          }
+        }
+      }
+    });
+  </script>
   <table style="margin-top:.75rem;">
     <thead><tr><th>Day</th><th class="right">Gross</th><th class="right">Refunds %</th><th class="right">Net</th></tr></thead>
     <tbody>
@@ -90,6 +113,34 @@
         {% endfor %}
       </tbody>
     </table>
+    <canvas id="paymentChart" width="400" height="200" style="margin-top:1rem;"></canvas>
+    <script>
+      const paymentCtx = document.getElementById('paymentChart').getContext('2d');
+      const paymentChart = new Chart(paymentCtx, {
+        type: 'pie',
+        data: {
+          labels: {{ overview.per_mode.keys()|list|tojson }},
+          datasets: [{
+            data: {{ overview.per_mode.values()|list|tojson }},
+            backgroundColor: [
+              '#22c55e',
+              '#f59e0b',
+              '#ef4444',
+              '#4f46e5',
+              '#06b6d4'
+            ]
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              position: 'bottom'
+            }
+          }
+        }
+      });
+    </script>
   {% endif %}
 </div>
 

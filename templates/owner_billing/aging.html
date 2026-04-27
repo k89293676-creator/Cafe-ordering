@@ -11,6 +11,48 @@
   <div class="stat danger"><div class="label">Critical (&gt;24h)</div><div class="value">{{ buckets.over_24h.count }}</div><div class="sub">₹{{ '%.2f'|format(buckets.over_24h.value) }}</div></div>
 </div>
 
+<div class="panel" style="margin-bottom:1.5rem;">
+  <h2>Aging Distribution</h2>
+  <canvas id="agingChart" width="600" height="200"></canvas>
+  <script>
+    const agingCtx = document.getElementById('agingChart').getContext('2d');
+    const agingChart = new Chart(agingCtx, {
+      type: 'bar',
+      data: {
+        labels: ['<1h', '1-4h', '4-24h', '>24h'],
+        datasets: [{
+          label: 'Amount (₹)',
+          data: [
+            {{ buckets.under_1h.value }},
+            {{ buckets['1h_to_4h'].value }},
+            {{ buckets['4h_to_24h'].value }},
+            {{ buckets.over_24h.value }}
+          ],
+          backgroundColor: [
+            '#22c55e',
+            '#3b82f6',
+            '#f59e0b',
+            '#ef4444'
+          ]
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: function(value) {
+                return '₹' + value.toFixed(0);
+              }
+            }
+          }
+        }
+      }
+    });
+  </script>
+</div>
+
 {% if not orders %}
   <div class="empty">No open tabs. Healthy floor!</div>
 {% else %}
