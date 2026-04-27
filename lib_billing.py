@@ -168,14 +168,22 @@ from datetime import timedelta as _timedelta  # local re-import for clarity
 
 
 def parse_date_range(from_str: str | None, to_str: str | None,
-                     fallback_days: int = 1) -> tuple[datetime, datetime]:
+                     fallback_days: int = 1,
+                     today: datetime | None = None
+                     ) -> tuple[datetime, datetime, str]:
     """Parse ``?from=YYYY-MM-DD&to=YYYY-MM-DD``. Inclusive day-bounds.
 
-    Returns ``(start_utc, end_utc)`` where ``end_utc`` is the *exclusive*
-    upper bound (i.e. start of the day *after* ``to_str``). Falls back
-    to "today minus ``fallback_days``" when no range is supplied so the
-    EOD page keeps working without any query string."""
-    now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    Returns ``(start_utc, end_utc, label)`` where ``end_utc`` is the
+    *exclusive* upper bound (i.e. start of the day *after* ``to_str``)
+    and ``label`` is a human-readable range string for headers/filenames.
+
+    Falls back to "today minus ``fallback_days``" when no range is
+    supplied so the EOD page keeps working without any query string.
+    Pass ``today`` to anchor the fallback (the caller usually has a
+    ``today_start`` already computed in the local timezone). When
+    omitted we use ``utcnow`` truncated to midnight UTC."""
+    now = today or datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0)
 
     def _parse(s: str | None) -> datetime | None:
         if not s:
@@ -188,13 +196,23 @@ def parse_date_range(from_str: str | None, to_str: str | None,
     start = _parse(from_str)
     end_inclusive = _parse(to_str)
     if start and end_inclusive:
-        return start, end_inclusive + _timedelta(days=1)
-    if start and not end_inclusive:
-        return start, start + _timedelta(days=1)
-    if end_inclusive and not start:
-        return end_inclusive, end_inclusive + _timedelta(days=1)
-    # Neither: today (or last N days back).
-    return now - _timedelta(days=max(0, fallback_days - 1)), now + _timedelta(days=1)
+        end = end_inclusive + _timedelta(days=1)
+    elif start and not end_inclusive:
+        end = start + _timedelta(days=1)
+    elif end_inclusive and not start:
+        start = end_inclusive
+        end = end_inclusive + _timedelta(days=1)
+    else:
+        # Neither: today (or last N days back).
+        start = now - _timedelta(days=max(0, fallback_days - 1))
+        end = now + _timedelta(days=1)
+
+    last_inclusive = end - _timedelta(days=1)
+    if start.date() == last_inclusive.date():
+        label = start.strftime("%Y-%m-%d")
+    else:
+        label = f"{start:%Y-%m-%d} → {last_inclusive:%Y-%m-%d}"
+    return start, end, label
 
 
 # Aging-bucket boundaries in seconds. The boundaries are intentionally

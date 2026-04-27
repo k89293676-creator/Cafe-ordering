@@ -364,11 +364,19 @@
     } else if (act === 'walkin') {
       ev.target.disabled = true;
       try {
-        const r = await postJson(`/api/owner/tables/${encodeURIComponent(id)}/walkin`);
-        if (r.ok && r.orderId) {
-          window.location = `/owner/billing/orders/${r.orderId}`;
+        const resp = await postJson(`/api/owner/tables/${encodeURIComponent(id)}/walkin`);
+        // ``postJson`` returns the raw fetch Response — we have to parse
+        // the body to read ``orderId`` / ``error``. Reading ``resp.ok``
+        // alone never tells us where to navigate.
+        let payload = {};
+        try { payload = await resp.json(); } catch (_) { /* non-JSON */ }
+        if (resp.ok && payload.orderId) {
+          window.location = `/owner/billing/orders/${payload.orderId}`;
+        } else if (resp.status === 409 && payload.orderId) {
+          // Table already has an open tab — open it instead of erroring.
+          window.location = `/owner/billing/orders/${payload.orderId}`;
         } else {
-          alert('Failed to create walk-in order.');
+          alert(payload.error || 'Failed to create walk-in order.');
         }
       } finally {
         ev.target.disabled = false;

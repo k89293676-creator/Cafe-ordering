@@ -679,22 +679,45 @@ def api_walkin(table_id: str):
 
     Allows the owner to start an order for a walk-in customer directly
     from the table overview. The order starts empty; items can be added
-    later via the billing order detail page.
+    later from the billing order-detail page. Refuses to clobber a table
+    that already has an open / unpaid order so two cashiers can't create
+    duplicate walk-ins on the same seat during a rush.
     """
     owner_id = logged_in_owner_id()
     table = CafeTable.query.filter_by(id=table_id, owner_id=owner_id).first()
     if not table:
         abort(404)
+
+    # Don't create a second walk-in if the table is already busy.
+    busy = (Order.query
+            .filter(Order.owner_id == owner_id,
+                    Order.table_id == table_id,
+                    Order.payment_status == "unpaid",
+                    Order.status != "cancelled")
+            .first())
+    if busy:
+        return jsonify({
+            "ok": False,
+            "error": "This table already has an open order. Open it instead.",
+            "orderId": busy.id,
+        }), 409
+
     now = datetime.now(timezone.utc)
     order = Order(
         owner_id=owner_id,
+        cafe_id=table.cafe_id,
         table_id=table_id,
         table_name=table.name,
         status="pending",
-        customer_name="Walk-in Customer",
+        payment_status="unpaid",
+        customer_name="Walk-in",
+        customer_email="",
+        customer_phone="",
         items=[],
-        subtotal=0.0,
-        total=0.0,
+        modifiers={},
+        subtotal=0,
+        total=0,
+        origin="walkin",
         created_at=now,
         updated_at=now,
     )
@@ -702,7 +725,8 @@ def api_walkin(table_id: str):
     db.session.commit()
     try:
         _notify_owner(owner_id, "order_created",
-                      {"id": order.id, "tableId": table_id, "status": "pending"})
+                      {"id": order.id, "tableId": table_id,
+                       "status": "pending", "origin": "walkin"})
     except Exception:
         pass
     return jsonify({"ok": True, "orderId": order.id})

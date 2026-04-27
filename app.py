@@ -1078,11 +1078,13 @@ def extra_security_headers(response: Response) -> Response:
     response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
-    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    # NOTE: Do NOT set Cross-Origin-Embedder-Policy: require-corp here. It
+    # blocks every cross-origin sub-resource (Chart.js / Google Fonts /
+    # jsdelivr CDN) unless they ship CORP/CORS headers, which would
+    # silently break the billing dashboard charts. Leave the default
+    # ("unsafe-none") so the existing CDN-served Chart.js keeps working.
     # Defence-in-depth: clickjacking, MIME sniffing, referrer leaks.
-    response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     # Fallback CSP: Talisman owns CSP in production, but if Talisman ever
@@ -1579,17 +1581,32 @@ def place_order_in_db(order: dict) -> dict:
                 raise _QuotaExceeded()
 
     pickup_code = _generate_pickup_code()
+    # ── Loyalty: link the order to a returning Customer (if their email
+    # or phone matches an account) and credit 1 point per ₹10 of bill
+    # value. Wrapped in ``try`` because loyalty MUST NOT block an order
+    # from being placed — a billing-side bug here would silently kill
+    # ordering on the storefront otherwise.
     customer_id = None
-    customer_email = order.get("customerEmail", "").strip().lower()
-    if customer_email:
-        from extensions.models import Customer
-        customer = Customer.query.filter_by(email=customer_email).first()
-        if customer:
+    try:
+        from extensions.models import Customer  # local import — avoids cycles at boot
+        customer_email = (order.get("customerEmail") or "").strip().lower()
+        customer_phone = (order.get("customerPhone") or "").strip()
+        customer = None
+        if customer_email:
+            customer = Customer.query.filter_by(email=customer_email).first()
+        if customer is None and customer_phone:
+            customer = Customer.query.filter_by(phone=customer_phone).first()
+        if customer is not None:
             customer_id = customer.id
-            # Add loyalty points: 1 point per ₹10 spent
-            points_earned = int(order.get("total", 0) // 10)
-            customer.points += points_earned
+            try:
+                bill_total = float(order.get("total") or 0)
+            except (TypeError, ValueError):
+                bill_total = 0.0
+            points_earned = max(0, int(bill_total // 10))  # 1 point per ₹10
+            customer.points = int(customer.points or 0) + points_earned
             db.session.add(customer)
+    except Exception:  # pragma: no cover — never break an order over loyalty
+        customer_id = None
     record = Order(
         owner_id=order.get("ownerId"),
         cafe_id=order.get("cafeId"),
@@ -4256,8 +4273,20 @@ def _billing_overview(owner_id: int) -> dict:
                            .filter(Order.owner_id == owner_id,
                                    Order.payment_status == "unpaid",
                                    Order.status != "cancelled").scalar() or 0)
+        # Voided bills today — separate query because voided orders never
+        # have ``paid_at`` populated, so they aren't in ``paid_today``.
+        voided_today = (Order.query
+                        .filter(Order.owner_id == owner_id,
+                                Order.payment_status == "voided",
+                                Order.updated_at >= start)
+                        .count())
+        voided_value_today = float(db.session.query(db.func.coalesce(db.func.sum(Order.total), 0))
+                                   .filter(Order.owner_id == owner_id,
+                                           Order.payment_status == "voided",
+                                           Order.updated_at >= start).scalar() or 0)
         avg_ticket = round((revenue / len(paid_today)) if paid_today else 0.0, 2)
         refund_ratio = round((refunds / (revenue + refunds) * 100.0) if (revenue + refunds) else 0.0, 2)
+        tip_ratio = round((tips / revenue * 100.0) if revenue else 0.0, 2)
         return {
             "revenue": round(revenue, 2),
             "orders_paid": len(paid_today),
@@ -4265,11 +4294,13 @@ def _billing_overview(owner_id: int) -> dict:
             "tax_collected": round(tax_collected, 2),
             "service_charge": round(service_charge, 2),
             "tips": round(tips, 2),
+            "tip_ratio": tip_ratio,
             "refunds": round(refunds, 2),
             "refund_ratio": refund_ratio,
             "open_tabs": open_tabs,
             "open_value": round(open_value, 2),
             "voided_today": voided_today,
+            "voided_value_today": round(voided_value_today, 2),
             "per_mode": per_mode,
             "as_of": datetime.now(timezone.utc).isoformat(),
         }
@@ -5042,20 +5073,55 @@ def owner_billing_aging():
                          Order.status != "cancelled")
                  .order_by(Order.created_at.asc()).all())
     now = datetime.now(timezone.utc)
+
+    # ``aging_bucket_for`` takes seconds (see lib_billing.AGING_BUCKETS),
+    # so compute the age explicitly per-row instead of passing a datetime.
+    def _age_seconds(created_at):
+        if not created_at:
+            return 0.0
+        return max(0.0, (now - created_at).total_seconds())
+
+    # Build the dict shapes the template uses:
+    #   * ``buckets`` — output of ``summarise_aging`` keyed by bucket id
+    #   * ``orders``  — _bill_dict-shaped rows (so the template can use
+    #                   ``o.tableName / o.customerName / o.total / o.id``)
+    #   * ``age_labels`` / ``age_classes`` — small lookups indexed by
+    #                   order id, used by the per-row age pill
     items = [{
-        "order_id": o.id,
-        "table": o.table_name or "",
-        "customer": o.customer_name or "",
+        "createdAt": o.created_at.isoformat() if o.created_at else None,
         "total": float(o.total or 0),
-        "created_at": o.created_at,
-        "age_hours": ((now - o.created_at).total_seconds() / 3600.0) if o.created_at else 0,
-        "bucket": aging_bucket_for(o.created_at, now=now),
+        "id": o.id,
     } for o in open_tabs]
-    aging = summarise_aging(items)
+    buckets = summarise_aging(items, now=now)
+
+    age_labels: dict[int, str] = {}
+    age_classes: dict[int, str] = {}
+    bucket_pill_class = {
+        "under_1h":  "pill-paid",      # green / fresh
+        "1h_to_4h":  "pill-unpaid",    # blue / active
+        "4h_to_24h": "pill-refunded",  # amber / stale
+        "over_24h":  "pill-voided",    # red / critical
+    }
+    for o in open_tabs:
+        seconds_old = _age_seconds(o.created_at)
+        bucket = aging_bucket_for(seconds_old)
+        hours = seconds_old / 3600.0
+        if hours < 1:
+            label = f"{int(seconds_old / 60)}m"
+        elif hours < 24:
+            label = f"{hours:.1f}h"
+        else:
+            label = f"{int(hours / 24)}d {int(hours % 24)}h"
+        age_labels[o.id] = label
+        age_classes[o.id] = bucket_pill_class.get(bucket, "pill-unpaid")
+
+    orders = [_bill_dict(o) for o in open_tabs]
     return _no_store(app.make_response(render_template(
         "owner_billing/aging.html",
-        aging=aging,
-        items=items,
+        buckets=buckets,
+        orders=orders,
+        age_labels=age_labels,
+        age_classes=age_classes,
         owner_username=logged_in_owner(),
     )))
 

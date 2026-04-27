@@ -31,14 +31,26 @@
     <div class="value">₹{{ '%.2f'|format(overview.tax_collected) }}</div>
   </div>
   <div class="stat">
+    <div class="label">Service Charge</div>
+    <div class="value">₹{{ '%.2f'|format(overview.service_charge) }}</div>
+  </div>
+  <div class="stat">
     <div class="label">Tips</div>
     <div class="value">₹{{ '%.2f'|format(overview.tips) }}</div>
+    <div class="sub">{{ overview.tip_ratio }}% of net revenue</div>
   </div>
   <div class="stat danger">
     <div class="label">Refunds</div>
     <div class="value">₹{{ '%.2f'|format(overview.refunds) }}</div>
     <div class="sub">{{ overview.refund_ratio }}% of settled revenue</div>
   </div>
+  {% if overview.voided_today %}
+  <div class="stat warn">
+    <div class="label">Voided Today</div>
+    <div class="value">{{ overview.voided_today }}</div>
+    <div class="sub">₹{{ '%.2f'|format(overview.voided_value_today) }} written off</div>
+  </div>
+  {% endif %}
 </div>
 <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;">
   <a class="btn btn-primary btn-sm" href="{{ url_for('owner_billing_open') }}">View open tabs</a>
