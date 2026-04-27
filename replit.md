@@ -2,6 +2,47 @@
 
 A web-based cafe ordering system built with Python and Flask.
 
+## Recent changes — April 27, 2026 (afternoon: billing + tables refresh)
+
+- **Billing layout (`templates/owner_billing/_base.html`):** defined the
+  missing `--primary` token and `.btn-primary` rule (it was being used as a
+  class but had no CSS), made the topbar + section nav sticky, swapped the
+  hard-coded "Cafe 11:11" header for the per-owner cafe name surfaced by a
+  new context processor, and added a global `window.billToast()` helper for
+  non-blocking notifications used across every billing page.
+- **Open Tabs (`templates/owner_billing/open.html`) — full rewrite:** card
+  grid replaces the bare table, with age buckets (≤30m / 30m–2h / ≥2h) shown
+  as a coloured stat strip and a segmented filter bar with live counts.
+  Search now matches table id, table name, customer name, and order id (`/`
+  shortcut). Sort by newest, oldest, amount ↑/↓, or table. Each card has a
+  one-tap "⚡ Cash ₹X" button that POSTs the existing settle endpoint via
+  fetch (with `X-CSRFToken`) and optimistically removes the card on success.
+  Visible-row CSV export and opt-in 60s auto-refresh that pauses on hidden
+  tabs round it out.
+- **Bill detail (`templates/owner_billing/order_detail.html`):** settle UI
+  redesigned — visual method chips (with emoji hints) replace the dropdown,
+  per-row reference + remove button, live "paid / due" balance read-out
+  with `change due` / `short` annotations, quick-amount chips (Exact /
+  Round-up / ₹100 / ₹200 / ₹500 / ₹1000), spinner state on submit so a
+  double-click can't race the server. Split rows default to remaining
+  balance so cash + UPI splits are one tap each. Right-hand totals + actions
+  panel is sticky at md+ so the cashier doesn't have to scroll back up after
+  editing items.
+- **Customer pay page (`templates/owner_billing/customer_pay.html`):** added
+  an order-summary block (line items + qty), itemised totals (subtotal /
+  discount / service charge / tax / tip), 3-step progress strip
+  (Review → Pay → Confirm), "Secured by <provider>" footer with lock icon,
+  and a paid-state success card. Provider buttons disable themselves when
+  redirecting to a hosted checkout.
+- **Tables overview tie-in (`templates/tables_overview.html`):** any card
+  with an active order now gets a primary "💳 Bill ₹X" CTA that deep-links
+  straight into `/owner/billing/orders/<id>`, so floor staff can pivot from
+  table view → settle in one tap.
+- **Backend (`app.py`):** added `_inject_cafe_name` Flask context processor
+  (cached per-request via `flask.g`) so every template can render the
+  owner's brand without each route having to pass it in. `g` added to the
+  Flask imports.
+
 ## Recent changes — April 27, 2026
 
 - **Tables overview UX:** filter pills now show live counts; new keyboard
