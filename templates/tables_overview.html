@@ -5,767 +5,1194 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>Tables Overview · Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" />
   <style>
+    /* ── Reset & tokens ──────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg: #faf6ef;
-      --card: #ffffff;
-      --ink: #1f1408;
-      --muted: #7a6a55;
-      --line: #e7dfd1;
-      --brand: #4f46e5;
-      --free: #15803d;
-      --occupied: #b45309;
-      --ready: #1d4ed8;
-      --attention: #dc2626;
-      --cleaning: #7c3aed;
-      --shadow: 0 8px 28px -18px rgba(31,20,8,.35);
-    }
-    * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-    a { color: var(--brand); text-decoration: none; }
-    .topbar { display:flex; align-items:center; justify-content:space-between;
-      padding: 14px 22px; background: #fff; border-bottom: 1px solid var(--line); }
-    .topbar h1 { margin: 0; font-size: 1.1rem; letter-spacing: -.01em; }
-    .topbar .meta { font-size: .82rem; color: var(--muted); }
-    .topbar .actions { display:flex; gap:.5rem; align-items:center; }
-    .btn {
-      border: 1px solid var(--line); background: #fff; color: var(--ink);
-      padding: .45rem .8rem; border-radius: 8px; font-size: .85rem; cursor: pointer;
-      transition: background .12s ease, border-color .12s ease;
-    }
-    .btn:hover { background: #f5efe2; }
-    .btn-primary { background: var(--brand); color: #fff; border-color: var(--brand); }
-    .btn-primary:hover { background: #4338ca; }
-    .container { padding: 22px; max-width: 1400px; margin: 0 auto; }
+      --bg:        #f1f4f9;
+      --surface:   #ffffff;
+      --ink:       #0f172a;
+      --ink-2:     #475569;
+      --ink-3:     #94a3b8;
+      --line:      #e2e8f0;
+      --line-s:    #cbd5e1;
+      --primary:   #4f46e5;
+      --primary-d: #4338ca;
+      --primary-bg:#eef2ff;
 
-    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 12px; margin-bottom: 18px; }
-    .summary-card { background: var(--card); border: 1px solid var(--line);
-      border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
-    .summary-card .label { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em;
-      color: var(--muted); }
-    .summary-card .value { font-size: 1.6rem; font-weight: 700; margin-top: .2rem; }
-    .summary-card.free .value      { color: var(--free); }
-    .summary-card.occupied .value  { color: var(--occupied); }
-    .summary-card.ready .value     { color: var(--ready); }
-    .summary-card.attention .value { color: var(--attention); }
-    .summary-card.cleaning .value  { color: var(--cleaning); }
+      /* status palette */
+      --free-fg:   #15803d; --free-bg:   #dcfce7; --free-border: #86efac;
+      --occ-fg:    #b45309; --occ-bg:    #fef3c7; --occ-border:  #fcd34d;
+      --ready-fg:  #1d4ed8; --ready-bg:  #dbeafe; --ready-border:#93c5fd;
+      --attn-fg:   #b91c1c; --attn-bg:   #fee2e2; --attn-border: #fca5a5;
+      --clean-fg:  #6d28d9; --clean-bg:  #ede9fe; --clean-border:#c4b5fd;
 
-    .toolbar { display:flex; align-items:center; gap: 10px; margin-bottom: 14px;
-      flex-wrap: wrap; }
-    .filter-pill { padding: .4rem .85rem; border-radius: 999px; border: 1px solid var(--line);
-      background: #fff; font-size: .82rem; cursor: pointer; display:inline-flex;
-      align-items:center; gap:.4rem; }
-    .filter-pill .pill-count { background: rgba(31,20,8,.08); color: var(--ink);
-      font-weight: 700; font-size: .72rem; padding: 1px 7px; border-radius: 999px;
-      min-width: 18px; text-align: center; }
+      /* card left-border accents */
+      --free-accent:  #22c55e;
+      --occ-accent:   #f59e0b;
+      --ready-accent: #3b82f6;
+      --attn-accent:  #ef4444;
+      --clean-accent: #8b5cf6;
+
+      --radius-sm: 8px;
+      --radius:    12px;
+      --radius-lg: 16px;
+      --shadow-sm: 0 1px 2px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.04);
+      --shadow:    0 4px 12px rgba(15,23,42,.07), 0 1px 3px rgba(15,23,42,.04);
+      --shadow-md: 0 8px 24px rgba(15,23,42,.09), 0 2px 6px rgba(15,23,42,.05);
+      --ring:      0 0 0 3px rgba(79,70,229,.18);
+    }
+    html, body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg);
+                 color: var(--ink); -webkit-font-smoothing: antialiased; }
+
+    /* ── Top bar ──────────────────────────────────────────── */
+    .topbar {
+      background: #0c1322;
+      background-image: linear-gradient(135deg, #0d1426 0%, #10193a 60%, #0f172a 100%);
+      padding: 0 1.5rem;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      border-bottom: 1px solid rgba(255,255,255,.07);
+    }
+    .topbar-left { display: flex; align-items: center; gap: .85rem; }
+    .topbar-logo {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      display: flex; align-items: center; justify-content: center;
+      font-size: .85rem; font-weight: 800; color: #fff; flex-shrink: 0;
+    }
+    .topbar-title { color: #fff; font-size: 1rem; font-weight: 700; letter-spacing: -.01em; }
+    .topbar-sub   { color: rgba(255,255,255,.38); font-size: .72rem; margin-top: .1rem; }
+    .topbar-right { display: flex; align-items: center; gap: .65rem; }
+    .live-indicator {
+      display: inline-flex; align-items: center; gap: .4rem;
+      font-size: .72rem; color: rgba(255,255,255,.5);
+      background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.1);
+      border-radius: 999px; padding: .3rem .75rem; white-space: nowrap;
+    }
+    #live-pip {
+      width: 7px; height: 7px; border-radius: 50%; background: #6b7280;
+      transition: background .3s ease; flex-shrink: 0;
+    }
+    #live-pip.connected { background: #22c55e; animation: pip-pulse 2s ease-in-out infinite; }
+    #live-pip.error     { background: #ef4444; }
+    @keyframes pip-pulse { 0%,100%{opacity:1;} 50%{opacity:.45;} }
+    .tbtn {
+      display: inline-flex; align-items: center; gap: .35rem;
+      padding: .45rem .9rem; border-radius: var(--radius-sm);
+      font-size: .82rem; font-weight: 600; cursor: pointer;
+      border: 1px solid rgba(255,255,255,.15); color: rgba(255,255,255,.8);
+      background: rgba(255,255,255,.07); text-decoration: none;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
+      white-space: nowrap;
+    }
+    .tbtn:hover { background: rgba(255,255,255,.13); color: #fff; border-color: rgba(255,255,255,.25); }
+    .tbtn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .tbtn-primary:hover { background: var(--primary-d); border-color: var(--primary-d); }
+
+    /* ── Page body layout ──────────────────────────────────── */
+    .page { max-width: 1440px; margin: 0 auto; padding: 1.5rem 1.75rem 3rem; }
+    @media (max-width: 640px) { .page { padding: 1rem; } }
+
+    /* ── Summary strip ─────────────────────────────────────── */
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: .75rem;
+      margin-bottom: 1.25rem;
+    }
+    @media (max-width: 1100px) { .summary { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 600px)  { .summary { grid-template-columns: repeat(2, 1fr); } }
+
+    .sum-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 1rem 1.15rem;
+      box-shadow: var(--shadow-sm);
+      position: relative;
+      overflow: hidden;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .sum-card:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+    .sum-card::before {
+      content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+    .sum-card.sc-total::before  { background: linear-gradient(90deg, #6366f1, #8b5cf6); }
+    .sum-card.sc-free::before   { background: linear-gradient(90deg, #22c55e, #16a34a); }
+    .sum-card.sc-occ::before    { background: linear-gradient(90deg, #f59e0b, #d97706); }
+    .sum-card.sc-ready::before  { background: linear-gradient(90deg, #3b82f6, #1d4ed8); }
+    .sum-card.sc-attn::before   { background: linear-gradient(90deg, #ef4444, #b91c1c); }
+    .sum-card.sc-clean::before  { background: linear-gradient(90deg, #8b5cf6, #6d28d9); }
+
+    .sum-label { font-size: .65rem; font-weight: 700; text-transform: uppercase;
+                 letter-spacing: .09em; color: var(--ink-3); margin-bottom: .3rem; }
+    .sum-value { font-size: 1.75rem; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+    .sum-card.sc-total .sum-value { color: #4f46e5; }
+    .sum-card.sc-free  .sum-value { color: var(--free-fg); }
+    .sum-card.sc-occ   .sum-value { color: var(--occ-fg); }
+    .sum-card.sc-ready .sum-value { color: var(--ready-fg); }
+    .sum-card.sc-attn  .sum-value { color: var(--attn-fg); }
+    .sum-card.sc-clean .sum-value { color: var(--clean-fg); }
+    .sum-icon {
+      position: absolute; right: .85rem; top: 50%; transform: translateY(-50%);
+      font-size: 1.5rem; opacity: .12;
+    }
+
+    /* ── Toolbar ────────────────────────────────────────────── */
+    .toolbar {
+      display: flex; align-items: center; gap: .55rem;
+      margin-bottom: 1.25rem; flex-wrap: wrap;
+    }
+    .filter-pill {
+      display: inline-flex; align-items: center; gap: .45rem;
+      padding: .42rem .85rem; border-radius: 999px;
+      border: 1px solid var(--line); background: var(--surface);
+      font-size: .8rem; font-weight: 600; cursor: pointer; color: var(--ink-2);
+      transition: all .15s ease;
+    }
+    .filter-pill:hover { border-color: var(--line-s); color: var(--ink); }
     .filter-pill.active { background: var(--ink); color: #fff; border-color: var(--ink); }
-    .filter-pill.active .pill-count { background: rgba(255,255,255,.18); color:#fff; }
-    .filter-pill[data-filter="needs_attention"] .pill-count.has { background:#fee2e2; color:var(--attention); }
-    .filter-pill[data-filter="ready_to_serve"]  .pill-count.has { background:#dbeafe; color:var(--ready); }
-    .search { flex: 1; min-width: 160px; padding: .5rem .8rem; border-radius: 8px;
-      border: 1px solid var(--line); background: #fff; font-size: .9rem; }
-    .sort-select { padding: .5rem .65rem; border-radius: 8px; border: 1px solid var(--line);
-      background: #fff; font-size: .85rem; color: var(--ink); cursor: pointer; }
-    .kbd-hint { font-size:.72rem; color: var(--muted); }
-    .kbd-hint kbd { background: #fff; border:1px solid var(--line); border-radius: 4px;
-      padding: 1px 5px; font-family: ui-monospace, Menlo, monospace; font-size: .68rem; }
-
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 14px; }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-      padding: 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px;
-      position: relative; transition: transform .12s ease, box-shadow .12s ease; }
-    .card:hover { transform: translateY(-1px); box-shadow: 0 14px 38px -20px rgba(31,20,8,.4); }
-    .card .head { display:flex; align-items:flex-start; justify-content: space-between; gap: 8px; }
-    .card .name { font-weight: 700; font-size: 1.05rem; }
-    .card .id   { font-size: .7rem; color: var(--muted); margin-top: 2px; }
-    .badge { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em;
-      padding: .25rem .55rem; border-radius: 999px; font-weight: 700; white-space: nowrap; }
-    .badge.free      { background: #dcfce7; color: var(--free); }
-    .badge.occupied  { background: #fef3c7; color: var(--occupied); }
-    .badge.ready_to_serve { background: #dbeafe; color: var(--ready); animation: pulse 1.6s ease-in-out infinite; }
-    .badge.needs_attention { background: #fee2e2; color: var(--attention); animation: pulse 1.1s ease-in-out infinite; }
-    .badge.cleaning  { background: #ede9fe; color: var(--cleaning); }
-    .card.cleaning-on { border-color: #ddd6fe; background: #faf5ff; }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
-
-    .row { display:flex; justify-content: space-between; align-items: center;
-      font-size: .85rem; color: var(--ink); }
-    .row .k { color: var(--muted); }
-    .order-line { background: #fdf6e8; border: 1px dashed #e7d4ad; border-radius: 10px;
-      padding: 8px 10px; font-size: .82rem; }
-    .order-line.stuck { background: #fff1f2; border-color: #fca5a5; color: var(--attention); }
-    .stuck-pill { display:inline-block; background: var(--attention); color:#fff;
-      padding: 1px 6px; border-radius: 4px; font-size: .65rem; font-weight: 700;
-      letter-spacing: .04em; margin-left: 4px; vertical-align: middle; }
-    .calls-line { background: #fff1f2; border: 1px dashed #fecaca; border-radius: 10px;
-      padding: 8px 10px; font-size: .82rem; color: var(--attention); }
-    .note { font-size: .82rem; color: var(--muted); font-style: italic;
-      border-top: 1px dashed var(--line); padding-top: 8px; }
-    .actions-row { display:flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
-    .actions-row .btn { font-size: .78rem; padding: .35rem .6rem; }
-
-    .empty { text-align: center; color: var(--muted); padding: 60px 0; }
-    .stale { opacity: .55; }
-
-    /* Modal */
-    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45);
-      display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
-    .modal-bg.show { display: flex; }
-    .modal { background: #fff; border-radius: 14px; padding: 18px 20px; width: 100%;
-      max-width: 520px; max-height: 86vh; overflow-y: auto; }
-    .modal h2 { margin: 0 0 .5rem; font-size: 1.1rem; }
-    .modal .close { float: right; cursor: pointer; color: var(--muted); }
-    .modal section { margin-top: 12px; }
-    .modal section h3 { font-size: .82rem; text-transform: uppercase; letter-spacing: .05em;
-      color: var(--muted); margin: 0 0 .35rem; }
-    .modal ul { margin: 0; padding-left: 1.1rem; font-size: .88rem; }
-    .modal li { margin: .2rem 0; }
-    .modal .field { margin-top: .6rem; }
-    .modal .field label { display:block; font-size:.78rem; color:var(--muted); margin-bottom:.2rem; text-transform:uppercase; letter-spacing:.04em; }
-    .modal .field input { width:100%; padding:.5rem .65rem; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:.92rem; }
-    .modal .field input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(79,70,229,.15); }
-    .modal .row-fields { display:grid; grid-template-columns: 1fr 1fr; gap:.6rem; }
-
-    /* Toasts — non-blocking notifications, replaces alert() */
-    .toast-stack { position: fixed; right: 18px; bottom: 18px; z-index: 80;
-      display:flex; flex-direction:column; gap:.5rem; pointer-events:none; max-width: 340px; }
-    .toast { background:#1f1408; color:#fff; padding:.65rem .9rem; border-radius:10px;
-      font-size:.85rem; box-shadow: 0 12px 32px -10px rgba(31,20,8,.55);
-      pointer-events:auto; opacity:0; transform: translateY(8px);
-      transition: opacity .18s ease, transform .18s ease; }
-    .toast.show { opacity: 1; transform: translateY(0); }
-    .toast.ok    { background:#15803d; }
-    .toast.warn  { background:#b45309; }
-    .toast.error { background:#b91c1c; }
-
-    @media (max-width: 540px) {
-      .container { padding: 14px; }
-      .grid { grid-template-columns: 1fr 1fr; gap: 10px; }
-      .card { padding: 10px; }
+    .pill-count {
+      background: rgba(15,23,42,.08); color: var(--ink-2);
+      font-weight: 700; font-size: .68rem; padding: .1rem .5rem;
+      border-radius: 999px; min-width: 18px; text-align: center;
     }
+    .filter-pill.active .pill-count { background: rgba(255,255,255,.2); color: #fff; }
+    .filter-pill[data-filter="needs_attention"].active { background: var(--attn-fg); border-color: var(--attn-fg); }
+    .filter-pill[data-filter="ready_to_serve"].active  { background: var(--ready-fg); border-color: var(--ready-fg); }
+    .filter-pill[data-filter="free"].active            { background: var(--free-fg); border-color: var(--free-fg); }
+
+    .search-wrap { flex: 1; min-width: 180px; position: relative; }
+    .search-wrap svg { position: absolute; left: .75rem; top: 50%; transform: translateY(-50%);
+                       pointer-events: none; color: var(--ink-3); }
+    .search {
+      width: 100%; padding: .52rem .85rem .52rem 2.2rem;
+      border-radius: var(--radius-sm); border: 1px solid var(--line);
+      background: var(--surface); font-family: inherit; font-size: .875rem;
+      color: var(--ink); transition: border-color .15s, box-shadow .15s;
+    }
+    .search:focus { outline: none; border-color: var(--primary); box-shadow: var(--ring); }
+    .sort-select {
+      padding: .52rem .75rem; border-radius: var(--radius-sm); border: 1px solid var(--line);
+      background: var(--surface); font-family: inherit; font-size: .82rem;
+      color: var(--ink); cursor: pointer;
+    }
+    .kbd-hint { font-size: .7rem; color: var(--ink-3); display: flex; align-items: center; gap: .3rem; }
+    kbd {
+      background: var(--surface); border: 1px solid var(--line-s);
+      border-radius: 4px; padding: 1px 6px; font-family: ui-monospace, monospace;
+      font-size: .65rem; color: var(--ink-2);
+    }
+
+    /* ── Table grid ─────────────────────────────────────────── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(285px, 1fr));
+      gap: 1rem;
+    }
+    @media (max-width: 540px) { .grid { grid-template-columns: 1fr 1fr; gap: .65rem; } }
+    @media (max-width: 360px) { .grid { grid-template-columns: 1fr; } }
+
+    /* ── Table card ─────────────────────────────────────────── */
+    .tcard {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-left-width: 4px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      display: flex; flex-direction: column;
+      transition: transform .15s ease, box-shadow .15s ease;
+      overflow: hidden;
+    }
+    .tcard:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+
+    /* Status border colors */
+    .tcard.s-free           { border-left-color: var(--free-accent); }
+    .tcard.s-occupied       { border-left-color: var(--occ-accent); }
+    .tcard.s-ready_to_serve { border-left-color: var(--ready-accent); }
+    .tcard.s-needs_attention{ border-left-color: var(--attn-accent); animation: card-pulse 2.5s ease-in-out infinite; }
+    .tcard.s-cleaning       { border-left-color: var(--clean-accent); }
+
+    @keyframes card-pulse {
+      0%,100% { box-shadow: var(--shadow-sm); }
+      50%     { box-shadow: 0 0 0 3px rgba(239,68,68,.15), var(--shadow); }
+    }
+
+    .card-head {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: .6rem; padding: .9rem 1rem .7rem;
+    }
+    .card-name { font-size: 1rem; font-weight: 700; color: var(--ink); line-height: 1.2; }
+    .card-id   { font-size: .65rem; color: var(--ink-3); margin-top: .15rem; font-family: ui-monospace, monospace; }
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: .28rem;
+      font-size: .65rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .06em; padding: .28rem .65rem; border-radius: 999px;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .status-badge::before {
+      content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor;
+    }
+    .status-badge.s-free           { background: var(--free-bg);   color: var(--free-fg); }
+    .status-badge.s-occupied       { background: var(--occ-bg);    color: var(--occ-fg); }
+    .status-badge.s-ready_to_serve { background: var(--ready-bg);  color: var(--ready-fg);
+                                     animation: badge-glow 1.6s ease-in-out infinite; }
+    .status-badge.s-needs_attention{ background: var(--attn-bg);   color: var(--attn-fg);
+                                     animation: badge-glow 1s ease-in-out infinite; }
+    .status-badge.s-cleaning       { background: var(--clean-bg);  color: var(--clean-fg); }
+    @keyframes badge-glow { 0%,100%{opacity:1;} 50%{opacity:.55;} }
+
+    /* Card body sections */
+    .card-body { display: flex; flex-direction: column; gap: .55rem; padding: 0 1rem .85rem; }
+
+    /* Order info block */
+    .order-block {
+      border-radius: var(--radius-sm);
+      padding: .65rem .75rem;
+      display: flex; flex-direction: column; gap: .4rem;
+    }
+    .order-block.normal { background: #f8fafc; border: 1px solid #e9ecf4; }
+    .order-block.stuck  { background: #fff1f2; border: 1px dashed #fca5a5; }
+    .order-block-top {
+      display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+    }
+    .order-id-text { font-size: .75rem; font-weight: 700; color: var(--ink); }
+    .order-status-pill {
+      font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+      padding: .18rem .55rem; border-radius: 999px;
+    }
+    .pill-pending   { background: #fff7ed; color: #9a3412; }
+    .pill-confirmed { background: #eff6ff; color: #1e40af; }
+    .pill-preparing { background: #fefce8; color: #713f12; }
+    .pill-ready     { background: #f0fdf4; color: #166534; }
+    .stuck-pill {
+      display: inline-flex; align-items: center; gap: .2rem;
+      background: #ef4444; color: #fff; font-size: .6rem; font-weight: 800;
+      padding: .18rem .5rem; border-radius: 4px; letter-spacing: .04em;
+    }
+    .order-meta-row {
+      display: flex; align-items: center; gap: .55rem; flex-wrap: wrap;
+      font-size: .76rem; color: var(--ink-2);
+    }
+    .order-meta-row .sep { color: var(--ink-3); }
+    .order-total-big { font-size: .9rem; font-weight: 800; color: var(--ink); }
+    .order-customer { display: flex; align-items: center; gap: .3rem;
+                      font-size: .73rem; color: var(--ink-2); }
+
+    /* Calls block */
+    .calls-block {
+      background: #fff1f2; border: 1px dashed #fca5a5;
+      border-radius: var(--radius-sm); padding: .6rem .75rem;
+      display: flex; align-items: flex-start; gap: .55rem;
+    }
+    .calls-icon { font-size: 1rem; flex-shrink: 0; }
+    .calls-text { font-size: .78rem; color: var(--attn-fg); line-height: 1.4; }
+    .calls-ack  { font-size: .68rem; background: rgba(185,28,28,.1); color: var(--attn-fg);
+                  padding: .1rem .45rem; border-radius: 999px; display: inline-block;
+                  margin-left: .3rem; font-weight: 600; }
+
+    /* Stats row */
+    .stats-row {
+      display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+    }
+    .stat-chip {
+      display: inline-flex; align-items: center; gap: .25rem;
+      background: #f8fafc; border: 1px solid #e9ecf4;
+      border-radius: var(--radius-sm); padding: .28rem .6rem;
+      font-size: .74rem; color: var(--ink-2);
+    }
+    .stat-chip strong { color: var(--ink); font-weight: 700; }
+
+    /* Occupied timer bar */
+    .timer-bar-wrap { display: flex; align-items: center; gap: .55rem; }
+    .timer-bar-label { font-size: .72rem; color: var(--ink-3); min-width: 60px; }
+    .timer-bar-track {
+      flex: 1; height: 5px; background: #e9ecf4; border-radius: 999px; overflow: hidden;
+    }
+    .timer-bar-fill {
+      height: 100%; border-radius: 999px;
+      background: linear-gradient(90deg, #f59e0b, #ef4444);
+      transition: width .4s ease;
+    }
+    .timer-bar-val { font-size: .72rem; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+
+    /* Note */
+    .card-note {
+      display: flex; align-items: flex-start; gap: .4rem;
+      font-size: .76rem; color: var(--ink-2); font-style: italic;
+      padding-top: .5rem; border-top: 1px dashed var(--line);
+    }
+    .card-note .note-icon { flex-shrink: 0; color: var(--ink-3); }
+
+    /* Action buttons */
+    .card-actions { padding: .75rem 1rem; border-top: 1px solid #f1f4f9; display: flex; flex-wrap: wrap; gap: .4rem; }
+    .act-btn {
+      display: inline-flex; align-items: center; gap: .3rem;
+      padding: .38rem .72rem; border-radius: var(--radius-sm);
+      font-size: .76rem; font-weight: 600; cursor: pointer;
+      border: 1px solid var(--line); background: #fff;
+      color: var(--ink-2); text-decoration: none;
+      transition: all .15s ease; white-space: nowrap;
+    }
+    .act-btn:hover { border-color: var(--line-s); color: var(--ink); background: #f8fafc; }
+    .act-btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .act-btn.primary:hover { background: var(--primary-d); }
+    .act-btn.danger  { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+    .act-btn.danger:hover  { background: #fee2e2; border-color: #fca5a5; }
+    .act-btn.success { background: #f0fdf4; border-color: #bbf7d0; color: #15803d; }
+    .act-btn.success:hover { background: #dcfce7; }
+
+    /* ── Empty state ────────────────────────────────────────── */
+    .empty {
+      text-align: center; padding: 5rem 2rem; color: var(--ink-3);
+      display: none; grid-column: 1 / -1;
+    }
+    .empty-icon { font-size: 2.5rem; margin-bottom: .75rem; }
+    .empty h3 { font-size: 1rem; font-weight: 600; color: var(--ink-2); margin-bottom: .35rem; }
+    .empty p  { font-size: .875rem; }
+
+    /* ── Modals ─────────────────────────────────────────────── */
+    .modal-bg {
+      position: fixed; inset: 0; background: rgba(15,23,42,.55);
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      display: none; align-items: center; justify-content: center;
+      z-index: 60; padding: 1rem;
+    }
+    .modal-bg.show { display: flex; }
+    .modal {
+      background: #fff; border-radius: var(--radius-lg);
+      box-shadow: 0 24px 64px rgba(15,23,42,.22);
+      width: 100%; max-width: 520px;
+      max-height: 88vh; overflow-y: auto;
+      animation: modal-in .22s cubic-bezier(.16,1,.3,1);
+    }
+    @keyframes modal-in { from { opacity:0; transform:translateY(12px) scale(.97); } }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1.25rem 1.5rem 0;
+    }
+    .modal-header h2 { font-size: 1.1rem; font-weight: 700; letter-spacing: -.01em; }
+    .modal-close {
+      width: 30px; height: 30px; border-radius: 999px; display: flex;
+      align-items: center; justify-content: center;
+      background: #f1f5f9; border: none; cursor: pointer; color: var(--ink-2);
+      font-size: 1rem; transition: background .12s ease;
+    }
+    .modal-close:hover { background: #e2e8f0; color: var(--ink); }
+    .modal-body { padding: 1rem 1.5rem 1.5rem; }
+    .modal-sub  { font-size: .82rem; color: var(--ink-2); margin: .3rem 0 1rem; }
+
+    .modal-section { margin-top: 1.1rem; }
+    .modal-section-title {
+      font-size: .68rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--ink-3); margin-bottom: .6rem;
+      padding-bottom: .45rem; border-bottom: 1px solid var(--line);
+    }
+
+    .field { margin-bottom: .75rem; }
+    .field label {
+      display: block; font-size: .72rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .06em;
+      color: var(--ink-2); margin-bottom: .3rem;
+    }
+    .field input, .field textarea, .field select {
+      width: 100%; padding: .6rem .8rem; border: 1px solid var(--line);
+      border-radius: var(--radius-sm); font-family: inherit; font-size: .9rem;
+      color: var(--ink); background: #fff; transition: border-color .15s, box-shadow .15s;
+    }
+    .field input:focus, .field textarea:focus, .field select:focus {
+      outline: none; border-color: var(--primary); box-shadow: var(--ring);
+    }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: .65rem; }
+    .modal-actions {
+      display: flex; gap: .5rem; justify-content: flex-end; margin-top: 1rem;
+    }
+    .mbtn {
+      display: inline-flex; align-items: center; gap: .35rem;
+      padding: .55rem 1.1rem; border-radius: var(--radius-sm);
+      font-size: .875rem; font-weight: 600; cursor: pointer; border: 1px solid var(--line);
+      background: #fff; color: var(--ink-2); transition: all .15s ease;
+    }
+    .mbtn:hover { background: #f8fafc; color: var(--ink); }
+    .mbtn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .mbtn.primary:hover { background: var(--primary-d); }
+
+    /* Detail modal stats grid */
+    .stats-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: .65rem; margin-bottom: .5rem; }
+    .stats-4-item { background: #f8fafc; border-radius: var(--radius-sm); padding: .65rem .5rem; text-align: center; }
+    .stats-4-label { font-size: .62rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); }
+    .stats-4-val   { font-size: 1rem; font-weight: 700; color: var(--ink); margin-top: .15rem; }
+
+    /* Detail modal lists */
+    .detail-list { display: flex; flex-direction: column; gap: .45rem; margin-top: .35rem; }
+    .detail-item {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: .75rem; padding: .55rem .7rem; background: #f8fafc;
+      border-radius: var(--radius-sm); font-size: .82rem;
+    }
+    .detail-item-left { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+    .detail-item-title { font-weight: 600; color: var(--ink); }
+    .detail-item-sub   { font-size: .7rem; color: var(--ink-3); }
+    .detail-item-right { flex-shrink: 0; font-weight: 700; color: var(--ink); }
+
+    /* Error text */
+    .err-text { font-size: .8rem; color: #b91c1c; margin-top: .5rem; display: none; }
+
+    /* ── Toasts ─────────────────────────────────────────────── */
+    .toast-stack {
+      position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 80;
+      display: flex; flex-direction: column; gap: .45rem;
+      pointer-events: none; max-width: 340px;
+    }
+    .toast {
+      background: #1e293b; color: #fff; padding: .7rem 1rem;
+      border-radius: var(--radius); font-size: .84rem; font-weight: 500;
+      box-shadow: var(--shadow-md); pointer-events: auto;
+      opacity: 0; transform: translateY(10px);
+      transition: opacity .2s ease, transform .2s ease;
+      display: flex; align-items: center; gap: .55rem;
+    }
+    .toast.show  { opacity: 1; transform: translateY(0); }
+    .toast.ok    { background: #15803d; }
+    .toast.warn  { background: #b45309; }
+    .toast.error { background: #b91c1c; }
+    .toast-icon  { font-size: 1rem; flex-shrink: 0; }
+
+    /* ── Scroll thin ───────────────────────────────────────── */
+    *::-webkit-scrollbar { width: 6px; height: 6px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb { background: rgba(15,23,42,.15); border-radius: 99px; }
   </style>
 </head>
 <body>
-  <header class="topbar">
+
+<!-- ═══════════════ TOP BAR ═══════════════ -->
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="topbar-logo">11</div>
     <div>
-      <h1>Tables Overview</h1>
-      <div class="meta" id="meta-line">{{ table_count }} table{% if table_count != 1 %}s{% endif %} · @{{ owner_username }}</div>
+      <div class="topbar-title">Tables Overview</div>
+      <div class="topbar-sub" id="topbar-sub">{{ table_count }} table{% if table_count != 1 %}s{% endif %} · @{{ owner_username }}</div>
     </div>
-    <div class="actions">
-      <span id="live-dot" title="Live updates" style="display:inline-flex;align-items:center;gap:.35rem;font-size:.78rem;color:var(--muted);">
-        <span id="live-pip" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#9ca3af;transition:background .2s;"></span>
-        <span id="live-label">Connecting…</span>
-      </span>
-      <label style="font-size:.8rem; color: var(--muted);">
-        <input type="checkbox" id="auto-refresh" checked /> Poll fallback
-      </label>
-      <button class="btn" id="refresh-btn">Refresh</button>
-      <a class="btn" href="{{ url_for('owner_dashboard') }}">← Dashboard</a>
+  </div>
+  <div class="topbar-right">
+    <span class="live-indicator">
+      <span id="live-pip"></span>
+      <span id="live-label">Connecting…</span>
+    </span>
+    <label class="live-indicator" style="cursor:pointer;gap:.5rem;" title="Toggle 10s auto-poll">
+      <input type="checkbox" id="auto-refresh" checked style="accent-color:#6366f1;" />
+      <span style="font-size:.72rem;color:rgba(255,255,255,.5);">Auto-refresh</span>
+    </label>
+    <button class="tbtn" id="refresh-btn">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+      Refresh
+    </button>
+    <a class="tbtn" href="{{ url_for('owner_dashboard') }}">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      Dashboard
+    </a>
+  </div>
+</header>
+
+<!-- ═══════════════ PAGE BODY ═══════════════ -->
+<main class="page">
+
+  <!-- Summary strip -->
+  <div class="summary" id="summary">
+    <div class="sum-card sc-total">
+      <div class="sum-label">Total</div>
+      <div class="sum-value" id="sum-total">—</div>
+      <div class="sum-icon">⊞</div>
     </div>
-  </header>
-
-  <main class="container">
-    <div class="summary" id="summary">
-      <div class="summary-card"><div class="label">Total tables</div><div class="value" id="sum-total">—</div></div>
-      <div class="summary-card free"><div class="label">Free</div><div class="value" id="sum-free">—</div></div>
-      <div class="summary-card occupied"><div class="label">Occupied</div><div class="value" id="sum-occupied">—</div></div>
-      <div class="summary-card ready"><div class="label">Ready to serve</div><div class="value" id="sum-ready">—</div></div>
-      <div class="summary-card attention"><div class="label">Needs attention</div><div class="value" id="sum-attn">—</div></div>
-      <div class="summary-card cleaning"><div class="label">Cleaning</div><div class="value" id="sum-clean">—</div></div>
+    <div class="sum-card sc-free">
+      <div class="sum-label">Free</div>
+      <div class="sum-value" id="sum-free">—</div>
+      <div class="sum-icon">✓</div>
     </div>
-
-    <div class="toolbar">
-      <button class="filter-pill active" data-filter="all" title="Press 1">All <span class="pill-count" data-count="all">0</span></button>
-      <button class="filter-pill" data-filter="needs_attention" title="Press 2">Needs attention <span class="pill-count" data-count="needs_attention">0</span></button>
-      <button class="filter-pill" data-filter="ready_to_serve" title="Press 3">Ready <span class="pill-count" data-count="ready_to_serve">0</span></button>
-      <button class="filter-pill" data-filter="occupied" title="Press 4">Occupied <span class="pill-count" data-count="occupied">0</span></button>
-      <button class="filter-pill" data-filter="cleaning" title="Press 5">Cleaning <span class="pill-count" data-count="cleaning">0</span></button>
-      <button class="filter-pill" data-filter="free" title="Press 6">Free <span class="pill-count" data-count="free">0</span></button>
-      <input type="search" class="search" id="search" placeholder="Search tables… (/)" />
-      <select id="sort-select" class="sort-select" title="Sort tables">
-        <option value="status">Sort: Priority</option>
-        <option value="oldest">Sort: Oldest activity</option>
-        <option value="name">Sort: Name</option>
-      </select>
-      <span class="kbd-hint"><kbd>1</kbd>–<kbd>6</kbd> filter · <kbd>/</kbd> search · <kbd>r</kbd> refresh</span>
+    <div class="sum-card sc-occ">
+      <div class="sum-label">Occupied</div>
+      <div class="sum-value" id="sum-occupied">—</div>
+      <div class="sum-icon">👤</div>
     </div>
-
-    <div id="grid" class="grid"></div>
-    <div id="empty" class="empty" style="display:none;">No tables match the current filter.</div>
-  </main>
-
-  <div class="modal-bg" id="modal-bg">
-    <div class="modal">
-      <span class="close" id="modal-close">✕</span>
-      <h2 id="modal-title">Table</h2>
-      <section>
-        <h3>Sticky note <span style="font-weight:400;text-transform:none;color:var(--muted)">(clears in 30 min)</span></h3>
-        <textarea id="note-input" rows="2" maxlength="200"
-                  style="width:100%;padding:.5rem;border:1px solid var(--line);border-radius:8px;font-family:inherit;"></textarea>
-        <button class="btn btn-primary" id="note-save" style="margin-top:.4rem;">Save note</button>
-      </section>
-      <section>
-        <h3>Last 7 days</h3>
-        <div id="stats7d" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:.85rem;">
-          <div><div style="color:var(--muted);font-size:.7rem;text-transform:uppercase;">Orders</div><div id="s7-orders" style="font-weight:700;">—</div></div>
-          <div><div style="color:var(--muted);font-size:.7rem;text-transform:uppercase;">Revenue</div><div id="s7-rev"    style="font-weight:700;">—</div></div>
-          <div><div style="color:var(--muted);font-size:.7rem;text-transform:uppercase;">Avg ticket</div><div id="s7-avg" style="font-weight:700;">—</div></div>
-          <div><div style="color:var(--muted);font-size:.7rem;text-transform:uppercase;">Avg dwell</div><div id="s7-dwell" style="font-weight:700;">—</div></div>
-        </div>
-      </section>
-      <section>
-        <h3>Recent orders</h3>
-        <ul id="recent-orders"><li>Loading…</li></ul>
-      </section>
-      <section>
-        <h3>Recent service calls</h3>
-        <ul id="recent-calls"><li>Loading…</li></ul>
-      </section>
+    <div class="sum-card sc-ready">
+      <div class="sum-label">Ready to serve</div>
+      <div class="sum-value" id="sum-ready">—</div>
+      <div class="sum-icon">🍽</div>
+    </div>
+    <div class="sum-card sc-attn">
+      <div class="sum-label">Needs attention</div>
+      <div class="sum-value" id="sum-attn">—</div>
+      <div class="sum-icon">🔔</div>
+    </div>
+    <div class="sum-card sc-clean">
+      <div class="sum-label">Cleaning</div>
+      <div class="sum-value" id="sum-clean">—</div>
+      <div class="sum-icon">🧹</div>
     </div>
   </div>
 
-  <!-- Walk-in modal -->
-  <div class="modal-bg" id="walkin-bg">
-    <div class="modal" style="max-width:420px;">
-      <span class="close" id="walkin-close">✕</span>
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <button class="filter-pill active" data-filter="all" title="1">All <span class="pill-count" data-count="all">0</span></button>
+    <button class="filter-pill" data-filter="needs_attention" title="2">
+      <span>⚠</span> Attention <span class="pill-count" data-count="needs_attention">0</span>
+    </button>
+    <button class="filter-pill" data-filter="ready_to_serve" title="3">
+      🍽 Ready <span class="pill-count" data-count="ready_to_serve">0</span>
+    </button>
+    <button class="filter-pill" data-filter="occupied" title="4">
+      👤 Occupied <span class="pill-count" data-count="occupied">0</span>
+    </button>
+    <button class="filter-pill" data-filter="cleaning" title="5">
+      🧹 Cleaning <span class="pill-count" data-count="cleaning">0</span>
+    </button>
+    <button class="filter-pill" data-filter="free" title="6">
+      ✓ Free <span class="pill-count" data-count="free">0</span>
+    </button>
+    <div class="search-wrap">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="search" class="search" id="search" placeholder="Search tables… (/)" />
+    </div>
+    <select id="sort-select" class="sort-select">
+      <option value="status">Sort: Priority</option>
+      <option value="oldest">Sort: Oldest</option>
+      <option value="name">Sort: Name A–Z</option>
+      <option value="revenue">Sort: Revenue ↓</option>
+    </select>
+    <span class="kbd-hint"><kbd>1</kbd>–<kbd>6</kbd> filter · <kbd>/</kbd> search · <kbd>r</kbd> refresh</span>
+  </div>
+
+  <!-- Cards grid -->
+  <div id="grid" class="grid"></div>
+  <div id="empty-state" class="empty">
+    <div class="empty-icon">🔍</div>
+    <h3>No tables match</h3>
+    <p>Try a different filter or search term.</p>
+  </div>
+
+</main>
+
+<!-- ═══════════════ DETAIL MODAL ═══════════════ -->
+<div class="modal-bg" id="modal-detail">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="detail-title">Table details</h2>
+      <button class="modal-close" id="detail-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-sub" id="detail-sub"></p>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Last 7 days</div>
+        <div class="stats-4" id="detail-stats">
+          <div class="stats-4-item"><div class="stats-4-label">Orders</div><div class="stats-4-val" id="d7-orders">—</div></div>
+          <div class="stats-4-item"><div class="stats-4-label">Revenue</div><div class="stats-4-val" id="d7-rev">—</div></div>
+          <div class="stats-4-item"><div class="stats-4-label">Avg ticket</div><div class="stats-4-val" id="d7-avg">—</div></div>
+          <div class="stats-4-item"><div class="stats-4-label">Avg dwell</div><div class="stats-4-val" id="d7-dwell">—</div></div>
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Sticky note <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink-3)">(clears after 30 min)</span></div>
+        <div class="field" style="margin-bottom:.5rem;">
+          <textarea id="note-input" rows="2" maxlength="200" placeholder="Birthday party, dietary needs, VIP guest…"></textarea>
+        </div>
+        <button class="mbtn primary" id="note-save" style="font-size:.82rem;padding:.42rem .85rem;">Save note</button>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Recent orders</div>
+        <div class="detail-list" id="recent-orders"><div style="color:var(--ink-3);font-size:.84rem;">Loading…</div></div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Recent service calls</div>
+        <div class="detail-list" id="recent-calls"><div style="color:var(--ink-3);font-size:.84rem;">Loading…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ WALK-IN MODAL ═══════════════ -->
+<div class="modal-bg" id="modal-walkin">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-header">
       <h2>New walk-in order</h2>
-      <p style="font-size:.85rem;color:var(--muted);margin:.25rem 0 .8rem;">
-        Seating <b id="walkin-table-name"></b>. Name &amp; phone are optional —
-        leave blank for an anonymous tab.
-      </p>
+      <button class="modal-close" id="walkin-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-sub">Seating <strong id="walkin-table-name"></strong>. Name &amp; phone are optional.</p>
       <div class="field">
-        <label for="walkin-name">Customer name (optional)</label>
+        <label>Customer name (optional)</label>
         <input id="walkin-name" type="text" maxlength="80" placeholder="e.g. Aisha" autocomplete="off" />
       </div>
-      <div class="row-fields">
+      <div class="two-col">
         <div class="field">
-          <label for="walkin-phone">Phone (optional)</label>
-          <input id="walkin-phone" type="tel" maxlength="32" placeholder="+91…" autocomplete="off" inputmode="tel" />
+          <label>Phone (optional)</label>
+          <input id="walkin-phone" type="tel" maxlength="32" placeholder="+91…" inputmode="tel" />
         </div>
         <div class="field">
-          <label for="walkin-party">Party size</label>
+          <label>Party size</label>
           <input id="walkin-party" type="number" min="1" max="50" placeholder="2" inputmode="numeric" />
         </div>
       </div>
-      <div id="walkin-error" style="color:var(--attention);font-size:.82rem;margin-top:.6rem;display:none;"></div>
-      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.9rem;">
-        <button class="btn" id="walkin-cancel">Cancel</button>
-        <button class="btn btn-primary" id="walkin-confirm">Open tab →</button>
+      <div class="err-text" id="walkin-error"></div>
+      <div class="modal-actions">
+        <button class="mbtn" id="walkin-cancel">Cancel</button>
+        <button class="mbtn primary" id="walkin-confirm">Open tab →</button>
       </div>
     </div>
   </div>
+</div>
 
-  <!-- Toast stack -->
-  <div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="false"></div>
-
-  <!-- Transfer modal -->
-  <div class="modal-bg" id="transfer-bg">
-    <div class="modal" style="max-width:380px;">
-      <span class="close" id="transfer-close">✕</span>
+<!-- ═══════════════ TRANSFER MODAL ═══════════════ -->
+<div class="modal-bg" id="modal-transfer">
+  <div class="modal" style="max-width:380px;">
+    <div class="modal-header">
       <h2>Transfer order</h2>
-      <p style="font-size:.85rem;color:var(--muted);margin:.25rem 0 .8rem;">
-        Move the open order from <b id="transfer-from-name"></b> to another table.
-      </p>
-      <label style="font-size:.8rem;color:var(--muted);">Target table</label>
-      <select id="transfer-target" style="width:100%;padding:.5rem;border:1px solid var(--line);border-radius:8px;margin-top:.3rem;"></select>
-      <div id="transfer-error" style="color:var(--attention);font-size:.82rem;margin-top:.5rem;display:none;"></div>
-      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.9rem;">
-        <button class="btn" id="transfer-cancel">Cancel</button>
-        <button class="btn btn-primary" id="transfer-confirm">Transfer</button>
+      <button class="modal-close" id="transfer-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-sub">Move the open order from <strong id="transfer-from-name"></strong> to another table.</p>
+      <div class="field">
+        <label>Target table</label>
+        <select id="transfer-target"></select>
+      </div>
+      <div class="err-text" id="transfer-error"></div>
+      <div class="modal-actions">
+        <button class="mbtn" id="transfer-cancel">Cancel</button>
+        <button class="mbtn primary" id="transfer-confirm">Transfer order</button>
       </div>
     </div>
   </div>
+</div>
 
+<!-- Toast stack -->
+<div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+<!-- ═══════════════ JS ═══════════════ -->
 <script>
 (function () {
-  const csrf = document.querySelector('meta[name="csrf-token"]').content;
-  const grid = document.getElementById('grid');
-  const empty = document.getElementById('empty');
-  const meta = document.getElementById('meta-line');
-  const search = document.getElementById('search');
-  const auto = document.getElementById('auto-refresh');
-  let activeFilter = 'all';
-  let activeSort = 'status';   // status | oldest | name
-  let lastData = null;
-  let timer = null;
-  let currentTableId = null;
+'use strict';
 
-  // Loud → quiet ordering used for the default "Priority" sort. Keeps
-  // the floor staff focused on the cards that actually need a human.
-  const STATUS_RANK = {
-    needs_attention: 0,
-    ready_to_serve:  1,
-    occupied:        2,
-    cleaning:        3,
-    free:            4,
+const csrf       = document.querySelector('meta[name="csrf-token"]').content;
+const grid       = document.getElementById('grid');
+const emptyState = document.getElementById('empty-state');
+const topbarSub  = document.getElementById('topbar-sub');
+const searchEl   = document.getElementById('search');
+const autoEl     = document.getElementById('auto-refresh');
+const toastStack = document.getElementById('toast-stack');
+
+let activeFilter = 'all';
+let activeSort   = 'status';
+let lastData     = null;
+let timer        = null;
+let currentTableId = null;
+
+const STATUS_RANK = { needs_attention:0, ready_to_serve:1, occupied:2, cleaning:3, free:4 };
+const STATUS_LABEL = {
+  free:'Free', occupied:'Occupied', ready_to_serve:'Ready to serve',
+  needs_attention:'Needs attention', cleaning:'Cleaning'
+};
+const PILL_CLASS = { pending:'pill-pending', confirmed:'pill-confirmed',
+                     preparing:'pill-preparing', ready:'pill-ready' };
+
+/* ── Utilities ────────────────────────────────────────────── */
+function esc(s) {
+  return String(s||'').replace(/[&<>"']/g, c =>
+    ({  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function money(n) { return '₹' + Number(n||0).toFixed(2); }
+function fmtAge(s) {
+  if (!s || s <= 0) return '0s';
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm ' + (s % 60 ? (s%60)+'s' : '');
+  return Math.floor(m/60) + 'h ' + (m%60) + 'm';
+}
+function reasonLabel(r) {
+  return ({service:'Call server',bill:'Bill request',water:'Water',help:'Needs help'}[r]||r||'Service');
+}
+
+/* ── Toast helper ─────────────────────────────────────────── */
+function toast(msg, variant='', ms=3600) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (variant ? ' '+variant : '');
+  el.setAttribute('role', variant==='error' ? 'alert' : 'status');
+  const icons = { ok:'✓', warn:'⚠', error:'✕', ''  :'ℹ' };
+  el.innerHTML = `<span class="toast-icon">${icons[variant]||'ℹ'}</span>${esc(msg)}`;
+  toastStack.appendChild(el);
+  requestAnimationFrame(()=>el.classList.add('show'));
+  setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),250); }, ms);
+}
+
+/* ── Live pip ─────────────────────────────────────────────── */
+const pip   = document.getElementById('live-pip');
+const label = document.getElementById('live-label');
+function setLive(state) {
+  pip.className = state;
+  label.textContent = { connected:'Live', error:'Offline', ''  :'Connecting…' }[state]||'Connecting…';
+}
+
+/* ── Render cards ─────────────────────────────────────────── */
+function render() {
+  if (!lastData) return;
+
+  // Update summary strip
+  const s = lastData.summary;
+  document.getElementById('sum-total').textContent    = s.total    || 0;
+  document.getElementById('sum-free').textContent     = s.free     || 0;
+  document.getElementById('sum-occupied').textContent = s.occupied || 0;
+  document.getElementById('sum-ready').textContent    = s.ready_to_serve || 0;
+  document.getElementById('sum-attn').textContent     = s.needs_attention || 0;
+  document.getElementById('sum-clean').textContent    = s.cleaning  || 0;
+
+  // Update filter pill counts
+  document.querySelectorAll('.filter-pill .pill-count').forEach(el => {
+    const k = el.dataset.count;
+    const n = (k==='all') ? (s.total||0) : (s[k]||0);
+    el.textContent = n;
+  });
+
+  const q = (searchEl.value||'').toLowerCase().trim();
+  let rows = lastData.tables.filter(t => {
+    if (activeFilter !== 'all' && t.status !== activeFilter) return false;
+    if (q && !(t.name||'').toLowerCase().includes(q) && !(t.id||'').toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  // Sort
+  rows.sort((a,b) => {
+    if (activeSort === 'name')
+      return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true});
+    if (activeSort === 'oldest') {
+      const ax = a.lastActivityAt ? Date.parse(a.lastActivityAt) : Infinity;
+      const bx = b.lastActivityAt ? Date.parse(b.lastActivityAt) : Infinity;
+      return ax !== bx ? ax-bx : (a.name||'').localeCompare(b.name||'', undefined, {numeric:true});
+    }
+    if (activeSort === 'revenue')
+      return (b.today.revenue||0) - (a.today.revenue||0);
+    const ra = STATUS_RANK[a.status]??99, rb = STATUS_RANK[b.status]??99;
+    return ra!==rb ? ra-rb : (a.name||'').localeCompare(b.name||'', undefined, {numeric:true});
+  });
+
+  if (!rows.length) {
+    grid.innerHTML = '';
+    emptyState.style.display = 'block';
+    return;
+  }
+  emptyState.style.display = 'none';
+
+  grid.innerHTML = rows.map(t => buildCard(t)).join('');
+
+  topbarSub.textContent = `${s.total} tables · updated ${new Date(lastData.fetchedAt).toLocaleTimeString()}`;
+}
+
+function buildCard(t) {
+  const o = t.openOrder;
+  const c = t.openCalls;
+  const statusClass = 's-' + t.status;
+  const badgeLabel  = STATUS_LABEL[t.status] || t.status.replace('_',' ');
+
+  /* Order block */
+  let orderHtml = '';
+  if (o) {
+    const stuckBadge = o.stuck
+      ? `<span class="stuck-pill">⚠ Stuck ${fmtAge(o.ageSeconds)}</span>` : '';
+    const pillClass  = PILL_CLASS[o.status] || '';
+    orderHtml = `
+      <div class="order-block ${o.stuck?'stuck':'normal'}">
+        <div class="order-block-top">
+          <span class="order-id-text">Order #${Number(o.id)||0}</span>
+          <span class="order-status-pill ${pillClass}">${esc(o.status)}</span>
+        </div>
+        ${stuckBadge}
+        <div class="order-meta-row">
+          <span class="order-total-big">${money(o.total)}</span>
+          <span class="sep">·</span>
+          <span>${Number(o.itemsCount)||0} item${o.itemsCount===1?'':'s'}</span>
+          <span class="sep">·</span>
+          <span>${fmtAge(o.ageSeconds)}</span>
+        </div>
+        ${o.customerName
+          ? `<div class="order-customer">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              ${esc(o.customerName)}
+            </div>` : ''}
+      </div>`;
+  }
+
+  /* Calls block */
+  let callsHtml = '';
+  if (c.count) {
+    const ackBadge = c.anyAcknowledged ? '<span class="calls-ack">ack</span>' : '';
+    callsHtml = `
+      <div class="calls-block">
+        <span class="calls-icon">🔔</span>
+        <div class="calls-text">
+          <strong>${c.count} open call${c.count===1?'':'s'}</strong> · ${reasonLabel(c.latestReason)} · ${fmtAge(c.latestAgeSeconds)} ago ${ackBadge}
+        </div>
+      </div>`;
+  }
+
+  /* Stats row */
+  const statsHtml = `
+    <div class="stats-row">
+      <div class="stat-chip">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 9l-5 5-4-4-5 5"/></svg>
+        <span>Today <strong>${t.today.orders} order${t.today.orders===1?'':'s'}</strong></span>
+      </div>
+      ${t.today.revenue > 0
+        ? `<div class="stat-chip">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+            <span><strong>${money(t.today.revenue)}</strong></span>
+          </div>` : ''}
+    </div>`;
+
+  /* Occupied timer bar */
+  let timerHtml = '';
+  if (t.occupiedSinceSeconds > 0) {
+    // Show % of 2h session cap (visually) — cap at 100
+    const pct = Math.min(100, Math.round(t.occupiedSinceSeconds / 7200 * 100));
+    timerHtml = `
+      <div class="timer-bar-wrap">
+        <span class="timer-bar-label">Occupied</span>
+        <div class="timer-bar-track"><div class="timer-bar-fill" style="width:${pct}%"></div></div>
+        <span class="timer-bar-val">${fmtAge(t.occupiedSinceSeconds)}</span>
+      </div>`;
+  }
+
+  /* Note */
+  const noteHtml = t.note
+    ? `<div class="card-note"><span class="note-icon">📝</span><span>${esc(t.note)}</span></div>` : '';
+
+  /* Action buttons */
+  const cleanLabel = t.cleaning ? 'Mark clean' : 'Cleaning';
+  let actions = `<button class="act-btn" data-act="detail">Details</button>`;
+  if (o) {
+    actions += `<a class="act-btn primary" href="/owner/billing/orders/${o.id}">💳 ${money(o.total)}</a>`;
+    actions += `<button class="act-btn success" data-act="close">✓ Close table</button>`;
+    actions += `<button class="act-btn" data-act="transfer">⇄ Transfer</button>`;
+  } else {
+    actions += `<button class="act-btn primary" data-act="walkin">+ Walk-in</button>`;
+  }
+  if (c.count)  actions += `<button class="act-btn danger" data-act="clear">Clear calls</button>`;
+  actions += `<button class="act-btn" data-act="cleaning">${cleanLabel}</button>`;
+  if (o) actions += `<a class="act-btn" href="/owner/order/${o.id}/receipt" target="_blank">Receipt</a>`;
+  actions += `<a class="act-btn" href="/t/${t.id}" target="_blank">Menu ↗</a>`;
+
+  return `
+    <div class="tcard ${statusClass}${t.cleaning?' cleaning-on':''}" data-id="${t.id}" data-name="${esc(t.name)}">
+      <div class="card-head">
+        <div>
+          <div class="card-name">${esc(t.name)}</div>
+          <div class="card-id">${esc(t.id)}</div>
+        </div>
+        <span class="status-badge ${statusClass}">${badgeLabel}</span>
+      </div>
+      <div class="card-body">
+        ${orderHtml}
+        ${callsHtml}
+        ${timerHtml}
+        ${statsHtml}
+        ${noteHtml}
+      </div>
+      <div class="card-actions">${actions}</div>
+    </div>`;
+}
+
+/* ── Fetch data ───────────────────────────────────────────── */
+async function load() {
+  try {
+    const r = await fetch('/api/owner/tables/overview', { credentials:'same-origin', cache:'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    lastData = await r.json();
+    grid.classList.remove('stale');
+    setLive('connected');
+    render();
+  } catch(e) {
+    setLive('error');
+    grid.classList.add('stale');
+    console.error('[tables-overview] fetch error:', e);
+  }
+}
+
+/* ── Auto-refresh ─────────────────────────────────────────── */
+function scheduleRefresh() {
+  clearTimeout(timer);
+  if (autoEl.checked) timer = setTimeout(()=>{ load(); scheduleRefresh(); }, 10000);
+}
+autoEl.addEventListener('change', scheduleRefresh);
+
+/* ── Filter pills ─────────────────────────────────────────── */
+document.querySelectorAll('.filter-pill').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-pill').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    activeFilter = btn.dataset.filter;
+    render();
+  });
+});
+
+/* ── Sort select ──────────────────────────────────────────── */
+document.getElementById('sort-select').addEventListener('change', e => {
+  activeSort = e.target.value;
+  render();
+});
+
+/* ── Search ───────────────────────────────────────────────── */
+searchEl.addEventListener('input', render);
+
+/* ── Refresh button ───────────────────────────────────────── */
+document.getElementById('refresh-btn').addEventListener('click', ()=>{ load(); scheduleRefresh(); });
+
+/* ── Keyboard shortcuts ───────────────────────────────────── */
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  const filterKeys = { '1':'all','2':'needs_attention','3':'ready_to_serve','4':'occupied','5':'cleaning','6':'free' };
+  if (filterKeys[e.key]) {
+    document.querySelectorAll('.filter-pill').forEach(b=>{
+      b.classList.toggle('active', b.dataset.filter === filterKeys[e.key]);
+    });
+    activeFilter = filterKeys[e.key];
+    render();
+    return;
+  }
+  if (e.key === '/') { e.preventDefault(); searchEl.focus(); searchEl.select(); }
+  if (e.key === 'r' || e.key === 'R') { load(); scheduleRefresh(); }
+  if (e.key === 'Escape') { closeAllModals(); }
+});
+
+/* ── Card action delegation ───────────────────────────────── */
+grid.addEventListener('click', e => {
+  const btn = e.target.closest('[data-act]');
+  if (!btn) return;
+  const card = btn.closest('.tcard');
+  if (!card) return;
+  const id   = card.dataset.id;
+  const name = card.dataset.name;
+  const act  = btn.dataset.act;
+
+  if (act === 'detail')   openDetail(id, name);
+  if (act === 'clear')    doClear(id, name);
+  if (act === 'close')    doClose(id, name, card);
+  if (act === 'walkin')   openWalkin(id, name);
+  if (act === 'transfer') openTransfer(id, name);
+  if (act === 'cleaning') doToggleCleaning(id, name, btn, card);
+});
+
+/* ── API helpers ──────────────────────────────────────────── */
+async function postJSON(url, body={}) {
+  const r = await fetch(url, {
+    method:'POST', credentials:'same-origin',
+    headers:{ 'Content-Type':'application/json', 'X-CSRFToken':csrf },
+    body: JSON.stringify(body),
+  });
+  return { ok: r.ok, status: r.status, data: await r.json().catch(()=>({})) };
+}
+
+/* ── Clear calls ──────────────────────────────────────────── */
+async function doClear(id, name) {
+  const { ok, data } = await postJSON(`/api/owner/tables/${id}/clear`);
+  if (ok) { toast(`Cleared ${data.count||0} call(s) on ${name}`, 'ok'); load(); }
+  else    { toast(data.error || 'Failed to clear calls', 'error'); }
+}
+
+/* ── Close table ──────────────────────────────────────────── */
+async function doClose(id, name) {
+  const { ok, data } = await postJSON(`/api/owner/tables/${id}/close`);
+  if (ok) { toast(`Table ${name} closed & marked for cleaning`, 'ok'); load(); }
+  else    { toast(data.error || 'Failed to close table', 'error'); }
+}
+
+/* ── Toggle cleaning ──────────────────────────────────────── */
+async function doToggleCleaning(id, name, btn, card) {
+  const isCleaning = card.classList.contains('cleaning-on');
+  const { ok, data } = await postJSON(`/api/owner/tables/${id}/cleaning`, { on: !isCleaning });
+  if (ok) {
+    toast(`Table ${name}: ${data.cleaning?'marked for cleaning':'marked clean'}`, 'ok');
+    load();
+  } else { toast(data.error||'Failed', 'error'); }
+}
+
+/* ── Detail modal ─────────────────────────────────────────── */
+async function openDetail(id, name) {
+  currentTableId = id;
+  document.getElementById('detail-title').textContent = name;
+  document.getElementById('detail-sub').textContent = 'Table ' + id;
+  document.getElementById('d7-orders').textContent  = '…';
+  document.getElementById('d7-rev').textContent     = '…';
+  document.getElementById('d7-avg').textContent     = '…';
+  document.getElementById('d7-dwell').textContent   = '…';
+  document.getElementById('recent-orders').innerHTML = '<div style="color:var(--ink-3);font-size:.84rem;">Loading…</div>';
+  document.getElementById('recent-calls').innerHTML  = '<div style="color:var(--ink-3);font-size:.84rem;">Loading…</div>';
+  document.getElementById('note-input').value = '';
+  showModal('modal-detail');
+
+  try {
+    const r = await fetch(`/api/owner/tables/${id}/detail`, { credentials:'same-origin', cache:'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const s = d.stats7d;
+    document.getElementById('d7-orders').textContent = s.orders;
+    document.getElementById('d7-rev').textContent    = money(s.revenue);
+    document.getElementById('d7-avg').textContent    = money(s.avgTicket);
+    document.getElementById('d7-dwell').textContent  = fmtAge(s.avgDwellSeconds)||'—';
+    document.getElementById('note-input').value      = d.note||'';
+
+    const ordersEl = document.getElementById('recent-orders');
+    if (d.recentOrders.length) {
+      ordersEl.innerHTML = d.recentOrders.map(o => `
+        <div class="detail-item">
+          <div class="detail-item-left">
+            <div class="detail-item-title">Order #${o.id} — ${esc(o.status)}</div>
+            <div class="detail-item-sub">${o.customerName ? esc(o.customerName)+' · ' : ''}${o.itemsCount} item${o.itemsCount===1?'':'s'} · ${fmtAge(o.ageSeconds)} ago</div>
+          </div>
+          <div class="detail-item-right">${money(o.total)}</div>
+        </div>`).join('');
+    } else { ordersEl.innerHTML = '<div style="color:var(--ink-3);font-size:.84rem;">No recent orders</div>'; }
+
+    const callsEl = document.getElementById('recent-calls');
+    if (d.recentCalls.length) {
+      callsEl.innerHTML = d.recentCalls.map(c => `
+        <div class="detail-item">
+          <div class="detail-item-left">
+            <div class="detail-item-title">${reasonLabel(c.reason)}</div>
+            <div class="detail-item-sub">${esc(c.status)} · ${fmtAge(c.ageSeconds)} ago</div>
+          </div>
+          <div class="detail-item-right" style="font-size:.72rem;color:var(--ink-3);">${c.resolvedAt?'✓ Resolved':'Open'}</div>
+        </div>`).join('');
+    } else { callsEl.innerHTML = '<div style="color:var(--ink-3);font-size:.84rem;">No recent calls</div>'; }
+  } catch(e) { toast('Failed to load table detail', 'error'); }
+}
+
+document.getElementById('note-save').addEventListener('click', async () => {
+  if (!currentTableId) return;
+  const note = document.getElementById('note-input').value;
+  const { ok, data } = await postJSON(`/api/owner/tables/${currentTableId}/note`, { note });
+  if (ok) { toast('Note saved', 'ok'); load(); }
+  else    { toast(data.error||'Failed to save note', 'error'); }
+});
+
+/* ── Walk-in modal ────────────────────────────────────────── */
+let walkinTableId = null;
+function openWalkin(id, name) {
+  walkinTableId = id;
+  document.getElementById('walkin-table-name').textContent = name;
+  document.getElementById('walkin-name').value  = '';
+  document.getElementById('walkin-phone').value = '';
+  document.getElementById('walkin-party').value = '';
+  document.getElementById('walkin-error').style.display = 'none';
+  showModal('modal-walkin');
+  setTimeout(()=>document.getElementById('walkin-name').focus(), 80);
+}
+document.getElementById('walkin-confirm').addEventListener('click', async () => {
+  if (!walkinTableId) return;
+  const errEl = document.getElementById('walkin-error');
+  errEl.style.display = 'none';
+  const body = {
+    customerName:  document.getElementById('walkin-name').value.trim(),
+    customerPhone: document.getElementById('walkin-phone').value.trim(),
+    partySize:     document.getElementById('walkin-party').value || null,
   };
-
-  function fmtAge(s) {
-    if (!s) return '0s';
-    if (s < 60) return s + 's';
-    const m = Math.floor(s / 60);
-    if (m < 60) return m + 'm' + (s % 60 ? ' ' + (s % 60) + 's' : '');
-    const h = Math.floor(m / 60);
-    return h + 'h ' + (m % 60) + 'm';
+  const { ok, data } = await postJSON(`/api/owner/tables/${walkinTableId}/walkin`, body);
+  if (ok) {
+    closeModal('modal-walkin');
+    toast(`Walk-in order #${data.orderId} opened`, 'ok');
+    load();
+  } else {
+    errEl.textContent = data.error || 'Failed to create walk-in order.';
+    errEl.style.display = 'block';
+    if (data.orderId) {
+      setTimeout(()=>{ window.location = `/owner/billing/orders/${data.orderId}`; }, 1800);
+    }
   }
-  function money(n) {
-    return '₹' + Number(n || 0).toFixed(2);
-  }
-  function reasonLabel(r) {
-    return ({ service: 'Call server', bill: 'Bill request', water: 'Water', help: 'Needs help' }[r] || r || 'service');
-  }
+});
 
-  // ── Toast helper — non-blocking, auto-dismiss, accessible. ─────────
-  // Replaces ``alert()`` so a modal stack-up never freezes the floor
-  // staff during a rush. Variant: 'ok' | 'warn' | 'error' | (default).
-  const toastStack = document.getElementById('toast-stack');
-  function toast(message, variant = '', timeoutMs = 3500) {
-    const el = document.createElement('div');
-    el.className = 'toast' + (variant ? ' ' + variant : '');
-    el.setAttribute('role', variant === 'error' ? 'alert' : 'status');
-    el.textContent = String(message || '');
-    toastStack.appendChild(el);
-    requestAnimationFrame(() => el.classList.add('show'));
-    setTimeout(() => {
-      el.classList.remove('show');
-      setTimeout(() => el.remove(), 250);
-    }, timeoutMs);
+/* ── Transfer modal ───────────────────────────────────────── */
+let transferFromId = null;
+function openTransfer(id, name) {
+  transferFromId = id;
+  document.getElementById('transfer-from-name').textContent = name;
+  document.getElementById('transfer-error').style.display = 'none';
+  const sel = document.getElementById('transfer-target');
+  sel.innerHTML = (lastData?.tables||[])
+    .filter(t => t.id !== id && !t.openOrder)
+    .map(t => `<option value="${esc(t.id)}">${esc(t.name)} (${t.status.replace('_',' ')})</option>`)
+    .join('');
+  if (!sel.options.length) {
+    sel.innerHTML = '<option disabled>No free tables available</option>';
+    document.getElementById('transfer-confirm').disabled = true;
+  } else {
+    document.getElementById('transfer-confirm').disabled = false;
   }
+  showModal('modal-transfer');
+}
+document.getElementById('transfer-confirm').addEventListener('click', async () => {
+  if (!transferFromId) return;
+  const targetId = document.getElementById('transfer-target').value;
+  const errEl    = document.getElementById('transfer-error');
+  errEl.style.display = 'none';
+  const { ok, data } = await postJSON(`/api/owner/tables/${transferFromId}/transfer`, { targetTableId: targetId });
+  if (ok) {
+    closeModal('modal-transfer');
+    toast(`Order transferred to table`, 'ok');
+    load();
+  } else {
+    errEl.textContent = data.error || 'Transfer failed.';
+    errEl.style.display = 'block';
+  }
+});
 
-  function render() {
-    if (!lastData) return;
-    document.getElementById('sum-total').textContent    = lastData.summary.total;
-    document.getElementById('sum-free').textContent     = lastData.summary.free || 0;
-    document.getElementById('sum-occupied').textContent = lastData.summary.occupied || 0;
-    document.getElementById('sum-ready').textContent    = lastData.summary.ready_to_serve || 0;
-    document.getElementById('sum-attn').textContent     = lastData.summary.needs_attention || 0;
-    document.getElementById('sum-clean').textContent    = lastData.summary.cleaning || 0;
-    meta.textContent = `${lastData.summary.total} tables · updated ${new Date(lastData.fetchedAt).toLocaleTimeString()}`;
+/* ── Modal helpers ────────────────────────────────────────── */
+function showModal(id)  { document.getElementById(id).classList.add('show'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+function closeAllModals() {
+  document.querySelectorAll('.modal-bg').forEach(m=>m.classList.remove('show'));
+}
+document.getElementById('detail-close').addEventListener('click',   ()=>closeModal('modal-detail'));
+document.getElementById('walkin-close').addEventListener('click',   ()=>closeModal('modal-walkin'));
+document.getElementById('walkin-cancel').addEventListener('click',  ()=>closeModal('modal-walkin'));
+document.getElementById('transfer-close').addEventListener('click', ()=>closeModal('modal-transfer'));
+document.getElementById('transfer-cancel').addEventListener('click',()=>closeModal('modal-transfer'));
+document.querySelectorAll('.modal-bg').forEach(bg => {
+  bg.addEventListener('click', e => { if (e.target === bg) closeAllModals(); });
+});
 
-    // Update the inline counts on each filter pill so the floor staff
-    // can see "Needs attention (2)" without scanning the summary cards.
-    const counts = lastData.summary || {};
-    document.querySelectorAll('.filter-pill .pill-count').forEach(el => {
-      const key = el.dataset.count;
-      const n = (key === 'all') ? (counts.total || 0) : (counts[key] || 0);
-      el.textContent = n;
-      el.classList.toggle('has', n > 0);
+/* ── SSE live feed (optional, best-effort) ────────────────── */
+(function initSSE() {
+  try {
+    if (!window.EventSource) return;
+    const evtSrc = new EventSource('/api/owner/stream');
+    const RELOAD_KINDS = new Set(['order_created','order_updated','table_call_update']);
+    evtSrc.addEventListener('message', e => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (RELOAD_KINDS.has(msg.kind)) { load(); scheduleRefresh(); }
+      } catch {}
     });
+    evtSrc.addEventListener('open',  () => setLive('connected'));
+    evtSrc.addEventListener('error', () => setLive('error'));
+  } catch {}
+})();
 
-    const q = (search.value || '').toLowerCase().trim();
-    let filtered = lastData.tables.filter(t => {
-      if (activeFilter !== 'all' && t.status !== activeFilter) return false;
-      if (q && !(t.name || '').toLowerCase().includes(q) && !(t.id || '').toLowerCase().includes(q)) return false;
-      return true;
-    });
+/* ── Boot ─────────────────────────────────────────────────── */
+load();
+scheduleRefresh();
 
-    // Stable sort — secondary key is name so equal-priority cards
-    // never visibly swap places between refreshes.
-    filtered.sort((a, b) => {
-      if (activeSort === 'name') {
-        return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true });
-      }
-      if (activeSort === 'oldest') {
-        // Older activity (smaller timestamp) first; missing → bottom.
-        const ax = a.lastActivity ? Date.parse(a.lastActivity) : Infinity;
-        const bx = b.lastActivity ? Date.parse(b.lastActivity) : Infinity;
-        if (ax !== bx) return ax - bx;
-        return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true });
-      }
-      // Default: status priority.
-      const ra = STATUS_RANK[a.status] ?? 99;
-      const rb = STATUS_RANK[b.status] ?? 99;
-      if (ra !== rb) return ra - rb;
-      return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true });
-    });
-
-    if (!filtered.length) { grid.innerHTML = ''; empty.style.display = 'block'; return; }
-    empty.style.display = 'none';
-
-    grid.innerHTML = filtered.map(t => {
-      const order = t.openOrder;
-      const calls = t.openCalls;
-      const stuckHtml = order && order.stuck ? '<span class="stuck-pill">⚠ STUCK</span>' : '';
-      const orderHtml = order
-        ? `<div class="order-line${order.stuck ? ' stuck' : ''}"><b>Order #${Number(order.id)||0}</b> · ${escapeHtml(order.status)}${stuckHtml}<br>
-           ${Number(order.itemsCount)||0} item${order.itemsCount === 1 ? '' : 's'} · ${money(order.total)} · ${fmtAge(order.ageSeconds)}
-           ${order.customerName ? '<br>👤 ' + escapeHtml(order.customerName) : ''}</div>`
-        : '';
-      const callsHtml = calls.count
-        ? `<div class="calls-line">🔔 ${calls.count} open call${calls.count === 1 ? '' : 's'}
-           · ${reasonLabel(calls.latestReason)} · ${fmtAge(calls.latestAgeSeconds)}${calls.anyAcknowledged ? ' · ack' : ''}</div>`
-        : '';
-      const noteHtml = t.note ? `<div class="note">📝 ${escapeHtml(t.note)}</div>` : '';
-      const occupiedHtml = t.occupiedSinceSeconds
-        ? `<div class="row"><span class="k">Occupied</span><span>${fmtAge(t.occupiedSinceSeconds)}</span></div>` : '';
-      const cleanBtnLabel = t.cleaning ? 'Mark clean' : 'Cleaning';
-      return `
-        <div class="card${t.cleaning ? ' cleaning-on' : ''}" data-id="${t.id}" data-name="${escapeHtml(t.name)}">
-          <div class="head">
-            <div>
-              <div class="name">${escapeHtml(t.name)}</div>
-              <div class="id">${t.id}</div>
-            </div>
-            <span class="badge ${t.status}">${t.status.replace('_', ' ')}</span>
-          </div>
-          ${orderHtml}
-          ${callsHtml}
-          ${occupiedHtml}
-          <div class="row"><span class="k">Today</span><span>${t.today.orders} orders · ${money(t.today.revenue)}</span></div>
-          ${noteHtml}
-          <div class="actions-row">
-            <button class="btn" data-act="detail">Details</button>
-            ${order ? `<a class="btn btn-primary" href="/owner/billing/orders/${order.id}" title="Open this table's bill in the billing module">💳 Bill ${money(order.total)}</a>` : ''}
-            ${order ? '<button class="btn" data-act="close" title="Complete the open order and resolve calls">Close table</button>' : ''}
-            ${order ? '<button class="btn" data-act="transfer">Transfer</button>' : ''}
-            ${!order ? '<button class="btn" data-act="walkin">Walk-in Order</button>' : ''}
-            ${calls.count ? '<button class="btn" data-act="clear">Clear calls</button>' : ''}
-            <button class="btn" data-act="cleaning">${cleanBtnLabel}</button>
-            ${order ? `<a class="btn" href="/owner/order/${order.id}/receipt" target="_blank" rel="noopener">Receipt</a>` : ''}
-            <a class="btn" href="/t/${t.id}" target="_blank" rel="noopener">Menu</a>
-          </div>
-        </div>`;
-    }).join('');
-  }
-
-  function escapeHtml(s) {
-    return String(s || '').replace(/[&<>"']/g, c => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    }[c]));
-  }
-
-  async function load() {
-    try {
-      const r = await fetch('/api/owner/tables/overview', { credentials: 'same-origin', cache: 'no-store' });
-      if (!r.ok) throw new Error('http ' + r.status);
-      lastData = await r.json();
-      grid.classList.remove('stale');
-      render();
-    } catch (e) {
-      grid.classList.add('stale');
-      console.warn('overview load failed', e);
-    }
-  }
-
-  // Filter buttons
-  function setFilter(filter) {
-    activeFilter = filter;
-    document.querySelectorAll('.filter-pill').forEach(b => {
-      b.classList.toggle('active', b.dataset.filter === filter);
-    });
-    render();
-  }
-  document.querySelectorAll('.filter-pill').forEach(btn => {
-    btn.addEventListener('click', () => setFilter(btn.dataset.filter));
-  });
-  search.addEventListener('input', render);
-
-  // Sort dropdown — UX request from busy-shift staff who wanted to
-  // surface the oldest table at the top (stale walk-ins).
-  const sortSelect = document.getElementById('sort-select');
-  sortSelect.addEventListener('change', () => {
-    activeSort = sortSelect.value || 'status';
-    render();
-  });
-
-  // Keyboard shortcuts: 1-6 swap filter, "/" focuses search, "r"
-  // refreshes. Skipped while typing in any input/textarea.
-  const FILTER_KEYS = ['all','needs_attention','ready_to_serve','occupied','cleaning','free'];
-  document.addEventListener('keydown', (ev) => {
-    const tag = (ev.target && ev.target.tagName) || '';
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    if (ev.key >= '1' && ev.key <= '6') {
-      const f = FILTER_KEYS[Number(ev.key) - 1];
-      if (f) { setFilter(f); ev.preventDefault(); }
-    } else if (ev.key === '/') {
-      search.focus(); search.select(); ev.preventDefault();
-    } else if (ev.key === 'r' || ev.key === 'R') {
-      load(); ev.preventDefault();
-    }
-  });
-
-  async function postJson(url, body) {
-    return fetch(url, {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {})
-    });
-  }
-
-  // Card actions (event delegation)
-  grid.addEventListener('click', async (ev) => {
-    const card = ev.target.closest('.card'); if (!card) return;
-    const id = card.dataset.id;
-    const act = ev.target.dataset.act;
-    if (!act) return;
-    const tableData = (lastData && lastData.tables.find(x => x.id === id)) || null;
-    if (act === 'clear') {
-      ev.target.disabled = true;
-      try { await postJson(`/api/owner/tables/${encodeURIComponent(id)}/clear`); await load(); }
-      finally { ev.target.disabled = false; }
-    } else if (act === 'close') {
-      if (!confirm(`Close ${card.dataset.name}? This completes the open order and resolves any calls.`)) return;
-      ev.target.disabled = true;
-      try { await postJson(`/api/owner/tables/${encodeURIComponent(id)}/close`); await load(); }
-      finally { ev.target.disabled = false; }
-    } else if (act === 'transfer') {
-      openTransfer(id, card.dataset.name);
-    } else if (act === 'cleaning') {
-      const on = !(tableData && tableData.cleaning);
-      ev.target.disabled = true;
-      try { await postJson(`/api/owner/tables/${encodeURIComponent(id)}/cleaning`, { on }); await load(); }
-      finally { ev.target.disabled = false; }
-    } else if (act === 'detail') {
-      openDetail(id);
-    } else if (act === 'walkin') {
-      // Open the walk-in modal so the cashier can (optionally) attach
-      // a name / phone / party-size before the tab is created.
-      openWalkin(id, card.dataset.name);
-    }
-  });
-
-  // ── Walk-in modal ─────────────────────────────────────────────────
-  const walkinBg = document.getElementById('walkin-bg');
-  const walkinName = document.getElementById('walkin-name');
-  const walkinPhone = document.getElementById('walkin-phone');
-  const walkinParty = document.getElementById('walkin-party');
-  const walkinError = document.getElementById('walkin-error');
-  const walkinConfirmBtn = document.getElementById('walkin-confirm');
-  let walkinTableId = null;
-
-  document.getElementById('walkin-close').addEventListener('click', closeWalkin);
-  document.getElementById('walkin-cancel').addEventListener('click', closeWalkin);
-  walkinBg.addEventListener('click', (e) => { if (e.target === walkinBg) closeWalkin(); });
-
-  function openWalkin(tableId, tableName) {
-    walkinTableId = tableId;
-    document.getElementById('walkin-table-name').textContent = tableName || tableId;
-    walkinName.value = '';
-    walkinPhone.value = '';
-    walkinParty.value = '';
-    walkinError.style.display = 'none';
-    walkinBg.classList.add('show');
-    setTimeout(() => walkinName.focus(), 50);
-  }
-  function closeWalkin() { walkinBg.classList.remove('show'); walkinTableId = null; }
-
-  walkinConfirmBtn.addEventListener('click', submitWalkin);
-  // Enter on any field submits the form for fast keyboard entry.
-  [walkinName, walkinPhone, walkinParty].forEach(el =>
-    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitWalkin(); }));
-
-  async function submitWalkin() {
-    if (!walkinTableId) return;
-    walkinError.style.display = 'none';
-    walkinConfirmBtn.disabled = true;
-    try {
-      const resp = await postJson(`/api/owner/tables/${encodeURIComponent(walkinTableId)}/walkin`, {
-        customerName: walkinName.value.trim(),
-        customerPhone: walkinPhone.value.trim(),
-        partySize: walkinParty.value.trim(),
-      });
-      let payload = {};
-      try { payload = await resp.json(); } catch (_) { /* non-JSON */ }
-      if (resp.ok && payload.orderId) {
-        toast('Walk-in tab opened — taking you to billing…', 'ok', 1800);
-        // Small delay so the toast is visible before navigation.
-        setTimeout(() => { window.location = `/owner/billing/orders/${payload.orderId}`; }, 600);
-      } else if (resp.status === 409 && payload.orderId) {
-        toast('That table already has an open tab — opening it.', 'warn', 2200);
-        setTimeout(() => { window.location = `/owner/billing/orders/${payload.orderId}`; }, 700);
-      } else {
-        walkinError.textContent = (payload && payload.error) || ('Failed to create walk-in (' + resp.status + ').');
-        walkinError.style.display = 'block';
-      }
-    } catch (e) {
-      walkinError.textContent = 'Network error — try again.';
-      walkinError.style.display = 'block';
-    } finally {
-      walkinConfirmBtn.disabled = false;
-    }
-  }
-
-  // Transfer modal
-  const transferBg = document.getElementById('transfer-bg');
-  const transferTarget = document.getElementById('transfer-target');
-  const transferError = document.getElementById('transfer-error');
-  let transferFromId = null;
-  document.getElementById('transfer-close').addEventListener('click', () => transferBg.classList.remove('show'));
-  document.getElementById('transfer-cancel').addEventListener('click', () => transferBg.classList.remove('show'));
-  transferBg.addEventListener('click', (e) => { if (e.target === transferBg) transferBg.classList.remove('show'); });
-
-  function openTransfer(fromId, fromName) {
-    transferFromId = fromId;
-    document.getElementById('transfer-from-name').textContent = fromName;
-    transferError.style.display = 'none';
-    // Populate select with sibling tables that don't have an open order.
-    const opts = (lastData ? lastData.tables : [])
-      .filter(t => t.id !== fromId && !t.openOrder)
-      .map(t => `<option value="${t.id}">${escapeHtml(t.name)}${t.cleaning ? ' (cleaning)' : ''}</option>`);
-    if (!opts.length) {
-      transferTarget.innerHTML = '<option value="">No free tables available</option>';
-    } else {
-      transferTarget.innerHTML = opts.join('');
-    }
-    transferBg.classList.add('show');
-  }
-
-  document.getElementById('transfer-confirm').addEventListener('click', async (ev) => {
-    const targetId = transferTarget.value;
-    if (!targetId || !transferFromId) return;
-    ev.target.disabled = true;
-    try {
-      const r = await postJson(`/api/owner/tables/${encodeURIComponent(transferFromId)}/transfer`,
-                               { targetTableId: targetId });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.ok) {
-        transferError.textContent = j.error || ('Transfer failed (' + r.status + ').');
-        transferError.style.display = 'block';
-        return;
-      }
-      transferBg.classList.remove('show');
-      await load();
-    } finally { ev.target.disabled = false; }
-  });
-
-  // Detail modal
-  const modalBg = document.getElementById('modal-bg');
-  document.getElementById('modal-close').addEventListener('click', () => modalBg.classList.remove('show'));
-  modalBg.addEventListener('click', (e) => { if (e.target === modalBg) modalBg.classList.remove('show'); });
-  document.getElementById('note-save').addEventListener('click', async () => {
-    if (!currentTableId) return;
-    const note = document.getElementById('note-input').value;
-    await fetch(`/api/owner/tables/${encodeURIComponent(currentTableId)}/note`, {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'X-CSRFToken': csrf, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ note })
-    });
-    modalBg.classList.remove('show');
-    await load();
-  });
-
-  async function openDetail(id) {
-    currentTableId = id;
-    document.getElementById('modal-title').textContent = 'Table ' + id;
-    document.getElementById('recent-orders').innerHTML = '<li>Loading…</li>';
-    document.getElementById('recent-calls').innerHTML = '<li>Loading…</li>';
-    document.getElementById('note-input').value = '';
-    modalBg.classList.add('show');
-    try {
-      const r = await fetch(`/api/owner/tables/${encodeURIComponent(id)}/detail`, { credentials: 'same-origin' });
-      const d = await r.json();
-      document.getElementById('modal-title').textContent = d.table.name;
-      document.getElementById('note-input').value = d.note || '';
-      const s = d.stats7d || {};
-      document.getElementById('s7-orders').textContent = s.orders || 0;
-      document.getElementById('s7-rev').textContent    = money(s.revenue || 0);
-      document.getElementById('s7-avg').textContent    = money(s.avgTicket || 0);
-      document.getElementById('s7-dwell').textContent  = s.avgDwellSeconds ? fmtAge(s.avgDwellSeconds) : '—';
-      document.getElementById('recent-orders').innerHTML = (d.recentOrders.length
-        ? d.recentOrders.map(o => `<li>#${o.id} · ${o.status} · ${money(o.total)} · ${fmtAge(o.ageSeconds)} ago${o.customerName ? ' · ' + escapeHtml(o.customerName) : ''}</li>`).join('')
-        : '<li style="color:var(--muted)">No orders yet.</li>');
-      document.getElementById('recent-calls').innerHTML = (d.recentCalls.length
-        ? d.recentCalls.map(c => `<li>${reasonLabel(c.reason)} · ${c.status} · ${fmtAge(c.ageSeconds)} ago</li>`).join('')
-        : '<li style="color:var(--muted)">No service calls yet.</li>');
-    } catch (e) {
-      document.getElementById('recent-orders').innerHTML = '<li>Failed to load.</li>';
-      document.getElementById('recent-calls').innerHTML = '';
-    }
-  }
-
-  // Refresh control
-  document.getElementById('refresh-btn').addEventListener('click', load);
-  function schedule() {
-    if (timer) clearInterval(timer);
-    // SSE handles real-time updates; poll fallback runs less often (30s)
-    // to catch anything missed if the connection silently dies.
-    if (auto.checked) timer = setInterval(load, 30000);
-  }
-  auto.addEventListener('change', schedule);
-
-  // ----- Real-time updates via SSE (owner stream) ----------------------
-  // The server already broadcasts new_order, order_updated, table_call,
-  // and table_call_update on /api/orders/stream. We listen for any of
-  // those and trigger a single debounced reload — a burst of events in
-  // the same tick coalesces into one round-trip.
-  const livePip = document.getElementById('live-pip');
-  const liveLabel = document.getElementById('live-label');
-  let es = null;
-  let reloadDebounce = null;
-  let reconnectAttempts = 0;
-
-  function setLiveState(state) {
-    // state: 'live' | 'connecting' | 'offline'
-    const colors = { live: '#16a34a', connecting: '#9ca3af', offline: '#dc2626' };
-    const labels = { live: 'Live',     connecting: 'Connecting…', offline: 'Reconnecting…' };
-    livePip.style.background = colors[state] || colors.connecting;
-    liveLabel.textContent = labels[state] || labels.connecting;
-  }
-
-  function scheduleReload() {
-    if (reloadDebounce) return;
-    // 350ms gives the server time to commit + flush any chained events
-    // (e.g. new_order immediately followed by order_updated) so we do
-    // one fetch instead of two.
-    reloadDebounce = setTimeout(() => { reloadDebounce = null; load(); }, 350);
-  }
-
-  function connectStream() {
-    if (es) { try { es.close(); } catch (_) {} }
-    setLiveState('connecting');
-    try {
-      es = new EventSource('/api/orders/stream', { withCredentials: true });
-    } catch (e) {
-      setLiveState('offline'); scheduleReconnect(); return;
-    }
-    es.onopen = () => { reconnectAttempts = 0; setLiveState('live'); };
-    es.onerror = () => {
-      setLiveState('offline');
-      try { es.close(); } catch (_) {}
-      es = null;
-      scheduleReconnect();
-    };
-    // Generic message handler — server may send named events or default.
-    const handle = (ev) => {
-      let payload = null;
-      try { payload = ev.data ? JSON.parse(ev.data) : null; } catch (_) {}
-      const t = (payload && payload.type) || ev.type;
-      if (!t || t === 'ping' || t === 'heartbeat') return;
-      // Anything order- or call-related can change a card.
-      if (t === 'new_order' || t === 'order_updated'
-          || t === 'table_call' || t === 'table_call_update') {
-        scheduleReload();
-      }
-    };
-    es.onmessage = handle;
-    ['new_order', 'order_updated', 'table_call', 'table_call_update'].forEach(name => {
-      es.addEventListener(name, handle);
-    });
-  }
-
-  function scheduleReconnect() {
-    if (document.visibilityState !== 'visible') return; // wait for focus
-    reconnectAttempts++;
-    const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(reconnectAttempts, 5)));
-    setTimeout(() => { if (document.visibilityState === 'visible') connectStream(); }, delay);
-  }
-
-  // Re-poll on tab focus, save battery while hidden.
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      load(); schedule();
-      if (!es) connectStream();
-    } else {
-      if (timer) { clearInterval(timer); timer = null; }
-      if (es) { try { es.close(); } catch (_) {} es = null; setLiveState('connecting'); }
-    }
-  });
-
-  load(); schedule(); connectStream();
 })();
 </script>
 </body>
