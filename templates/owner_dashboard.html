@@ -317,6 +317,19 @@
         </div>
       </div>
 
+      <!-- ── Live Activity Feed ── -->
+      <div class="af-panel" id="owner-activity-panel" style="margin-bottom:1.25rem;">
+        <div class="af-header">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.2" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          <span class="af-header__title">Live Order Activity</span>
+          <div class="af-header__live">
+            <span class="af-header__dot"></span>Live
+          </div>
+          <span class="af-header__badge" id="owner-feed-badge"></span>
+        </div>
+        <div class="af-list" id="owner-feed-list"></div>
+      </div>
+
       <!-- Tab bar -->
       <div class="tab-bar">
         <button class="tab-btn active" data-tab="overview">Overview</button>
@@ -1250,6 +1263,7 @@
   <div id="ays-list" style="overflow:auto;padding:.5rem;font-size:.85rem;"></div>
 </div>
 
+<script src="/static/js/activity-feed.js"></script>
 <script src="/static/js/dashboard.js"></script>
 <script>
 // Dark mode persistence
@@ -1970,6 +1984,109 @@ if (localStorage.getItem('darkMode') === '1') document.documentElement.classList
 document.addEventListener('DOMContentLoaded', function () {
   if (window.cafePush) cafePush.subscribeOwner();
 });
+</script>
+
+<script>
+/* ── Animated stat counters ───────────────────────────── */
+(function () {
+  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+  function animateStat(el) {
+    const raw = el.dataset.target || el.textContent.trim();
+    const numMatch = raw.match(/([\d.]+)/);
+    if (!numMatch) return;
+    const target   = parseFloat(numMatch[1]);
+    const isFloat  = raw.includes('.');
+    const prefix   = raw.slice(0, numMatch.index);
+    const suffix   = raw.slice(numMatch.index + numMatch[0].length);
+    const duration = 1200;
+    const startTime = performance.now();
+
+    function step(now) {
+      const progress = Math.min((now - startTime) / duration, 1);
+      const cur = easeOutCubic(progress) * target;
+      el.textContent = prefix + (isFloat ? cur.toFixed(1) : Math.round(cur).toLocaleString()) + suffix;
+      if (progress < 1) requestAnimationFrame(step);
+      else el.textContent = prefix + (isFloat ? target.toFixed(1) : target.toLocaleString()) + suffix;
+    }
+    requestAnimationFrame(step);
+  }
+
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        animateStat(e.target);
+        io.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.5 });
+
+  document.querySelectorAll('.stat-value').forEach(el => {
+    const txt = el.textContent.trim();
+    if (/\d/.test(txt)) {
+      el.dataset.target = txt;
+      io.observe(el);
+    }
+  });
+})();
+
+/* ── Mobile sidebar toggle ────────────────────────────── */
+(function () {
+  const sidebar  = document.querySelector('.admin-sidebar, .sidebar');
+  const overlay  = document.querySelector('.sidebar-overlay');
+  const menuBtn  = document.querySelector('.sidebar-toggle-btn, [data-sidebar-toggle]');
+  const closeBtn = document.querySelector('.sidebar-close-btn, [data-sidebar-close]');
+
+  if (!sidebar) return;
+
+  function open()  { sidebar.classList.add('sidebar--open');  if (overlay) overlay.classList.add('is-visible'); }
+  function close() { sidebar.classList.remove('sidebar--open'); if (overlay) overlay.classList.remove('is-visible'); }
+
+  if (menuBtn)  menuBtn.addEventListener('click',  open);
+  if (closeBtn) closeBtn.addEventListener('click', close);
+  if (overlay)  overlay.addEventListener('click',  close);
+
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+
+  /* Swipe-to-close on mobile */
+  let touchStartX = null;
+  sidebar.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive: true });
+  sidebar.addEventListener('touchend',   e => {
+    if (touchStartX !== null && e.changedTouches[0].clientX - touchStartX < -60) close();
+    touchStartX = null;
+  }, { passive: true });
+})();
+
+/* ── Page-load progress bar ───────────────────────────── */
+document.querySelectorAll('a:not([href^="#"]):not([target]):not([data-no-progress])').forEach(link => {
+  link.addEventListener('click', () => document.documentElement.classList.add('page-loading'));
+});
+
+/* ── Alert badge pulse for pending orders ─────────────── */
+(function () {
+  const badge = document.querySelector('[data-pending-badge]');
+  if (badge && parseInt(badge.textContent, 10) > 0) {
+    badge.classList.add('pulse-dot');
+  }
+})();
+</script>
+
+<script>
+/* ── Owner Live Activity Feed ──────────────────────────── */
+(function () {
+  const listEl  = document.getElementById('owner-feed-list');
+  const badgeEl = document.getElementById('owner-feed-badge');
+  if (!listEl || typeof initKitchenFeed !== 'function') return;
+
+  const panel = document.getElementById('owner-activity-panel');
+  if (panel) {
+    panel.addEventListener('click', () => {
+      if (window._ownerFeed) window._ownerFeed.resetUnseen();
+    });
+  }
+
+  window._ownerFeed = initKitchenFeed(listEl, badgeEl);
+})();
 </script>
 </body>
 </html>
