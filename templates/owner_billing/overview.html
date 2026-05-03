@@ -1,7 +1,7 @@
 {% extends "owner_billing/_base.html" %}
 {% block title %}Overview{% endblock %}
 {% block content %}
-<h1>Today's Billing</h1>
+<h1 style="font-size:1.65rem;font-weight:800;letter-spacing:-.025em;margin:0 0 .5rem;">Today's Billing</h1>
 <p class="muted" style="margin-top:-.75rem;">
   Live snapshot — refreshes every 10 seconds.
   <span class="mono">As of {{ overview.as_of[:19] }} UTC</span>
@@ -62,7 +62,7 @@
 <div class="panel" style="margin-bottom:1.5rem;">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
     <div>
-      <h2 style="margin-top:0;">Last 7 days &mdash; Net Revenue</h2>
+      <h2 style="margin-top:0;font-size:1.05rem;font-weight:700;letter-spacing:-.01em;">Last 7 days — Net Revenue</h2>
       <p class="muted" style="font-size:.88rem;margin-top:-.25rem;">Total: <strong>₹{{ '%.2f'|format(sparkline.total_net) }}</strong> · Peak day: <strong>₹{{ '%.2f'|format(sparkline.peak) }}</strong> · Avg/day: <strong>₹{{ '%.2f'|format(sparkline.total_net / (sparkline.labels|length) if sparkline.labels|length else 0) }}</strong></p>
     </div>
     <button type="button" class="btn btn-ghost btn-sm" id="export-7d-csv" title="Download 7-day breakdown as CSV">⬇ Export CSV</button>
@@ -119,7 +119,7 @@
 {% endif %}
 
 <div class="panel" style="margin-bottom:1.5rem;">
-  <h2 style="margin-top:0;">Today's Revenue by Payment Mode</h2>
+  <h2 style="margin-top:0;font-size:1.05rem;font-weight:700;letter-spacing:-.01em;">Today's Revenue by Payment Mode</h2>
   {% if not overview.per_mode %}
     <p class="muted">No paid orders yet today.</p>
   {% else %}
@@ -183,7 +183,7 @@
 </div>
 
 <div class="panel">
-  <h2 style="margin-top:0;">Recent Settlements</h2>
+  <h2 style="margin-top:0;font-size:1.05rem;font-weight:700;letter-spacing:-.01em;">Recent Settlements</h2>
   {% if not recent_paid %}
     <p class="muted">No bills settled yet today.</p>
   {% else %}

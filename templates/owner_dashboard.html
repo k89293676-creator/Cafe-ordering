@@ -379,7 +379,7 @@
                 <a class="btn btn-sm btn-primary" href="{{ url_for('owner_aggregators') }}">+ Connect Swiggy / Zomato</a>
               </div>
             {% else %}
-              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:.6rem;">
+              <div class="integration-grid">
                 {% for it in integration_health['items'] %}
                   {% set palette = {
                     'live':       ('#16a34a', '#dcfce7', 'Live'),
@@ -388,27 +388,23 @@
                     'failing':    ('#b91c1c', '#fee2e2', 'Failing'),
                     'disabled':   ('#525252', '#e5e5e5', 'Disabled'),
                   }[it.state] %}
-                  <div style="border:1px solid #e5e7eb;border-radius:10px;padding:.65rem .75rem;display:flex;flex-direction:column;gap:.4rem;background:#fff;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:.4rem;">
-                      <div style="display:flex;flex-direction:column;min-width:0;">
-                        <div style="font-weight:600;font-size:.9rem;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ it.display_name }}</div>
-                        <div style="font-size:.7rem;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">
-                          {{ it.label }} · {{ it.mode|default('test') }}
-                        </div>
+                  <div class="integration-card">
+                    <div class="integration-card-head">
+                      <div>
+                        <div class="integration-card-name">{{ it.display_name }}</div>
+                        <div class="integration-card-sub">{{ it.label }} · {{ it.mode|default('test') }}</div>
                       </div>
-                      <span style="font-size:.65rem;font-weight:700;padding:.18rem .5rem;border-radius:999px;color:{{ palette[0] }};background:{{ palette[1] }};white-space:nowrap;">
-                        <span style="display:inline-block;width:.45rem;height:.45rem;border-radius:50%;background:{{ palette[0] }};margin-right:.3rem;vertical-align:middle;"></span>{{ palette[2] }}
-                      </span>
+                      <span class="integration-status-pill i-{{ it.state }}">{{ {'live':'Live','ready':'Test ready','unverified':'Needs test','failing':'Failing','disabled':'Disabled'}.get(it.state, it.state) }}</span>
                     </div>
                     {% if it.last_test_message %}
-                    <div style="font-size:.7rem;color:#6b7280;line-height:1.3;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">{{ it.last_test_message }}</div>
+                    <div style="font-size:.72rem;color:#6b7280;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">{{ it.last_test_message }}</div>
                     {% endif %}
                     <div style="display:flex;gap:.35rem;">
                       <form method="post" action="{{ it.test_url }}" style="margin:0;flex:1;">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                        <button type="submit" class="btn btn-sm btn-secondary" style="width:100%;font-size:.75rem;padding:.3rem;">Test connection</button>
+                        <button type="submit" class="btn btn-sm btn-secondary" style="width:100%;">Test</button>
                       </form>
-                      <a class="btn btn-sm btn-secondary" href="{{ it.manage_url }}" style="font-size:.75rem;padding:.3rem .55rem;">Manage</a>
+                      <a class="btn btn-sm btn-secondary" href="{{ it.manage_url }}">Manage</a>
                     </div>
                   </div>
                 {% endfor %}

@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/static/css/enhancements.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
-    body { font-family: Inter, system-ui, sans-serif; background:#f7f8fb; color:#0f172a; margin:0; }
+    body { font-family: Inter, system-ui, sans-serif; background:#f6f7fb; color:#0f172a; margin:0; -webkit-font-smoothing:antialiased; }
     .ext-shell { max-width: 1280px; margin: 0 auto; padding: 1.5rem; }
     .ext-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:.75rem;}
     .ext-header h1 { font-size: 1.4rem; margin:0; letter-spacing:-.01em; }
@@ -27,12 +27,12 @@
     .kpi-label { font-size:.7rem; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; font-weight:700;}
     .kpi-value { font-size:1.7rem; font-weight:800; margin-top:.3rem; line-height:1;}
     .kpi-sub { font-size:.75rem; color:#6b7280; margin-top:.25rem;}
-    .card { background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:1.1rem; margin-bottom:1rem;}
+    .card { background:#fff; border:1px solid #e6e8ef; border-radius:14px; padding:1.25rem; margin-bottom:1rem; box-shadow:0 1px 3px rgba(15,23,42,.06);}
     .card h3 { margin:0 0 .85rem; font-size:1rem; font-weight:700;}
     .chart-wrap { position:relative; height:300px;}
     table.dt { width:100%; border-collapse:collapse; font-size:.85rem;}
     table.dt th, table.dt td { padding:.55rem .6rem; border-bottom:1px solid #f1f3f7; text-align:left;}
-    table.dt th { font-size:.7rem; text-transform:uppercase; color:#6b7280; letter-spacing:.05em;}
+    table.dt th { font-size:.68rem; text-transform:uppercase; color:#64748b; letter-spacing:.08em; font-weight:700; background:#fafbfd; padding:.7rem .65rem !important;}
     .badge { display:inline-block; padding:.15rem .55rem; border-radius:999px; font-size:.7rem; font-weight:700; text-transform:uppercase;}
     .b-star { background:#dcfce7; color:#15803d;}
     .b-plowhorse { background:#fef3c7; color:#a16207;}
@@ -45,7 +45,7 @@
 <div class="ext-shell">
   <div class="ext-header">
     <h1>{% block heading %}{% endblock %}</h1>
-    <a class="back" href="{{ url_for('owner_dashboard') }}">&larr; Back to dashboard</a>
+    <a class="back" href="{{ url_for('owner_dashboard') }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:.2rem;"><polyline points="15 18 9 12 15 6"/></svg>Dashboard</a>
   </div>
   {% block body %}{% endblock %}
 </div>

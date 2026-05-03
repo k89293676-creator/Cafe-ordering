@@ -79,7 +79,7 @@
     </div>
   </nav>
 
-  <main class="main-content">
+  <main class="main-content" style="overflow-y:auto;">
     <div class="main-header">
       <div>
         <h1 class="main-title">Analytics</h1>
@@ -114,30 +114,50 @@
     <!-- KPI Cards -->
     <div class="kpi-cards">
       <div class="kpi-card">
-        <div class="kpi-card-label">Total Revenue</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
+          <div class="kpi-card-label">Total Revenue</div>
+          <div style="width:34px;height:34px;border-radius:10px;background:#eef2ff;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+          </div>
+        </div>
         <div class="kpi-card-value">₹{{ '%.0f'|format(analytics.totalRevenue) }}</div>
         <div class="kpi-card-sub">Completed orders only</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-card-label">Completed Orders</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
+          <div class="kpi-card-label">Completed Orders</div>
+          <div style="width:34px;height:34px;border-radius:10px;background:#ecfdf5;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+        </div>
         <div class="kpi-card-value">{{ analytics.totalOrders }}</div>
         <div class="kpi-card-sub">{{ analytics.totalAllOrders }} total placed</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-card-label">Avg. Order Value</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
+          <div class="kpi-card-label">Avg. Order Value</div>
+          <div style="width:34px;height:34px;border-radius:10px;background:#fffbeb;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>
+          </div>
+        </div>
         <div class="kpi-card-value">₹{{ '%.0f'|format(analytics.avgOrderValue) }}</div>
         <div class="kpi-card-sub">Per completed order</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-card-label">Avg. Rating</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
+          <div class="kpi-card-label">Avg. Rating</div>
+          <div style="width:34px;height:34px;border-radius:10px;background:#fdf2f8;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#ec4899" stroke="#ec4899" stroke-width="1"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          </div>
+        </div>
         <div class="kpi-card-value">{{ '%.1f'|format(analytics.avgRating) }}<span style="font-size:1rem;color:#6b7280;font-weight:600;"> / 5</span></div>
         <div class="kpi-card-sub">{{ analytics.feedbackCount }} review{{ 's' if analytics.feedbackCount != 1 else '' }}</div>
       </div>
     </div>
 
     <!-- Charts -->
-    <div class="analytics-grid">
-      <div class="chart-card" data-drillable>
+    <div class="analytics-grid" style="margin-bottom:2rem;">
+      <div class="chart-card" data-drillable style="cursor:pointer;">
         <h3>Daily Revenue (Last 30 Days)</h3>
         <div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
       </div>

@@ -14,15 +14,15 @@
     .customer-table th { text-align: left; padding: 0.65rem 1rem; background:#fafbfd; border-bottom: 1px solid #e5e7eb; font-weight: 700; color: #475569; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
     .customer-table td { padding: 0.75rem 1rem; border-bottom: 1px solid #f1f3f7; color: #0f172a; vertical-align: middle; }
     .customer-table tr:last-child td { border-bottom: none; }
-    .customer-table tr:hover td { background: rgba(99,102,241,.04); }
+    .customer-table tr:hover td { background: rgba(99,102,241,.035); transition: background .12s ease; }
     .badge-repeat { background: #dcfce7; color: #15803d; font-size: 0.7rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; }
     .badge-vip    { background: #fef3c7; color: #92400e; font-size: 0.7rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; margin-left:.25rem;}
     .insight-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.25rem; }
     @media (max-width: 900px) { .insight-cards { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 480px) { .insight-cards { grid-template-columns: 1fr; } }
-    .insight-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 1.1rem 1.25rem; }
+    .insight-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 1.1rem 1.25rem; transition: box-shadow .18s ease, transform .18s ease; } .insight-card:hover { box-shadow: 0 4px 16px rgba(15,23,42,.1); transform: translateY(-2px); }
     .insight-card-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; margin-bottom: 0.4rem; }
-    .insight-card-value { font-size: 1.85rem; font-weight: 800; color: #0f172a; letter-spacing: -.02em; }
+    .insight-card-value { font-size: 1.9rem; font-weight: 800; color: #0f172a; letter-spacing: -.025em; line-height:1; }
     .toolbar { display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; margin-bottom:1rem; }
     .toolbar input[type=search] { flex:1; min-width:220px; border:1px solid #d3d7e2; border-radius:10px; padding:.55rem .85rem; font-size:.92rem; }
     .toolbar a { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:.55rem .9rem; font-size:.85rem; font-weight:600; color:#0f172a; text-decoration:none; }

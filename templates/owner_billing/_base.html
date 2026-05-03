@@ -179,10 +179,10 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-  <div class="topbar">
+  <div class="topbar" style="border-bottom:1px solid #1e1e1e;background:#111;">
     <div>
       <a class="back" href="/owner/dashboard">← Dashboard</a>
-      <span class="brand">☕ Billing{% if cafe_name %} · {{ cafe_name }}{% endif %}</span>
+      <span class="brand" style="font-size:1.1rem;letter-spacing:-.01em;">☕ Billing{% if cafe_name %} &mdash; {{ cafe_name }}{% endif %}</span>
     </div>
     <div class="who">Signed in as <strong>{{ owner_username }}</strong></div>
   </div>
