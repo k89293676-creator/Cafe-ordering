@@ -3,20 +3,52 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Server Error — Cafe Portal</title>
+  <title>Server Error — Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600&display=swap" />
   <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/enhancements.css" />
+  <style>
+    .error-page {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #1e1b4b 0%, #312e81 38%, #4338ca 78%, #6366f1 100%);
+      position: relative; overflow: hidden; padding: 2rem;
+    }
+    .error-page::before {
+      content: ""; position: absolute; inset: 0;
+      background-image: radial-gradient(circle at 20% 20%, rgba(165,180,252,.25), transparent 40%), radial-gradient(circle at 80% 70%, rgba(244,114,182,.18), transparent 40%);
+      pointer-events: none;
+    }
+    .error-card { background: rgba(255,255,255,.08); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,.15); border-radius: 20px; padding: 3rem 2.5rem; text-align: center; max-width: 440px; width: 100%; position: relative; }
+    .error-code { font-family: 'Playfair Display', Georgia, serif; font-size: 6rem; font-weight: 700; line-height: 1; color: rgba(255,255,255,.12); position: absolute; top: 1rem; left: 50%; transform: translateX(-50%); user-select: none; letter-spacing: -.04em; white-space: nowrap; }
+    .error-icon { font-size: 3.5rem; margin-bottom: 1rem; display: block; }
+    .error-title { font-family: 'Playfair Display', Georgia, serif; font-size: 1.75rem; font-weight: 700; color: #fff; margin: 0 0 .75rem; }
+    .error-sub { color: rgba(255,255,255,.7); font-size: .95rem; line-height: 1.6; margin-bottom: 2rem; }
+    .error-actions { display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap; }
+    .error-btn { display: inline-flex; align-items: center; gap: .4rem; padding: .65rem 1.4rem; border-radius: 10px; font-size: .9rem; font-weight: 600; text-decoration: none; transition: background .15s, transform .1s; }
+    .error-btn:active { transform: scale(.97); }
+    .error-btn--primary { background: #fff; color: #312e81; }
+    .error-btn--primary:hover { background: #e0e7ff; }
+    .error-btn--ghost { background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.2); }
+    .error-btn--ghost:hover { background: rgba(255,255,255,.2); }
+    .error-wordmark { margin-bottom: 2.5rem; font-family: 'Playfair Display', Georgia, serif; color: rgba(255,255,255,.5); font-size: .85rem; letter-spacing: .12em; text-transform: uppercase; }
+  </style>
 </head>
 <body>
-<div class="auth-page">
-  <div class="auth-logo">
-    <div class="auth-logo-icon">☕</div>
-    <h1>Cafe Portal</h1>
-  </div>
-  <div class="auth-card" style="text-align:center;">
-    <div style="font-size:4rem;margin-bottom:1rem;">🛠️</div>
-    <h2 style="margin:0 0 0.5rem;">500 — Something Went Wrong</h2>
-    <p class="subtitle">We encountered an unexpected error. Our team has been notified. Please try again shortly.</p>
-    <a href="/" class="btn btn-primary" style="margin-top:1.5rem;display:inline-block;">← Back to Home</a>
+<div class="error-page">
+  <div style="width:100%;max-width:440px;">
+    <div class="error-wordmark">☕ Cafe 11:11</div>
+    <div class="error-card">
+      <div class="error-code">500</div>
+      <span class="error-icon">🛠️</span>
+      <h1 class="error-title">Something Went Wrong</h1>
+      <p class="error-sub">We hit an unexpected error. Our team has been notified. Please try again in a moment.</p>
+      <div class="error-actions">
+        <a href="/" class="error-btn error-btn--primary">← Back to Home</a>
+        <a href="javascript:location.reload()" class="error-btn error-btn--ghost">Try Again</a>
+      </div>
+    </div>
   </div>
 </div>
 </body>

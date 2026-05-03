@@ -556,6 +556,12 @@ function trackerHtml(order) {
       </div>
     </div>
     <p class="o-tracker__hint" id="tracker-hint">Updates in real time as your order progresses.</p>
+    <div class="af-activity-log" id="customer-activity-log">
+      <div class="af-activity-log__head">
+        <span class="af-dot"></span>Live Updates
+      </div>
+      <div class="af-list"></div>
+    </div>
     <div class="o-tracker__summary">
       ${itemsHtml}
       <div class="o-tracker__line o-tracker__line--total">
@@ -592,6 +598,14 @@ function showTracker(order) {
 
   openCart();
   startPolling(order.id);
+
+  /* ── Live Activity Log ── */
+  if (window.initCustomerFeed) {
+    window._cFeed = window.initCustomerFeed(
+      document.getElementById("customer-activity-log"),
+      order.id
+    );
+  }
 }
 
 function patchTrackerStatus(status) {

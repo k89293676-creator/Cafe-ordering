@@ -866,3 +866,613 @@ body { background: var(--enh-bg); }
   .admin-content, .dashboard-main { width: 100% !important; }
   body { background: #fff !important; }
 }
+
+/* ==========================================================
+   ENHANCEMENT v2 — Micro-interactions, Reveals, Loaders
+   v2.0  ·  2025-05
+   ========================================================== */
+
+/* ── Page fade-in ──────────────────────────────────────── */
+body { animation: _pageFadeIn .22s ease; }
+@keyframes _pageFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { body { animation: none; } }
+
+/* ── Top page-load progress bar ──────────────────────────
+   Add class "page-loading" to <html> while navigating.   */
+html.page-loading::before {
+  content: "";
+  position: fixed;
+  top: 0; left: 0;
+  height: 3px;
+  width: 0%;
+  background: linear-gradient(90deg, #6366f1, #a78bfa, #6366f1);
+  background-size: 200% 100%;
+  z-index: 9999;
+  animation: _progressBar 1.6s ease-in-out infinite;
+  border-radius: 0 999px 999px 0;
+}
+@keyframes _progressBar {
+  0%   { width: 0%; background-position: 0% 50%; }
+  50%  { width: 70%; background-position: 100% 50%; }
+  100% { width: 95%; background-position: 0% 50%; }
+}
+
+/* ── Scroll reveal ───────────────────────────────────────
+   Apply .reveal to any element; JS adds .revealed.        */
+.reveal {
+  opacity: 0;
+  transform: translateY(22px);
+  transition: opacity .55s cubic-bezier(.22,1,.36,1),
+              transform .55s cubic-bezier(.22,1,.36,1);
+}
+.reveal.revealed { opacity: 1; transform: none; }
+.reveal-delay-1  { transition-delay: .08s; }
+.reveal-delay-2  { transition-delay: .16s; }
+.reveal-delay-3  { transition-delay: .24s; }
+.reveal-delay-4  { transition-delay: .32s; }
+.reveal-delay-5  { transition-delay: .40s; }
+.reveal-left  { transform: translateX(-22px); }
+.reveal-right { transform: translateX(22px); }
+.reveal-left.revealed, .reveal-right.revealed { transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+}
+
+/* ── Skeleton loaders ────────────────────────────────────*/
+.skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 37%, #f0f0f0 63%);
+  background-size: 400% 100%;
+  animation: _shimmer 1.4s ease infinite;
+  border-radius: 6px;
+  color: transparent !important;
+  pointer-events: none;
+  user-select: none;
+}
+.skeleton * { visibility: hidden !important; }
+@keyframes _shimmer {
+  0%   { background-position: 100% 50%; }
+  100% { background-position: 0%   50%; }
+}
+.skeleton-text   { height: 1em; margin: .35rem 0; }
+.skeleton-circle { border-radius: 50%; }
+.skeleton-btn    { height: 2.4rem; border-radius: 10px; }
+
+/* ── Button loading state ────────────────────────────────
+   Add class .btn-loading or use [aria-busy="true"].       */
+.btn-loading,
+.btn[aria-busy="true"] {
+  position: relative;
+  color: transparent !important;
+  pointer-events: none;
+  opacity: .85;
+}
+.btn-loading::after,
+.btn[aria-busy="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 50% 50%;
+  width: 1.1rem; height: 1.1rem;
+  margin: -.55rem 0 0 -.55rem;
+  border: 2px solid currentColor;
+  border-color: rgba(255,255,255,.85) rgba(255,255,255,.3) rgba(255,255,255,.3) rgba(255,255,255,.3);
+  border-radius: 50%;
+  animation: _spinBtn .65s linear infinite;
+}
+@keyframes _spinBtn { to { transform: rotate(360deg); } }
+
+/* ── Stat counter (number roll) ──────────────────────────
+   JS targets .stat-value[data-target] elements            */
+.stat-value[data-target] {
+  transition: color .4s ease;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Input validation feedback ───────────────────────────*/
+.form-group input:invalid:not(:placeholder-shown),
+.field input:invalid:not(:placeholder-shown) {
+  border-color: var(--enh-danger) !important;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, .1);
+}
+.form-group input:valid:not(:placeholder-shown),
+.field input:valid:not(:placeholder-shown) {
+  border-color: var(--enh-success) !important;
+}
+
+/* ── Password strength bar ───────────────────────────────*/
+.pw-strength-bar {
+  height: 4px;
+  border-radius: 999px;
+  margin-top: .4rem;
+  background: var(--enh-border);
+  overflow: hidden;
+  transition: opacity .2s;
+}
+.pw-strength-bar__fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width .3s ease, background .3s ease;
+  width: 0%;
+}
+.pw-strength-bar__fill[data-strength="1"] { width: 25%; background: var(--enh-danger); }
+.pw-strength-bar__fill[data-strength="2"] { width: 50%; background: var(--enh-warning); }
+.pw-strength-bar__fill[data-strength="3"] { width: 75%; background: #f59e0b; }
+.pw-strength-bar__fill[data-strength="4"] { width: 100%; background: var(--enh-success); }
+
+/* ── Kitchen timer progress bar ─────────────────────────
+   Shows elapsed time up to 20 min on each kitchen card.   */
+.k-timer-wrap {
+  height: 3px;
+  background: rgba(255,255,255,.08);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: .35rem 0 .5rem;
+}
+.k-timer-bar {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 1s linear, background .5s ease;
+  background: var(--k-green, #10b981);
+}
+.k-timer-bar.warn  { background: var(--k-yellow, #f59e0b); }
+.k-timer-bar.late  { background: var(--k-red, #ef4444);    }
+
+/* ── Dashboard mobile sidebar ───────────────────────────*/
+@media (max-width: 900px) {
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform .28s cubic-bezier(.4,0,.2,1),
+                box-shadow .28s ease;
+    z-index: 200;
+  }
+  .sidebar.sidebar--open {
+    transform: translateX(0);
+    box-shadow: 8px 0 40px rgba(0,0,0,.35);
+  }
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 199;
+    display: none;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+  .sidebar--open ~ .sidebar-overlay,
+  .sidebar-overlay.is-visible { display: block; }
+  .dashboard-main { margin-left: 0 !important; }
+  .sidebar-toggle-btn { display: flex !important; }
+}
+@media (min-width: 901px) {
+  .sidebar { transform: none !important; }
+  .sidebar-toggle-btn { display: none !important; }
+}
+.sidebar-toggle-btn {
+  align-items: center;
+  justify-content: center;
+  width: 38px; height: 38px;
+  border-radius: 8px;
+  border: 1.5px solid var(--enh-border);
+  background: transparent;
+  cursor: pointer;
+  color: var(--enh-text-2);
+  flex-shrink: 0;
+}
+.sidebar-toggle-btn:hover { background: var(--enh-bg); }
+
+/* ── Hover lift for cards ────────────────────────────────*/
+.stat-card,
+.card,
+.order-card,
+.kitchen-card,
+.table-item {
+  will-change: transform;
+}
+
+/* ── Flash toast notifications ───────────────────────────*/
+.flash-container .alert {
+  animation: _alertSlideIn .3s cubic-bezier(.22,1,.36,1);
+}
+@keyframes _alertSlideIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── Pulse animation for pending-order dot ───────────────*/
+.pulse-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--enh-danger);
+  animation: _pulse 1.5s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.pulse-dot--card {
+  position: absolute;
+  top: .75rem; right: .75rem;
+}
+@keyframes _pulse {
+  0%,100% { box-shadow: 0 0 0 0   rgba(220,38,38,.6); }
+  50%      { box-shadow: 0 0 0 7px rgba(220,38,38,.0); }
+}
+
+/* ── Landing page scroll-reveal ──────────────────────────*/
+.lp-section-enter {
+  opacity: 0;
+  transform: translateY(32px);
+  transition: opacity .65s cubic-bezier(.22,1,.36,1),
+              transform .65s cubic-bezier(.22,1,.36,1);
+}
+.lp-section-enter.lp-entered { opacity: 1; transform: none; }
+.lp-card-enter {
+  opacity: 0;
+  transform: translateY(20px) scale(.98);
+  transition: opacity .5s cubic-bezier(.22,1,.36,1),
+              transform .5s cubic-bezier(.22,1,.36,1);
+}
+.lp-card-enter.lp-entered { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .lp-section-enter, .lp-card-enter { opacity: 1; transform: none; transition: none; }
+}
+
+/* ── Landing animated counter digits ─────────────────────*/
+.lp-stat-num[data-from] {
+  font-variant-numeric: tabular-nums;
+  transition: color .3s;
+}
+
+/* ── Sticky nav backdrop blur improvement ─────────────────*/
+.nav {
+  backdrop-filter: saturate(180%) blur(14px) !important;
+  -webkit-backdrop-filter: saturate(180%) blur(14px) !important;
+}
+
+/* ── Better link-badge on sidebar ───────────────────────*/
+.sidebar-link--danger { color: #fca5a5 !important; }
+.sidebar-link--danger:hover { background: rgba(239,68,68,.12) !important; color: #fff !important; }
+
+/* ── Topbar alert pill ───────────────────────────────────*/
+.topbar-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  padding: .35rem .85rem;
+  border-radius: 999px;
+  font-size: .8rem;
+  font-weight: 700;
+  animation: _alertPop .3s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes _alertPop { from { transform: scale(.88); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* ── Stats grid responsive ───────────────────────────────*/
+.stats-grid-5 {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+@media (max-width: 1200px) {
+  .stats-grid-5 { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 700px) {
+  .stats-grid-5 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 420px) {
+  .stats-grid-5 { grid-template-columns: 1fr; }
+}
+
+/* ── Revenue stat card ───────────────────────────────────*/
+.stat-card--revenue {
+  background: linear-gradient(135deg, #f0fdf4, #dcfce7) !important;
+  border-color: #86efac !important;
+}
+.stat-card--revenue .stat-icon.emerald {
+  background: #dcfce7;
+  color: #16a34a;
+  font-weight: 800;
+  font-size: 1.1rem;
+}
+.stat-value--revenue { color: #15803d !important; }
+.stat-avg {
+  font-size: .72rem;
+  color: #16a34a;
+  font-weight: 600;
+  margin-top: .15rem;
+}
+
+/* ── Alert stat card ─────────────────────────────────────*/
+.stat-card--alert {
+  border-color: #fca5a5 !important;
+  background: linear-gradient(135deg, #fff, #fef2f2) !important;
+}
+.stat-card--alert .stat-icon.amber { background: #fee2e2; }
+
+/* ── Brand wordmark in sidebar ───────────────────────────*/
+.brand-wordmark {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: .04em;
+  line-height: 1;
+  background: var(--primary, #4f46e5);
+  border-radius: 8px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: .75rem;
+  letter-spacing: .02em;
+}
+
+/* ── Auth logo wordmark ──────────────────────────────────*/
+.auth-logo-wordmark {
+  width: 60px; height: 60px;
+  background: rgba(255,255,255,.15);
+  border-radius: 20px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; font-weight: 700; color: #fff;
+  margin: 0 auto .75rem;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.2);
+  font-family: 'Playfair Display', Georgia, serif;
+  letter-spacing: .04em;
+}
+
+/* ── Input icon wrapper ──────────────────────────────────*/
+.input-with-toggle {
+  position: relative;
+}
+.input-with-toggle input { padding-right: 2.75rem !important; }
+.password-toggle {
+  position: absolute;
+  right: .75rem; top: 50%; transform: translateY(-50%);
+  background: transparent; border: none; padding: .25rem;
+  color: var(--enh-text-3); cursor: pointer; line-height: 1;
+}
+.password-toggle:hover { color: var(--enh-text); }
+
+/* ── Link icon SVG alignment ─────────────────────────────*/
+.link-icon-svg {
+  flex-shrink: 0;
+  width: 16px; height: 16px;
+  color: inherit;
+}
+
+/* ==========================================================
+   LIVE ACTIVITY FEED WIDGET  (v1.0)
+   Used across Owner, Admin, Superadmin, Customer views
+   ========================================================== */
+
+/* ── Panel shell ────────────────────────────────────────── */
+.af-panel {
+  background: #fff;
+  border: 1px solid var(--enh-border, #e5e7eb);
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+}
+
+.af-panel--dark {
+  background: #1a1d27;
+  border-color: rgba(255,255,255,.08);
+}
+
+/* ── Header bar ─────────────────────────────────────────── */
+.af-header {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  padding: .8rem 1.1rem;
+  border-bottom: 1px solid var(--enh-border, #e5e7eb);
+  background: #fafafa;
+}
+
+.af-panel--dark .af-header {
+  background: #1e2130;
+  border-bottom-color: rgba(255,255,255,.07);
+}
+
+.af-header__title {
+  font-size: .88rem;
+  font-weight: 700;
+  color: #111827;
+  flex: 1;
+  letter-spacing: -.01em;
+}
+
+.af-panel--dark .af-header__title { color: #e5e7eb; }
+
+.af-header__live {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .72rem;
+  font-weight: 600;
+  color: #16a34a;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.af-header__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #16a34a;
+  animation: af-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes af-pulse {
+  0%, 100% { opacity: 1; transform: scale(1);   }
+  50%       { opacity: .5; transform: scale(.7); }
+}
+
+.af-header__badge {
+  display: none;
+  background: #4f46e5;
+  color: #fff;
+  font-size: .65rem;
+  font-weight: 700;
+  padding: .1rem .45rem;
+  border-radius: 999px;
+  margin-left: .25rem;
+}
+
+/* ── Scrollable event list ───────────────────────────────── */
+.af-list {
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #e5e7eb transparent;
+}
+
+.af-list::-webkit-scrollbar { width: 4px; }
+.af-list::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 99px; }
+
+/* ── Individual event row ───────────────────────────────── */
+.af-item {
+  display: grid;
+  grid-template-columns: 2rem 1fr auto;
+  align-items: center;
+  gap: .6rem;
+  padding: .6rem 1rem;
+  border-bottom: 1px solid #f3f4f6;
+  transition: background .15s;
+  position: relative;
+}
+
+.af-item:last-child { border-bottom: none; }
+.af-item:hover { background: #f9fafb; }
+
+.af-panel--dark .af-item { border-bottom-color: rgba(255,255,255,.05); }
+.af-panel--dark .af-item:hover { background: rgba(255,255,255,.03); }
+
+/* Slide-in animation for newest item */
+.af-item--animate {
+  animation: af-slidein .35s ease;
+}
+@keyframes af-slidein {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+/* New-order accent bar */
+.af-item--new::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: #4f46e5;
+  transition: background .4s;
+}
+
+.af-item--confirm::before  { background: #2563eb; }
+.af-item--prepare::before  { background: #d97706; }
+.af-item--ready::before    { background: #16a34a; }
+.af-item--done::before     { background: #059669; }
+.af-item--cancel::before   { background: #dc2626; }
+
+.af-item__icon {
+  font-size: 1.15rem;
+  text-align: center;
+  line-height: 1;
+  user-select: none;
+}
+
+.af-item__body {
+  min-width: 0;
+}
+
+.af-item__label {
+  font-size: .84rem;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.af-panel--dark .af-item__label { color: #e5e7eb; }
+
+.af-item__sub {
+  font-size: .76rem;
+  color: #6b7280;
+  margin-top: .05rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.af-item__time {
+  font-size: .7rem;
+  color: #9ca3af;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Empty state ─────────────────────────────────────────── */
+.af-empty {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: #9ca3af;
+  font-size: .84rem;
+  font-style: italic;
+}
+
+/* ── Customer activity log (inside tracker) ──────────────── */
+.af-activity-log {
+  margin-top: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.af-activity-log__head {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .55rem .85rem;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: .78rem;
+  font-weight: 700;
+  color: #374151;
+}
+
+.af-activity-log__head .af-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #16a34a;
+  flex-shrink: 0;
+  animation: af-pulse 1.6s ease-in-out infinite;
+}
+
+.af-activity-log .af-list {
+  max-height: 180px;
+}
+
+.af-activity-log .af-item {
+  padding: .45rem .75rem;
+}
+
+.af-activity-log .af-item__label {
+  font-size: .8rem;
+}
+
+.af-activity-log .af-item__sub {
+  font-size: .72rem;
+}
+
+/* ── Bootstrap-compatible overrides (admin/superadmin) ────── */
+.af-bs-panel {
+  background: #fff;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 12px !important;
+}

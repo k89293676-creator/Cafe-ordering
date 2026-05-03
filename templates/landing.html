@@ -121,19 +121,19 @@
   </div>
   <div class="hero-meta">Free 30-day trial · Personal onboarding · No credit card required</div>
   <div class="stats">
-    <div class="stat"><div class="stat-num">~30%</div><div class="stat-label">faster table turnover</div></div>
-    <div class="stat"><div class="stat-num">~20%</div><div class="stat-label">higher avg. order value</div></div>
-    <div class="stat"><div class="stat-num">0</div><div class="stat-label">paper chits or wrong orders</div></div>
-    <div class="stat"><div class="stat-num">2 min</div><div class="stat-label">to request access</div></div>
+    <div class="stat lp-section-enter" data-delay="0"><div class="stat-num lp-stat-num" data-prefix="~" data-suffix="%">30</div><div class="stat-label">faster table turnover</div></div>
+    <div class="stat lp-section-enter" data-delay="80"><div class="stat-num lp-stat-num" data-prefix="~" data-suffix="%">20</div><div class="stat-label">higher avg. order value</div></div>
+    <div class="stat lp-section-enter" data-delay="160"><div class="stat-num lp-stat-num">0</div><div class="stat-label">paper chits or wrong orders</div></div>
+    <div class="stat lp-section-enter" data-delay="240"><div class="stat-num" style="font-size:2rem;font-weight:700;color:var(--primary);">2 min</div><div class="stat-label">to request access</div></div>
   </div>
 </section>
 
 <section class="section" id="features">
-  <h2>Everything your café needs, in one place</h2>
-  <p class="lede">Every feature below is included in your account from day one. No add-ons, no upsells.</p>
+  <h2 class="lp-section-enter">Everything your café needs, in one place</h2>
+  <p class="lede lp-section-enter" data-delay="80">Every feature below is included in your account from day one. No add-ons, no upsells.</p>
 
   <div class="grid">
-    <div class="card">
+    <div class="card lp-card-enter" data-delay="0">
       <div class="icon">📱</div>
       <h3>Scan-to-order from any table</h3>
       <p>Customers scan a QR code on their table and order from your menu in their own browser.</p>
@@ -407,6 +407,7 @@
 </footer>
 
 <script>
+  /* ── Smooth anchor scrolling ── */
   document.querySelectorAll('a[href^="#"]').forEach(a => {
     a.addEventListener('click', e => {
       const id = a.getAttribute('href').slice(1);
@@ -414,6 +415,63 @@
       if (el) { e.preventDefault(); el.scrollIntoView({behavior:'smooth', block:'start'}); history.replaceState(null,'','#'+id); }
     });
   });
+
+  /* ── Page-load progress bar ── */
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('a:not([href^="#"]):not([target])').forEach(link => {
+      link.addEventListener('click', () => document.documentElement.classList.add('page-loading'));
+    });
+  });
+
+  /* ── Scroll reveal via IntersectionObserver ── */
+  (function () {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e, i) => {
+        if (e.isIntersecting) {
+          const delay = e.target.dataset.delay || 0;
+          setTimeout(() => e.target.classList.add('lp-entered'), delay);
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.12 });
+
+    document.querySelectorAll('.lp-section-enter, .lp-card-enter').forEach(el => io.observe(el));
+  })();
+
+  /* ── Animated number counters ── */
+  (function () {
+    function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+    function animateNum(el) {
+      const raw   = el.dataset.to || el.textContent;
+      const prefix = el.dataset.prefix || '';
+      const suffix = el.dataset.suffix || '';
+      const numMatch = raw.match(/([\d,]+)/);
+      if (!numMatch) return;
+      const target = parseInt(numMatch[1].replace(/,/g,''), 10);
+      const duration = 1400;
+      const start = performance.now();
+      el.textContent = prefix + '0' + suffix;
+      function step(now) {
+        const progress = Math.min((now - start) / duration, 1);
+        const val = Math.round(easeOut(progress) * target);
+        el.textContent = prefix + val.toLocaleString() + suffix;
+        if (progress < 1) requestAnimationFrame(step);
+        else el.textContent = prefix + raw.replace(/[\d,]+/, target.toLocaleString()) + suffix;
+      }
+      requestAnimationFrame(step);
+    }
+
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) { animateNum(e.target); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.5 });
+
+    document.querySelectorAll('.lp-stat-num').forEach(el => {
+      el.dataset.to = el.textContent;
+      io.observe(el);
+    });
+  })();
 </script>
 </body>
 </html>

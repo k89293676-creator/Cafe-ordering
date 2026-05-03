@@ -380,6 +380,10 @@
           <span class="age-pill card-age"><i class="bi bi-clock"></i><span class="card-age-text"></span></span>
         </div>
       </div>
+      <!-- Urgency timer progress bar: fills from green → amber → red over 20 min -->
+      <div class="k-timer-wrap" title="Time elapsed">
+        <div class="k-timer-bar card-timer-bar" data-created-at=""></div>
+      </div>
       <div class="card-items"></div>
       <div class="card-notes"></div>
       <div class="card-actions no-print"></div>
@@ -837,6 +841,16 @@
           card.classList.remove('urgent', 'late');
           const cc = ageCardClass(age);
           if (cc) card.classList.add(cc);
+        }
+        // ── Timer progress bar (green → amber → red over 20 min) ──
+        const timerBar = col.querySelector('.card-timer-bar');
+        if (timerBar) {
+          const maxSec = 20 * 60;  // 20 minutes = full bar
+          const pct = Math.min(age / maxSec * 100, 100);
+          timerBar.style.width = pct + '%';
+          timerBar.classList.remove('warn', 'late');
+          if (age >= 900) timerBar.classList.add('late');       // ≥15 min → red
+          else if (age >= 420) timerBar.classList.add('warn'); // ≥7 min  → amber
         }
       });
       // Stale-data check (every tick is fine — it's a tiny calculation)
