@@ -40,109 +40,217 @@
     <div class="sidebar-nav">
       <div class="sidebar-section-label">Management</div>
       <button class="sidebar-link active" data-tab="overview">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-        Overview
+        <div class="slink-icon-wrap slink-icon--overview">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Overview</span>
+          <span class="slink-sub">Dashboard summary</span>
+        </div>
       </button>
       <button class="sidebar-link" data-tab="tables">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h18M3 6h18M3 14h18M3 18h18"/></svg>
-        Tables
+        <div class="slink-icon-wrap slink-icon--tables">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h18M3 6h18M3 14h18M3 18h18"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Tables</span>
+          <span class="slink-sub">Floor map &amp; seating</span>
+        </div>
       </button>
       <button class="sidebar-link" data-tab="menu">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-        Menu
+        <div class="slink-icon-wrap slink-icon--menu">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Menu</span>
+          <span class="slink-sub">Items, prices &amp; categories</span>
+        </div>
       </button>
       <button class="sidebar-link" data-tab="orders">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18"/></svg>
-        Orders
-        {% if pending_orders %}
-        <span class="link-badge">{{ pending_orders | length }}</span>
-        {% endif %}
+        <div class="slink-icon-wrap slink-icon--orders">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Orders</span>
+          <span class="slink-sub">Kanban ticket board</span>
+        </div>
+        {% if pending_orders %}<span class="link-badge" data-pending-badge>{{ pending_orders | length }}</span>{% endif %}
       </button>
       <button class="sidebar-link" data-tab="feedback">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-        Reviews
-        {% if total_feedback %}
-        <span class="link-badge" style="background:var(--success);">{{ total_feedback }}</span>
-        {% endif %}
+        <div class="slink-icon-wrap slink-icon--feedback">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Reviews</span>
+          <span class="slink-sub">Customer feedback &amp; ratings</span>
+        </div>
+        {% if total_feedback %}<span class="link-badge" style="background:#059669;">{{ total_feedback }}</span>{% endif %}
       </button>
 
       <div class="sidebar-section-label" style="margin-top:1rem;">Operations</div>
       <a class="sidebar-link" href="{{ url_for('kitchen_view') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2v6a1 1 0 01-1 1H4"/><path d="M15 2v6a1 1 0 001 1h4"/><path d="M12 19v3M8 19h8"/><rect x="3" y="9" width="18" height="10" rx="2"/></svg>
-        Kitchen View
+        <div class="slink-icon-wrap slink-icon--kitchen">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2v6a1 1 0 01-1 1H4"/><path d="M15 2v6a1 1 0 001 1h4"/><path d="M12 19v3M8 19h8"/><rect x="3" y="9" width="18" height="10" rx="2"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Kitchen View</span>
+          <span class="slink-sub">Live ticket display</span>
+        </div>
+        <span class="setup-pill setup-pill--ok" style="font-size:.58rem;padding:.16rem .52rem;">LIVE</span>
       </a>
       <a class="sidebar-link" href="{{ url_for('inventory_view') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
-        Inventory
-        {% if low_stock_alerts %}<span class="link-badge" style="background:var(--danger,#ef4444);">{{ low_stock_alerts|length }}</span>{% endif %}
+        <div class="slink-icon-wrap slink-icon--inventory">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Inventory</span>
+          <span class="slink-sub">Stock levels &amp; alerts</span>
+        </div>
+        {% if low_stock_alerts %}<span class="link-badge" style="background:#ef4444;animation:_setup-pulse 2s infinite;">{{ low_stock_alerts|length }}</span>{% endif %}
       </a>
       <a class="sidebar-link" href="{{ url_for('owner_billing_overview') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="14" x2="10" y2="14"/></svg>
-        Billing
+        <div class="slink-icon-wrap slink-icon--billing">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="14" x2="10" y2="14"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Billing</span>
+          <span class="slink-sub">Revenue &amp; settlements</span>
+        </div>
       </a>
 
       <div class="sidebar-section-label" style="margin-top:1rem;">Integrations &amp; Setup</div>
       <a class="sidebar-link" href="{{ url_for('owner_billing_payment_methods') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><circle cx="7" cy="15" r="1.2" fill="currentColor"/><line x1="11" y1="15" x2="18" y2="15"/></svg>
-        Payment Methods
-        {% if integration_health and integration_health.payments_configured == 0 %}<span class="link-badge" style="background:#f59e0b;">Setup</span>{% endif %}
+        <div class="slink-icon-wrap slink-icon--payments">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><circle cx="7" cy="15" r="1.2" fill="currentColor"/><line x1="11" y1="15" x2="18" y2="15"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Payment Methods</span>
+          <span class="slink-sub">UPI · Cards · Cash</span>
+        </div>
+        {% if integration_health and integration_health.payments_configured == 0 %}<span class="setup-pill setup-pill--warn">Setup</span>{% endif %}
       </a>
       <a class="sidebar-link" href="{{ url_for('owner_aggregators') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h13l4 5v5h-2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M3 7v10h2"/><path d="M9 17h6"/></svg>
-        Food Delivery (Swiggy / Zomato)
-        {% if integration_health and integration_health.aggregators_configured == 0 %}<span class="link-badge" style="background:#f59e0b;">Setup</span>{% endif %}
+        <div class="slink-icon-wrap slink-icon--delivery">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h13l4 5v5h-2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M3 7v10h2"/><path d="M9 17h6"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Food Delivery</span>
+          <span class="slink-sub">Swiggy &amp; Zomato sync</span>
+        </div>
+        {% if integration_health and integration_health.aggregators_configured == 0 %}<span class="setup-pill setup-pill--warn">Setup</span>{% endif %}
       </a>
       <a class="sidebar-link" href="{{ url_for('reorder_view') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-        Reorder
+        <div class="slink-icon-wrap slink-icon--reorder">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Reorder</span>
+          <span class="slink-sub">Repeat supplier orders</span>
+        </div>
       </a>
 
       <div class="sidebar-section-label" style="margin-top:1rem;">Insights</div>
       <a class="sidebar-link" href="{{ url_for('owner_analytics') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        Analytics
+        <div class="slink-icon-wrap slink-icon--billing">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Analytics</span>
+          <span class="slink-sub">Revenue &amp; trend charts</span>
+        </div>
       </a>
       <a class="sidebar-link" href="{{ url_for('sales_dashboard.sales_dashboard_view') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
-        Sales Dashboard
+        <div class="slink-icon-wrap slink-icon--kitchen">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Sales Dashboard</span>
+          <span class="slink-sub">Daily &amp; weekly breakdown</span>
+        </div>
       </a>
       <a class="sidebar-link" href="{{ url_for('menu_engineering.view') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-        Menu Engineering
+        <div class="slink-icon-wrap slink-icon--menu">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Menu Engineering</span>
+          <span class="slink-sub">Stars, plowhorses &amp; dogs</span>
+        </div>
       </a>
       <a class="sidebar-link" href="{{ url_for('ltv.view') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
-        Customer LTV
+        <div class="slink-icon-wrap slink-icon--reorder">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Customer LTV</span>
+          <span class="slink-sub">Lifetime value &amp; retention</span>
+        </div>
       </a>
       <a class="sidebar-link" href="{{ url_for('employees.view') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-        Employees
+        <div class="slink-icon-wrap slink-icon--tables">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Employees</span>
+          <span class="slink-sub">Staff &amp; shift management</span>
+        </div>
       </a>
       <a class="sidebar-link" href="{{ url_for('tables_overview.view') }}">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-        <span>Tables Overview</span>
+        <div class="slink-icon-wrap slink-icon--overview">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Tables Overview</span>
+          <span class="slink-sub">Real-time floor status</span>
+        </div>
       </a>
       <a class="sidebar-link" href="#" id="table-calls-link" data-tab="table-calls">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
-        Table Calls <span id="ays-badge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;padding:0 .45rem;font-size:.65rem;font-weight:700;margin-left:.4rem;">0</span>
+        <div class="slink-icon-wrap slink-icon--feedback">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Table Calls</span>
+          <span class="slink-sub">Guest assistance requests</span>
+        </div>
+        <span id="ays-badge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;padding:.18rem .52rem;font-size:.63rem;font-weight:800;flex-shrink:0;">0</span>
       </a>
       <a class="sidebar-link" href="{{ url_for('owner_customers') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
-        Customers
+        <div class="slink-icon-wrap slink-icon--reorder">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Customers</span>
+          <span class="slink-sub">Profiles &amp; visit history</span>
+        </div>
       </a>
       <a class="sidebar-link" href="{{ url_for('export_orders_csv') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17"/></svg>
-        Export CSV
+        <div class="slink-icon-wrap slink-icon--inventory">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Export CSV</span>
+          <span class="slink-sub">Download order data</span>
+        </div>
       </a>
       <a class="sidebar-link" href="{{ url_for('daily_report_pdf') }}">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        Daily PDF Report
+        <div class="slink-icon-wrap slink-icon--billing">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Daily PDF Report</span>
+          <span class="slink-sub">Printable day summary</span>
+        </div>
       </a>
       {% if owner.isSuperadmin %}
       <div class="sidebar-section-label" style="margin-top:1rem;">Admin</div>
-      <a class="sidebar-link" href="{{ url_for('superadmin_dashboard') }}" style="color:#ef4444;">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        Superadmin
+      <a class="sidebar-link sidebar-link--danger" href="{{ url_for('superadmin_dashboard') }}">
+        <div class="slink-icon-wrap" style="background:rgba(239,68,68,.16);color:#f87171;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Superadmin</span>
+          <span class="slink-sub">Platform-wide controls</span>
+        </div>
       </a>
       {% endif %}
     </div>
@@ -156,12 +264,21 @@
         </div>
       </div>
       <a href="{{ url_for('owner_profile') }}" class="sidebar-link">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        Profile &amp; Settings
+        <div class="slink-icon-wrap slink-icon--overview">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Profile &amp; Settings</span>
+          <span class="slink-sub">Account &amp; preferences</span>
+        </div>
       </a>
       <a href="{{ url_for('owner_logout') }}" class="sidebar-link sidebar-link--danger">
-        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
-        Sign Out
+        <div class="slink-icon-wrap" style="background:rgba(239,68,68,.14);color:#f87171;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        </div>
+        <div class="slink-body">
+          <span class="slink-title">Sign Out</span>
+        </div>
       </a>
     </div>
   </nav>
