@@ -3,6 +3,30 @@
 {% block page_title %}Owner Management{% endblock %}
 
 {% block content %}
+
+{# ── Secure one-time temp-password panel ──────────────────────────────────── #}
+{% if tmp_pw %}
+<div class="alert alert-warning border border-warning-subtle shadow-sm d-flex gap-3 align-items-start mb-4" role="alert" id="tmp-pw-banner">
+  <i class="bi bi-shield-lock fs-4 text-warning mt-1 flex-shrink-0"></i>
+  <div class="flex-grow-1">
+    <div class="fw-600 mb-1">Temporary password for <em>{{ tmp_pw_owner }}</em> — copy now</div>
+    <p class="mb-2 text-muted" style="font-size:.88rem;">
+      This is shown <strong>once only</strong>. It will not appear again after you leave or refresh this page.
+      Share it with the owner via a secure channel, not email or chat.
+    </p>
+    <div class="input-group" style="max-width:420px;">
+      <input id="tmp-pw-field" type="text" class="form-control font-monospace fw-600"
+             value="{{ tmp_pw }}" readonly autocomplete="off">
+      <button class="btn btn-outline-secondary" type="button"
+              onclick="navigator.clipboard.writeText(document.getElementById('tmp-pw-field').value);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500);">
+        Copy
+      </button>
+    </div>
+  </div>
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss"></button>
+</div>
+{% endif %}
+
 <div class="card border-0 shadow-sm">
   <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
     <span class="fw-600">All Registered Owners ({{ owners|length }})</span>
