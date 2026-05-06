@@ -19,8 +19,15 @@ bind = f"0.0.0.0:{os.environ.get('PORT', '8000')}"
 
 # ── Worker model ────────────────────────────────────────────────────────────
 worker_class = "gevent"
-workers = int(os.environ.get("WEB_CONCURRENCY", "1"))
-threads = int(os.environ.get("GUNICORN_THREADS", "2"))
+
+# Auto-scale workers: 2 × CPU + 1 (standard formula for I/O-bound apps).
+# Override via WEB_CONCURRENCY; cap at 8 to avoid connection-pool saturation
+# on shared Railway/Render instances.
+import multiprocessing as _mp
+
+_default_workers = min((_mp.cpu_count() * 2) + 1, 8)
+workers = int(os.environ.get("WEB_CONCURRENCY", str(_default_workers)))
+threads = int(os.environ.get("GUNICORN_THREADS", "1"))  # gevent uses green threads
 worker_connections = int(os.environ.get("GUNICORN_WORKER_CONNECTIONS", "1000"))
 
 # ── Timeouts & recycling ────────────────────────────────────────────────────

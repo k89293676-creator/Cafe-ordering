@@ -12,7 +12,11 @@ let menuData      = [];   // [{id, name, items:[...]}]
 let cart          = {};   // { itemId: {item, qty} }
 let feedbackRating = 0;
 let currentOrderId = null;
-let pollTimer      = null;
+let pollTimer      = null;  // kept for API compat; SSE replaces it
+let _sseOrderSource = null;
+let _sseOrderDelay  = 2000;
+let _sseOrderTries  = 0;
+const _SSE_ORDER_MAX = 10;
 let orderDone      = false;
 let lastName       = "Guest";
 let reviewsShown   = false;
@@ -652,25 +656,44 @@ function patchTrackerStatus(status) {
   }
 }
 
-/* ── Polling ── */
-function startPolling(orderId) {
-  stopPolling();
-  pollTimer = setInterval(async () => {
+/* ── Real-time order tracking via SSE (replaces 5-second polling) ── */
+function _connectOrderSSE(orderId) {
+  if (_sseOrderTries >= _SSE_ORDER_MAX) return;
+  _sseOrderSource = new EventSource(`/api/v1/orders/${orderId}/stream`);
+
+  _sseOrderSource.onmessage = (event) => {
     try {
-      const res = await fetch(`/api/orders/${orderId}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const status = data.order?.status;
+      const payload = JSON.parse(event.data);
+      const status = payload.status || payload.data?.status;
       if (!status) return;
+      _sseOrderDelay = 2000;
+      _sseOrderTries = 0;
       patchTrackerStatus(status);
-      if (status === "completed" || status === "cancelled") stopPolling();
+      if (status === "completed" || status === "cancelled") stopOrderSSE();
     } catch {}
-  }, 5000);
+  };
+
+  _sseOrderSource.onerror = () => {
+    if (_sseOrderSource) { _sseOrderSource.close(); _sseOrderSource = null; }
+    _sseOrderTries++;
+    if (_sseOrderTries >= _SSE_ORDER_MAX) return;
+    setTimeout(() => {
+      _sseOrderDelay = Math.min(_sseOrderDelay * 2, 30000);
+      _connectOrderSSE(orderId);
+    }, _sseOrderDelay);
+  };
 }
 
-function stopPolling() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+function startOrderSSE(orderId) { stopOrderSSE(); _connectOrderSSE(orderId); }
+
+function stopOrderSSE() {
+  if (_sseOrderSource) { _sseOrderSource.close(); _sseOrderSource = null; }
+  _sseOrderDelay = 2000; _sseOrderTries = 0;
 }
+
+/* ── Legacy shims so any caller of startPolling/stopPolling still works ── */
+function startPolling(orderId) { startOrderSSE(orderId); }
+function stopPolling() { stopOrderSSE(); }
 
 /* ── Cancel order ── */
 async function cancelOrder(orderId) {

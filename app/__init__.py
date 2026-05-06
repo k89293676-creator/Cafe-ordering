@@ -141,6 +141,21 @@ def create_app(test_config: dict | None = None) -> Flask:
     ):
         app.register_blueprint(bp)
 
+    # ── Background job queue (RQ) ─────────────────────────────────────────────
+    from app.tasks import init_queue
+    init_queue(_cfg.RQ_REDIS_URL)
+
+    # ── CDN helper — Jinja2 global ────────────────────────────────────────────
+    _cdn_base = _cfg.CDN_URL  # "" → serve from origin
+
+    def cdn_url(path: str) -> str:
+        """Return *path* prefixed with CDN_URL when configured."""
+        if _cdn_base:
+            return _cdn_base + path
+        return path
+
+    app.jinja_env.globals["cdn_url"] = cdn_url
+
     # ── External blueprints (existing extensions/) ────────────────────────────
     try:
         from extensions import init_extensions

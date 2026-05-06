@@ -56,7 +56,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save 60 1
     ports:
       - "6379:6379"
     healthcheck:
@@ -66,6 +66,23 @@ services:
       retries: 5
     volumes:
       - redis_data:/data
+
+  rqworker:
+    build: .
+    command: python rqworker.py
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://cafe:cafe@db:5432/cafe_ordering
+      SECRET_KEY: change-me-in-production
+      IS_PRODUCTION: "true"
+      RQ_QUEUES: "default"
+      LOG_LEVEL: INFO
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres_data:

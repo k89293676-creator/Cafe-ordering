@@ -58,6 +58,16 @@ SQLALCHEMY_ENGINE_OPTIONS: dict = (
 
 REDIS_URL: str | None = os.environ.get("REDIS_URL") or None
 
+# ── CDN / asset hosting ───────────────────────────────────────────────────────
+# When CDN_URL is set (e.g. "https://cdn.example.com"), static asset URLs are
+# rewritten to point at the CDN. Leave empty to serve assets from the origin.
+CDN_URL: str = (os.environ.get("CDN_URL") or "").rstrip("/")
+
+# ── RQ background worker ───────────────────────────────────────────────────────
+# RQ_REDIS_URL defaults to REDIS_URL so no extra env var is needed in most cases.
+RQ_REDIS_URL: str | None = os.environ.get("RQ_REDIS_URL") or REDIS_URL
+RQ_DEFAULT_TIMEOUT: int = int(os.environ.get("RQ_DEFAULT_TIMEOUT", "300"))
+
 # ── Security ──────────────────────────────────────────────────────────────────
 SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET", "")
 TRUSTED_PROXIES = max(1, int(os.environ.get("TRUSTED_PROXIES", "1") or "1"))
