@@ -145,7 +145,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
     WTF_CSRF_TIME_LIMIT=3600,
-    WTF_CSRF_SSL_STRICT=False,
+    WTF_CSRF_SSL_STRICT=IS_PRODUCTION,  # enforce HTTPS-only CSRF tokens in production
     SQLALCHEMY_DATABASE_URI=(
         _raw_db_url if _raw_db_url else f"sqlite:///{DATA_DIR / 'app.db'}"
     ),
