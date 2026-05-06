@@ -1,56 +1,59 @@
-"""Extensions package: new feature blueprints layered on top of the legacy
-monolithic ``app.py``.
+"""Extensions package: new feature blueprints layered on top of the core app.
 
-This package is the seam where we are gradually decomposing the monolith.
+This package is the seam where we gradually decompose the monolith.
 New features live here in small, focused modules and are wired into the
-Flask app via :func:`register_extensions`.
+Flask app via :func:`init_extensions`.
 """
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:  # pragma: no cover
+if TYPE_CHECKING:
     from flask import Flask
 
 
-def register_extensions(app: "Flask") -> None:
+def init_extensions(app: "Flask") -> None:
     """Register every extension blueprint and ensure new tables exist."""
-    # Local imports keep startup fast and avoid circular imports with app.py.
-    from . import models  # noqa: F401  (registers SQLAlchemy models)
-    from . import mt_models  # noqa: F401  (multi-tenant models: Invitation, AuditLog)
-    from .service_calls_bp import bp as service_calls_bp
-    from .sales_dashboard_bp import bp as sales_dashboard_bp
-    from .menu_engineering_bp import bp as menu_engineering_bp
-    from .ltv_bp import bp as ltv_bp
-    from .employees_bp import bp as employees_bp
-    from .superadmin_extras_bp import bp as superadmin_extras_bp
-    from .customers_bp import bp as customers_bp
-    from .push_bp import bp as push_bp
-    from .multi_tenant_bp import bp as multi_tenant_bp
-    from .tables_overview_bp import bp as tables_overview_bp
-    from .exports_bp import bp as exports_bp
+    # Local imports keep startup fast and avoid circular imports.
+    try:
+        from . import models as _models  # noqa: F401  (migrated → app.models)
+    except ImportError:
+        pass
+    try:
+        from . import mt_models as _mt_models  # noqa: F401  (migrated → app.models.auth / staff)
+    except ImportError:
+        pass
 
-    for bp in (
-        service_calls_bp,
-        sales_dashboard_bp,
-        menu_engineering_bp,
-        ltv_bp,
-        employees_bp,
-        superadmin_extras_bp,
-        customers_bp,
-        push_bp,
-        multi_tenant_bp,
-        tables_overview_bp,
-        exports_bp,
-    ):
-        if bp.name not in app.blueprints:
-            app.register_blueprint(bp)
+    blueprints_to_try = [
+        ("service_calls_bp", "bp"),
+        ("sales_dashboard_bp", "bp"),
+        ("menu_engineering_bp", "bp"),
+        ("ltv_bp", "bp"),
+        ("employees_bp", "bp"),
+        ("superadmin_extras_bp", "bp"),
+        ("customers_bp", "bp"),
+        ("push_bp", "bp"),
+        ("multi_tenant_bp", "bp"),
+        ("tables_overview_bp", "bp"),
+        ("exports_bp", "bp"),
+    ]
+    for module_name, bp_attr in blueprints_to_try:
+        try:
+            mod = __import__(f"extensions.{module_name}", fromlist=[bp_attr])
+            bp = getattr(mod, bp_attr)
+            if bp.name not in app.blueprints:
+                app.register_blueprint(bp)
+        except (ImportError, AttributeError, Exception) as exc:
+            app.logger.warning("extensions: failed to register %s: %s", module_name, exc)
 
-    # Ensure the new tables exist even if the operator hasn't run alembic yet.
-    # This is safe: ``create_all`` is idempotent and only creates missing tables.
-    from app import db  # local import to avoid circular import at module load
+    # Ensure the new tables exist even if alembic hasn't run yet.
+    from app.extensions import db
     try:
         with app.app_context():
             db.create_all()
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:
         app.logger.warning("extensions: deferred create_all failed: %s", exc)
+
+
+# Backward compat alias
+register_extensions = init_extensions
