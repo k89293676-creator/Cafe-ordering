@@ -226,7 +226,17 @@ def owners():
     store = _store()
     all_owners = store.load_owners()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    return render_template("admin/owners.html", owners=all_owners, now=now)
+    # Pop one-time temp password placed by reset_password() — shown once then gone.
+    from flask import session as _sess
+    tmp_pw       = _sess.pop("_reset_tmp_pw", None)
+    tmp_pw_owner = _sess.pop("_reset_tmp_owner", None)
+    return render_template(
+        "admin/owners.html",
+        owners=all_owners,
+        now=now,
+        tmp_pw=tmp_pw,
+        tmp_pw_owner=tmp_pw_owner,
+    )
 
 
 @admin_bp.route("/owners/<int:owner_id>/reset", methods=["POST"])
@@ -242,7 +252,17 @@ def reset_password(owner_id: int):
     owner.password_hash = new_hash
     db.session.commit()
     revoke_all_tokens_for_owner(owner_id)
-    flash(f"Password for <strong>{owner.username}</strong> reset. Temp: <code>{tmp_password}</code>", "password_reset")
+    # Store the temp password in the session for a one-time display.
+    # Never put plaintext credentials in a flash message — flash messages
+    # are rendered directly into HTML (cached by browsers, logged by proxies).
+    from flask import session as _sess
+    _sess["_reset_tmp_pw"] = tmp_password
+    _sess["_reset_tmp_owner"] = owner.username
+    flash(
+        f"Password for <strong>{owner.username}</strong> has been reset. "
+        "Copy the temporary password from the secure panel below — it will not be shown again.",
+        "password_reset",
+    )
     return redirect(url_for("admin.owners"))
 
 
