@@ -43,7 +43,10 @@ services:
     environment:
       POSTGRES_DB: cafe_ordering
       POSTGRES_USER: cafe
-      POSTGRES_PASSWORD: cafe
+      # DEV-ONLY default — override in production via .env or Docker secrets.
+      # Never commit a real password here. Set POSTGRES_PASSWORD in your
+      # deployment environment and reference it as: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cafe}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:

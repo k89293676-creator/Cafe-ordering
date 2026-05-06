@@ -22,11 +22,19 @@ to older tags.
 ## Hardening already in place
 
 - CSRF protection on every form (`Flask-WTF`).
-- Strict Content-Security-Policy + clickjacking + MIME-sniffing headers
-  (`Flask-Talisman` + custom `after_request` hardening).
-- Per-IP login lockout (15 min after 5 failed attempts).
-- Per-route rate limits (`Flask-Limiter`).
+- Strict Content-Security-Policy + clickjacking + MIME-sniffing headers via
+  custom `after_request` hardening (X-Frame-Options, X-Content-Type-Options,
+  Referrer-Policy, Permissions-Policy, COEP, CORP, HSTS in production).
+- Per-IP login lockout (15 min after 10 failed attempts, in-memory + Redis).
+- Per-route rate limits (`Flask-Limiter` backed by Redis).
 - Bcrypt password hashing with `Flask-Bcrypt`.
+- **Timing-attack prevention**: all admin key and token hash comparisons use
+  `hmac.compare_digest` — never the `==` operator.
+- **SQL identifier allowlist**: `app/utils/db_init.py` validates every table
+  name against an explicit frozenset and every column name against a strict
+  `^[a-zA-Z_][a-zA-Z0-9_]{0,63}$` regex before interpolating into raw SQL.
+- **Debug mode double-guard**: `wsgi.py` requires both `FLASK_ENV=development`
+  *and* the absence of `IS_PRODUCTION=1` before enabling Flask debug mode.
 - Optional TOTP (RFC 6238) two-factor authentication on owner accounts.
 - Session cookies marked `HttpOnly`, `SameSite=Lax`, and `Secure` in
   production.

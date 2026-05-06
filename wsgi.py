@@ -15,5 +15,9 @@ from app import app  # noqa: F401  (re-exported for gunicorn / waitress)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
-    debug = os.environ.get("FLASK_ENV") == "development"
+    # Enable debug only when explicitly in development mode AND not in production.
+    # IS_PRODUCTION is the authoritative flag; FLASK_ENV is a secondary hint.
+    is_production = os.environ.get("IS_PRODUCTION", "").lower() in {"1", "true", "yes"}
+    flask_dev = os.environ.get("FLASK_ENV", "") == "development"
+    debug = flask_dev and not is_production
     app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=False)

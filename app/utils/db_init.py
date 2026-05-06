@@ -12,11 +12,53 @@ from datetime import datetime, timezone
 
 log = logging.getLogger("cafe.db_init")
 
+# ── Allowlists — protect against identifier injection ─────────────────────────
+# All values passed to _add_column_if_missing come from internal call-sites
+# only, never from user input.  These allowlists act as a defence-in-depth
+# belt-and-suspenders guard so that future callers cannot accidentally pass
+# externally sourced strings into raw SQL.
+
+_ALLOWED_TABLES: frozenset[str] = frozenset({
+    "orders", "owners", "settings", "cafes", "cafe_tables",
+    "menus", "ingredients", "customers", "employees",
+    "feedback", "table_calls", "order_employee_assignments",
+    "remember_tokens", "owner_leads", "owner_invitations",
+    "billing_logs", "cash_drawer_counts", "payment_credentials",
+    "webhook_events", "audit_log", "online_payments",
+    "aggregator_credentials", "aggregator_orders", "system_flags",
+})
+
+# Column names and type fragments must be plain identifiers + limited SQL keywords.
+_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
+_COLTYPE_RE    = re.compile(
+    r"^[A-Z][A-Z0-9_ ,()]{0,80}$",
+    re.IGNORECASE,
+)
+
+
+def _safe_identifier(name: str, kind: str) -> str:
+    """Raise ValueError if *name* fails the identifier allowlist check."""
+    if not _IDENTIFIER_RE.match(name):
+        raise ValueError(f"Unsafe SQL identifier for {kind}: {name!r}")
+    return name
+
+
 # ── Schema helpers ────────────────────────────────────────────────────────────
 
 def _add_column_if_missing(conn, table: str, column: str, col_type: str) -> None:
-    """Idempotently add a column to an existing table (SQLite & Postgres)."""
+    """Idempotently add a column to an existing table (SQLite & Postgres).
+
+    All three parameters are validated against strict allowlists before
+    being interpolated into the SQL string.
+    """
     from sqlalchemy import text
+
+    if table not in _ALLOWED_TABLES:
+        raise ValueError(f"Table not in allowlist: {table!r}")
+    _safe_identifier(column, "column")
+    if not _COLTYPE_RE.match(col_type):
+        raise ValueError(f"Unsafe column type: {col_type!r}")
+
     try:
         conn.execute(text(f"SELECT {column} FROM {table} LIMIT 0"))
     except Exception:

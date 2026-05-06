@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -193,8 +194,10 @@ def generate_admin_key_for_owner(owner_id: int, username: str = "") -> str:
 
 def find_admin_key_owner(plaintext: str) -> int | None:
     key_hash = hashlib.sha256(plaintext.encode()).hexdigest()
+    # Use hmac.compare_digest for all hash comparisons to prevent timing attacks.
     for k in _load_admin_keys_from_db():
-        if k.get("keyHash") == key_hash:
+        stored = k.get("keyHash") or ""
+        if hmac.compare_digest(stored.encode(), key_hash.encode()):
             return k.get("ownerId")
     return None
 
@@ -202,7 +205,7 @@ def find_admin_key_owner(plaintext: str) -> int | None:
 def consume_admin_key(plaintext: str) -> int | None:
     key_hash = hashlib.sha256(plaintext.encode()).hexdigest()
     keys = _load_admin_keys_from_db()
-    matched = next((k for k in keys if k.get("keyHash") == key_hash), None)
+    matched = next((k for k in keys if hmac.compare_digest((k.get("keyHash") or "").encode(), key_hash.encode())), None)
     if not matched:
         return None
     new_keys = [k for k in keys if k.get("keyHash") != key_hash]
