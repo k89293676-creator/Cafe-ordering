@@ -113,13 +113,19 @@ def create_app(test_config: dict | None = None) -> Flask:
     login_manager.login_message_category = "warning"
     login_manager.init_app(app)
 
-    # ── Talisman (HTTPS/HSTS enforcement) ─────────────────────────────────────
+    # ── Talisman (security headers) ────────────────────────────────────────────
+    # force_https is intentionally False: Railway (and most PaaS) terminate
+    # TLS at the edge and forward requests to the container over plain HTTP.
+    # If force_https=True, Talisman issues a 301 redirect on every plain-HTTP
+    # request — including Railway's own internal health-check probe — causing
+    # the health check to fail permanently.  HSTS headers are still sent so
+    # browsers enforce HTTPS on subsequent user-facing requests.
     if _cfg.IS_PRODUCTION:
         try:
             from flask_talisman import Talisman
             Talisman(
                 app,
-                force_https=True,
+                force_https=False,
                 strict_transport_security=True,
                 strict_transport_security_max_age=31536000,
                 strict_transport_security_include_subdomains=True,
@@ -131,9 +137,9 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "microphone": "'none'",
                 },
             )
-            log.info("Talisman security headers enabled")
+            log.info("Talisman security headers enabled (force_https=False; TLS terminated at edge)")
         except ImportError:
-            log.warning("Flask-Talisman not installed; HTTPS enforcement disabled")
+            log.warning("Flask-Talisman not installed; security headers disabled")
 
     @login_manager.user_loader
     def load_user(user_id: str):

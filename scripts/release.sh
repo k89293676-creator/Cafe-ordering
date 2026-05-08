@@ -63,9 +63,14 @@ else
 fi
 
 # Catch any model additions that don't yet have a migration. Idempotent.
+# Non-fatal: if the CLI command isn't registered (older deploy) the script
+# continues instead of aborting the entire deploy under set -euo pipefail.
 echo "[release] Running flask sync-schema (idempotent CREATE/ADD COLUMN safety net)…"
-flask sync-schema
-echo "[release] Schema sync complete."
+if flask sync-schema; then
+  echo "[release] Schema sync complete."
+else
+  echo "[release] WARN: flask sync-schema unavailable or failed — skipping (non-fatal)." >&2
+fi
 
 # Log the active revision for audit trails.
 CURRENT_REV="$(flask db current 2>/dev/null | tail -n 1 || true)"

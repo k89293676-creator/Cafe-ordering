@@ -54,8 +54,9 @@ def readiness_check():
         checks["database"] = {"ok": False, "error": str(exc)[:200]}
 
     try:
-        db.session.execute(text("SELECT 1 FROM payment_provider_credentials LIMIT 0"))
-        db.session.execute(text("SELECT 1 FROM webhook_event_logs LIMIT 0"))
+        db.session.execute(text("SELECT 1 FROM payment_credentials LIMIT 0"))
+        db.session.execute(text("SELECT 1 FROM webhook_events LIMIT 0"))
+        db.session.execute(text("SELECT 1 FROM aggregator_credentials LIMIT 0"))
         checks["schema"] = {"ok": True}
     except Exception as exc:
         checks["schema"] = {"ok": False, "error": str(exc)[:200], "hint": "run flask db upgrade"}
