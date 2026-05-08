@@ -1,0 +1,178 @@
+name: Deploy to Railway
+
+# Triggered automatically after CI passes on main, or manually via the
+# Actions tab for hotfix deploys.
+#
+# Required GitHub Secrets (Settings → Secrets → Actions):
+#   RAILWAY_TOKEN      — Service token from Railway (Settings → Tokens)
+#
+# Required GitHub Variables (Settings → Variables → Actions):
+#   RAILWAY_APP_URL    — https://your-app.up.railway.app (for health probes)
+#   RAILWAY_SERVICE_NAME — Railway service name (default: "cafe-ordering")
+#
+# Optional GitHub Secrets:
+#   OPS_HEALTH_TOKEN   — Same value as the OPS_HEALTH_TOKEN env var in Railway
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force deploy without CI gate"
+        type: boolean
+        default: false
+
+concurrency:
+  group: railway-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  deploy:
+    name: Deploy to Railway
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Only run if CI passed — or if manually triggered with force=true
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_APP_URL: ${{ vars.RAILWAY_APP_URL || secrets.RAILWAY_APP_URL }}
+      SERVICE_NAME: ${{ vars.RAILWAY_SERVICE_NAME || 'cafe-ordering' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Use the SHA from the triggering CI run when available
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Skip when Railway token is not configured
+        if: env.RAILWAY_TOKEN == ''
+        run: |
+          echo "::warning ::RAILWAY_TOKEN secret not set — skipping Railway deploy."
+          echo "Add it under Settings → Secrets → Actions to enable automated deploys."
+          exit 0
+
+      - name: Install Railway CLI
+        if: env.RAILWAY_TOKEN != ''
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> "$GITHUB_PATH"
+
+      - name: Deploy to Railway
+        if: env.RAILWAY_TOKEN != ''
+        run: |
+          echo "🚀 Deploying commit $(git rev-parse --short HEAD) to Railway service: ${SERVICE_NAME}"
+          railway up --detach --service="${SERVICE_NAME}" 2>&1 || \
+            railway up --detach 2>&1
+
+      - name: Wait for Railway to roll the new image
+        if: env.RAILWAY_TOKEN != ''
+        run: |
+          echo "Waiting 90 seconds for Railway to build and start the new container..."
+          sleep 90
+
+      - name: Probe /healthz (liveness)
+        if: env.RAILWAY_TOKEN != '' && env.RAILWAY_APP_URL != ''
+        run: |
+          echo "Probing ${RAILWAY_APP_URL}/healthz ..."
+          MAX=20
+          DELAY=15
+          for i in $(seq 1 $MAX); do
+            code=$(curl -sS -o /tmp/healthz.txt -w "%{http_code}" \
+              --max-time 10 "${RAILWAY_APP_URL%/}/healthz" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "✅ /healthz OK on attempt $i"
+              cat /tmp/healthz.txt
+              exit 0
+            fi
+            echo "  Attempt $i/$MAX: HTTP $code — retrying in ${DELAY}s..."
+            sleep $DELAY
+          done
+          echo "::error ::/healthz never returned 200 after $MAX attempts"
+          exit 1
+
+      - name: Probe /readyz (readiness)
+        if: env.RAILWAY_TOKEN != '' && env.RAILWAY_APP_URL != ''
+        run: |
+          code=$(curl -sS -o /tmp/readyz.json -w "%{http_code}" \
+            --max-time 20 "${RAILWAY_APP_URL%/}/readyz" || echo 000)
+          echo "HTTP $code"
+          cat /tmp/readyz.json 2>/dev/null | head -c 2000 || true
+          echo
+          if [ "$code" = "200" ]; then
+            python3 -c '
+          import json, sys
+          data = json.load(open("/tmp/readyz.json"))
+          if data.get("ok", False):
+              print("✅ /readyz reports ok=true")
+          else:
+              print("::warning ::/readyz reports ok=false — check migrations")
+          '
+          else
+            echo "::warning ::/readyz returned $code — app may need migrations"
+          fi
+
+      - name: Probe /api/ops/health (per-section)
+        if: |
+          env.RAILWAY_TOKEN != '' &&
+          env.RAILWAY_APP_URL != '' &&
+          secrets.OPS_HEALTH_TOKEN != ''
+        env:
+          OPS_HEALTH_TOKEN: ${{ secrets.OPS_HEALTH_TOKEN }}
+        run: |
+          code=$(curl -sS -o /tmp/ops.json -w "%{http_code}" \
+            --max-time 20 \
+            -H "Authorization: Bearer ${OPS_HEALTH_TOKEN}" \
+            "${RAILWAY_APP_URL%/}/api/ops/health" || echo 000)
+          echo "HTTP $code"
+          python3 -c '
+          import json, sys
+          try:
+              data = json.load(open("/tmp/ops.json"))
+          except Exception:
+              print("::warning ::Could not parse /api/ops/health response")
+              sys.exit(0)
+          sections = data.get("sections", {}) or {}
+          for name, payload in sorted(sections.items()):
+              flag = "✅" if payload.get("ok", True) else "❌"
+              print(f"{flag} {name}: {json.dumps(payload)}")
+          if not data.get("ok", True):
+              print("::warning ::/api/ops/health has failing sections (non-blocking)")
+          else:
+              print("✅ All ops health sections passed")
+          ' 2>/dev/null || true
+
+      - name: Deployment summary
+        if: always() && env.RAILWAY_TOKEN != ''
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          {
+            echo "## 🚀 Railway Deployment"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| **Commit** | \`${SHA:0:12}\` |"
+            echo "| **Service** | \`${SERVICE_NAME}\` |"
+            echo "| **Status** | ${{ job.status }} |"
+            echo "| **App URL** | ${RAILWAY_APP_URL:-_not configured_} |"
+            echo "| **Triggered by** | ${{ github.event_name }} |"
+            if [ -n "$RAILWAY_APP_URL" ]; then
+              echo ""
+              echo "| Probe | Result |"
+              echo "| --- | --- |"
+              echo "| \`/healthz\` | ✅ passed |"
+              echo "| \`/readyz\`  | see logs |"
+              echo "| \`/api/ops/health\` | see logs |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

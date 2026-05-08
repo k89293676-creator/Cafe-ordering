@@ -66,20 +66,39 @@ def _admin_key() -> str:
     return os.environ.get("ADMIN_SECRET_KEY", "")
 
 
+def _find_admin_key_owner(key: str) -> int | None:
+    """Find owner_id for given admin key via auth service."""
+    try:
+        from app.services.auth import find_admin_key_owner
+        return find_admin_key_owner(key)
+    except Exception:
+        return None
+
+
+def _load_admin_keys() -> list:
+    """Load all admin keys via auth service."""
+    try:
+        from app.services.auth import _load_admin_keys_from_db
+        return _load_admin_keys_from_db()
+    except Exception:
+        return []
+
+
 def _key_match(key: str) -> tuple[bool, int | None]:
     """Return (matched, owner_id). owner_id is None for legacy env-based key."""
     if not key:
         return (False, None)
+
+    # Check environment variable key first
     secret = _admin_key()
     if secret and secrets.compare_digest(secret, key):
         return (True, None)
-    try:
-        store = _store()
-        owner_id = store.find_admin_key_owner(key)
-        if owner_id is not None:
-            return (True, owner_id)
-    except Exception:
-        pass
+
+    # Check stored admin keys
+    owner_id = _find_admin_key_owner(key)
+    if owner_id is not None:
+        return (True, owner_id)
+
     return (False, None)
 
 
@@ -89,12 +108,10 @@ def _key_valid(key: str) -> bool:
 
 
 def _has_any_admin_key() -> bool:
+    """Check if any admin key exists (env or stored)."""
     if _admin_key():
         return True
-    try:
-        return bool(_store().load_admin_keys())
-    except Exception:
-        return False
+    return bool(_load_admin_keys())
 
 
 def _logged_in_superadmin():

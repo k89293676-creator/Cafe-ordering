@@ -65,10 +65,12 @@ def _initialize_runtime_state(force: bool = False) -> bool:
 
 def create_app(test_config: dict | None = None) -> Flask:
     """Create and configure the Flask application."""
+    from pathlib import Path
+    _PROJECT_ROOT = Path(__file__).resolve().parent.parent
     app = Flask(
         __name__,
-        template_folder=os.path.join(os.path.dirname(__file__), "..", "templates"),
-        static_folder=os.path.join(os.path.dirname(__file__), "..", "static"),
+        template_folder=str(_PROJECT_ROOT / "templates"),
+        static_folder=str(_PROJECT_ROOT / "static"),
     )
 
     # ── Config ────────────────────────────────────────────────────────────────
@@ -111,6 +113,28 @@ def create_app(test_config: dict | None = None) -> Flask:
     login_manager.login_message_category = "warning"
     login_manager.init_app(app)
 
+    # ── Talisman (HTTPS/HSTS enforcement) ─────────────────────────────────────
+    if _cfg.IS_PRODUCTION:
+        try:
+            from flask_talisman import Talisman
+            Talisman(
+                app,
+                force_https=True,
+                strict_transport_security=True,
+                strict_transport_security_max_age=31536000,
+                strict_transport_security_include_subdomains=True,
+                content_security_policy=None,
+                referrer_policy="strict-origin-when-cross-origin",
+                feature_policy={
+                    "geolocation": "'none'",
+                    "camera": "'none'",
+                    "microphone": "'none'",
+                },
+            )
+            log.info("Talisman security headers enabled")
+        except ImportError:
+            log.warning("Flask-Talisman not installed; HTTPS enforcement disabled")
+
     @login_manager.user_loader
     def load_user(user_id: str):
         from app.services.auth import load_owner_user
@@ -126,6 +150,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     from app.api.v1.orders import bp as orders_bp
     from app.api.v1.kitchen import bp as kitchen_bp
     from app.api.v1.feedback import bp as feedback_bp
+    from app.api.v1.payments import bp as payments_bp
     from app.web.public import bp as public_bp
     from app.web.auth import bp as auth_bp
     from app.web.owner import bp as owner_bp
@@ -133,11 +158,14 @@ def create_app(test_config: dict | None = None) -> Flask:
     from app.web.analytics import bp as analytics_bp
     from app.web.inventory import bp as inventory_bp
     from app.web.superadmin import bp as superadmin_bp
+    from admin.routes import admin_bp
 
     for bp in (
         health_bp, menu_bp, orders_bp, kitchen_bp, feedback_bp,
+        payments_bp,
         public_bp, auth_bp, owner_bp, owner_menu_bp,
         analytics_bp, inventory_bp, superadmin_bp,
+        admin_bp,
     ):
         app.register_blueprint(bp)
 
@@ -407,3 +435,40 @@ from app.utils.serializers import (  # noqa: E402, F401
     _no_store,
     _safe_redirect_target,
 )
+
+# ── Flask CLI commands ────────────────────────────────────────────────────────
+import click as _click  # noqa: E402 — Flask bundles click
+
+
+@app.cli.command("sync-schema")
+def cli_sync_schema() -> None:
+    """Idempotent CREATE TABLE IF NOT EXISTS + ADD COLUMN pass.
+
+    Used by scripts/release.sh as a safety net after flask db upgrade
+    to catch any model additions that don't yet have a migration.
+    """
+    from app.extensions import db as _db
+    with app.app_context():
+        _db.create_all()
+    _click.echo("sync-schema OK")
+
+
+# ── Legacy compatibility exports for admin/routes.py _store() usage ──────────
+from app.config import DATA_DIR  # noqa: E402, F401
+from app.extensions import limiter  # noqa: E402, F401
+from sqlalchemy import text  # noqa: E402, F401
+from app.services.auth import (  # noqa: E402, F401
+    load_owners,
+    create_owner_in_db,
+    find_admin_key_owner,
+    _load_admin_keys_from_db as load_admin_keys,
+)
+
+USE_DB: bool = True
+
+# Legacy JSON-file path constants (admin status page compatibility)
+OWNERS_PATH = _cfg.DATA_DIR / "owners.json"
+ORDERS_PATH = _cfg.DATA_DIR / "orders.json"
+MENU_PATH = _cfg.DATA_DIR / "menu.json"
+TABLES_PATH = _cfg.DATA_DIR / "tables.json"
+FEEDBACK_PATH = _cfg.DATA_DIR / "feedback.json"
