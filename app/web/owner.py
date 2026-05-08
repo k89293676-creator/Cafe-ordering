@@ -1,9 +1,11 @@
 """Owner dashboard and profile routes."""
 from __future__ import annotations
 
+import datetime as _dt
 import re
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from sqlalchemy import func as _sqla_func
 
 from app.extensions import db, limiter
 from app.services.auth import logged_in_owner_id, logged_in_owner_obj
@@ -11,35 +13,174 @@ from app.services.tables import load_owner_tables, load_settings
 from app.services.menu import load_owner_menu
 from app.services.orders import load_orders
 from app.utils.security import login_required, log_security, _client_ip
-from app.utils.serializers import _safe_text
+from app.utils.serializers import _safe_text, _feedback_dict
 
 bp = Blueprint("web_owner", __name__)
+
+_COMPLETED_STATUSES = ("served", "completed", "closed", "paid")
 
 
 @bp.route("/owner/dashboard")
 @login_required
 def owner_dashboard():
+    from app.models import Feedback, Ingredient, Menu, Order
+    from app.models.billing import PaymentProviderCredential, WebhookEventLog
+
     owner_id = logged_in_owner_id()
     owner = logged_in_owner_obj()
     tables = load_owner_tables(owner_id)
     settings = load_settings(owner_id)
     recent_orders = load_orders(owner_id=owner_id, limit=50)
-    pending_count = sum(1 for o in recent_orders if o["status"] == "pending")
+
+    pending_orders = [o for o in recent_orders if o["status"] == "pending"]
     preparing_count = sum(1 for o in recent_orders if o["status"] == "preparing")
     revenue_today = sum(
         o["total"] for o in recent_orders
-        if o.get("createdAt", "").startswith(__import__("datetime").date.today().isoformat())
+        if o.get("createdAt", "").startswith(_dt.date.today().isoformat())
         and o["status"] not in ("cancelled", "voided")
     )
+
+    # All-time completed-order stats
+    total_completed: int = db.session.query(Order).filter(
+        Order.owner_id == owner_id,
+        Order.status.in_(_COMPLETED_STATUSES),
+    ).count()
+    total_revenue: float = float(
+        db.session.query(
+            _sqla_func.coalesce(_sqla_func.sum(Order.total), 0)
+        ).filter(
+            Order.owner_id == owner_id,
+            Order.status.in_(_COMPLETED_STATUSES),
+        ).scalar() or 0
+    )
+
+    # Menu item count
+    _menu = db.session.get(Menu, owner_id)
+    _categories = (_menu.data or {}).get("categories", []) if _menu else []
+    total_items: int = sum(len(cat.get("items", [])) for cat in _categories)
+
+    # Feedback
+    _feedbacks = (
+        Feedback.query.filter_by(owner_id=owner_id)
+        .order_by(Feedback.id.desc())
+        .limit(20)
+        .all()
+    )
+    owner_feedback = [_feedback_dict(f) for f in _feedbacks]
+    total_feedback: int = Feedback.query.filter_by(owner_id=owner_id).count()
+    avg_rating: float = (
+        round(sum(f["rating"] for f in owner_feedback) / len(owner_feedback), 1)
+        if owner_feedback else 0
+    )
+
+    # Low-stock ingredients
+    low_stock_alerts = Ingredient.query.filter(
+        Ingredient.owner_id == owner_id,
+        Ingredient.stock <= Ingredient.low_stock_threshold,
+    ).all()
+
+    # Integration health (payments + aggregators)
+    try:
+        _pcreds = PaymentProviderCredential.query.filter_by(owner_id=owner_id).all()
+    except Exception:
+        _pcreds = []
+    try:
+        from app.models.aggregator import AggregatorPlatformCredential
+        _acreds = AggregatorPlatformCredential.query.filter_by(owner_id=owner_id).all()
+    except Exception:
+        _acreds = []
+
+    _int_items = []
+    for _c in _pcreds:
+        _mode = getattr(_c, "mode", "test") or "test"
+        _active = bool(_c.is_active)
+        _state = (
+            "live" if (_active and _mode == "live") else
+            "ready" if (_active and _mode == "test") else
+            "disabled"
+        )
+        _int_items.append({
+            "display_name": _c.display_name or _c.provider.title(),
+            "label": _c.provider.title(),
+            "mode": _mode,
+            "state": _state,
+            "last_test_message": _c.last_test_message or "",
+            "test_url": "#",
+            "manage_url": "#",
+        })
+
+    integration_health = {
+        "configured": len(_pcreds) + len(_acreds),
+        "payments_configured": len(_pcreds),
+        "payments_live": sum(1 for c in _pcreds if c.is_active and getattr(c, "mode", "") == "live"),
+        "aggregators_configured": len(_acreds),
+        "aggregators_live": sum(1 for c in _acreds if getattr(c, "is_active", True)),
+        "counts": {
+            "live":       sum(1 for c in _pcreds if c.is_active and getattr(c, "mode", "") == "live"),
+            "ready":      sum(1 for c in _pcreds if c.is_active and getattr(c, "mode", "") == "test"),
+            "unverified": sum(1 for c in _pcreds if not getattr(c, "last_tested_at", None)),
+            "failing":    sum(1 for c in _pcreds if getattr(c, "last_test_status", "") == "fail"),
+        },
+        "items": _int_items,
+    }
+
+    # Recent webhook activity
+    try:
+        _recent_wh = (
+            WebhookEventLog.query.order_by(WebhookEventLog.id.desc()).limit(10).all()
+        )
+        _wh_24h = WebhookEventLog.query.filter(
+            WebhookEventLog.received_at
+            >= _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=24)
+        ).count()
+        webhook_activity = {
+            "counts": {"total_24h": _wh_24h},
+            "items": [
+                {
+                    "received_at": w.received_at,
+                    "label": f"{w.provider}: {w.event_type or 'event'}",
+                    "intent_id": w.intent_id or "",
+                    "is_signature_failure": False,
+                }
+                for w in _recent_wh
+            ],
+        }
+    except Exception:
+        webhook_activity = {"counts": {"total_24h": 0}, "items": []}
+
+    # Impersonation state
+    is_impersonating = False
+    impersonator_username = ""
+    try:
+        from extensions.multi_tenant_bp import is_impersonating as _is_imp
+        from flask import session as _sess
+        is_impersonating = bool(_is_imp())
+        impersonator_username = _sess.get("impersonator_username", "")
+    except Exception:
+        pass
+
     return render_template(
         "owner_dashboard.html",
         owner=owner,
         tables=tables,
         settings=settings,
         recent_orders=recent_orders,
-        pending_count=pending_count,
+        pending_orders=pending_orders,
+        pending_count=len(pending_orders),
         preparing_count=preparing_count,
         revenue_today=revenue_today,
+        total_completed=total_completed,
+        total_revenue=total_revenue,
+        total_items=total_items,
+        owner_feedback=owner_feedback,
+        total_feedback=total_feedback,
+        avg_rating=avg_rating,
+        low_stock_alerts=low_stock_alerts,
+        integration_health=integration_health,
+        webhook_activity=webhook_activity,
+        is_impersonating=is_impersonating,
+        impersonator_username=impersonator_username,
+        owner_username=owner.username if owner else "",
     )
 
 

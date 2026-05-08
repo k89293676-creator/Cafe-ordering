@@ -190,6 +190,52 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     app.jinja_env.globals["cdn_url"] = cdn_url
 
+    # ── Safe url_for: legacy endpoint-name aliases + graceful BuildError ──────
+    # The template was written against the original monolith where all routes
+    # had flat names.  After decomposition, endpoints are prefixed with their
+    # blueprint name (e.g. kitchen_view → web_owner.kitchen).  A safe wrapper
+    # (a) resolves the old names to the new ones and (b) returns '#' for any
+    # endpoint that has not been migrated yet so template rendering never 500s.
+    _ENDPOINT_ALIASES: dict[str, str] = {
+        # ── Web owner blueprint ───────────────────────────────────────────
+        "kitchen_view":                   "web_owner.kitchen",
+        "owner_profile":                  "web_owner.owner_profile",
+        "create_table":                   "web_owner.owner_add_table",
+        "delete_table":                   "web_owner.owner_delete_table",
+        "rename_table":                   "web_owner.owner_rename_table",
+        # ── Web auth blueprint ────────────────────────────────────────────
+        "owner_logout":                   "web_auth.owner_logout",
+        "owner_login":                    "web_auth.owner_login",
+        # ── Web analytics blueprint ───────────────────────────────────────
+        "owner_analytics":                "web_analytics.owner_analytics",
+        "export_orders_csv":              "web_analytics.export_orders_csv",
+        # ── Web inventory blueprint ───────────────────────────────────────
+        "inventory_view":                 "web_inventory.owner_inventory",
+        # ── Web superadmin blueprint ──────────────────────────────────────
+        "superadmin_dashboard":           "web_superadmin.superadmin_dashboard",
+        # ── Web owner_menu blueprint ──────────────────────────────────────
+        "create_menu_category":           "web_owner_menu.owner_add_category",
+        "delete_menu_category":           "web_owner_menu.owner_delete_category",
+        "delete_menu_item":               "web_owner_menu.owner_delete_item",
+        "toggle_menu_item_availability":  "web_owner_menu.owner_toggle_item",
+        # ── Extension blueprints ──────────────────────────────────────────
+        "tables_overview_view":           "tables_overview.view",
+    }
+
+    from werkzeug.routing import BuildError as _BuildError
+
+    def _safe_url_for(endpoint: str, **values):  # type: ignore[override]
+        """url_for() that resolves legacy monolith endpoint names and returns
+        '#' instead of raising BuildError for not-yet-migrated endpoints."""
+        from flask import url_for as _uf
+        resolved = _ENDPOINT_ALIASES.get(endpoint, endpoint)
+        try:
+            return _uf(resolved, **values)
+        except _BuildError:
+            return "#"
+
+    app.jinja_env.globals["url_for"] = _safe_url_for
+
     # ── External blueprints (existing extensions/) ────────────────────────────
     try:
         from extensions import init_extensions

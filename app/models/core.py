@@ -48,6 +48,15 @@ class Owner(db.Model):
     def get_id(self) -> str:
         return str(self.id)
 
+    # ── camelCase aliases used by Jinja2 templates ────────────────────────
+    @property
+    def cafeName(self) -> str:  # noqa: N802
+        return self.cafe_name or ""
+
+    @property
+    def isSuperadmin(self) -> bool:  # noqa: N802
+        return bool(self.is_superadmin)
+
 
 class CafeTable(db.Model):
     __tablename__ = "cafe_tables"
