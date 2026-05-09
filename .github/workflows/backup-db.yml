@@ -60,7 +60,7 @@ jobs:
 
       - name: Checkout
         if: env.DATABASE_URL != '' && env.BACKUP_GPG_PASSPHRASE != ''
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install pg_dump (matching client version)
         if: env.DATABASE_URL != '' && env.BACKUP_GPG_PASSPHRASE != ''
