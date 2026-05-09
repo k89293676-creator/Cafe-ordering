@@ -256,6 +256,7 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     from app.api.v1.kitchen import bp as kitchen_bp
     from app.api.v1.feedback import bp as feedback_bp
     from app.api.v1.payments import bp as payments_bp
+    from app.api.v1.webhooks import bp as webhooks_bp
     from app.web.public import bp as public_bp
     from app.web.auth import bp as auth_bp
     from app.web.owner import bp as owner_bp
@@ -267,7 +268,7 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
 
     for bp in (
         health_bp, menu_bp, orders_bp, kitchen_bp, feedback_bp,
-        payments_bp,
+        payments_bp, webhooks_bp,
         public_bp, auth_bp, owner_bp, owner_menu_bp,
         analytics_bp, inventory_bp, superadmin_bp,
         admin_bp,
@@ -347,7 +348,7 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     # ── CSRF exempt for API routes ────────────────────────────────────────────
     try:
         from flask_wtf.csrf import CSRFProtect
-        for bp in (health_bp, menu_bp, orders_bp, kitchen_bp, feedback_bp):
+        for bp in (health_bp, menu_bp, orders_bp, kitchen_bp, feedback_bp, webhooks_bp):
             csrf.exempt(bp)
     except Exception:
         pass

@@ -1,4 +1,9 @@
-"""Billing-domain models: BillingLog, CashDrawerCount, PaymentProviderCredential, WebhookEventLog."""
+"""Billing-domain models: BillingLog, CashDrawerCount, PaymentProviderCredential, WebhookEventLog.
+
+Enhancement applied:
+  WebhookEventLog — added retry/status columns (status, attempts, next_attempt_at,
+  last_error, payload) to match migration 007 and the webhook retry worker schema.
+"""
 from __future__ import annotations
 
 from app.extensions import db
@@ -63,16 +68,30 @@ class PaymentProviderCredential(db.Model):
     verified_at = db.Column(db.DateTime(timezone=True))
     verified_fingerprint = db.Column(db.Text, default="")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
-    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), onupdate=db.func.now())
+    updated_at = db.Column(
+        db.DateTime(timezone=True),
+        server_default=db.func.now(),
+        onupdate=db.func.now(),
+    )
     __table_args__ = (
         db.UniqueConstraint("owner_id", "provider", name="uq_payment_owner_provider"),
     )
 
 
 class WebhookEventLog(db.Model):
-    """Idempotency table for inbound provider webhooks."""
+    """Idempotency and retry table for inbound provider webhooks.
+
+    Columns added in migration 007:
+      status          — lifecycle state: pending / delivered / failed / dead
+      attempts        — delivery attempt counter
+      next_attempt_at — when the retry worker should next attempt delivery
+      last_error      — last delivery failure message (for operator visibility)
+      payload         — serialised event body for replay without re-fetching
+    """
 
     __tablename__ = "webhook_events"
+
+    # ── Core dedup columns (migration 005) ───────────────────────────────────
     id = db.Column(db.Integer, primary_key=True)
     provider = db.Column(db.Text, nullable=False)
     event_id = db.Column(db.Text, nullable=False)
@@ -80,6 +99,26 @@ class WebhookEventLog(db.Model):
     event_type = db.Column(db.Text, default="")
     received_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     processed = db.Column(db.Boolean, default=False, server_default="false")
+
+    # ── Retry / status columns (migration 007) ───────────────────────────────
+    status = db.Column(
+        db.Text, default="pending", server_default="pending", nullable=False, index=True
+    )
+    attempts = db.Column(db.Integer, default=0, server_default="0", nullable=False)
+    next_attempt_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    last_error = db.Column(db.Text, default="", nullable=True)
+    payload = db.Column(db.JSON, nullable=True)
+
     __table_args__ = (
         db.UniqueConstraint("provider", "event_id", name="uq_webhook_provider_event"),
     )
+
+    # ── Status constants ──────────────────────────────────────────────────────
+    STATUS_PENDING = "pending"
+    STATUS_DELIVERED = "delivered"
+    STATUS_FAILED = "failed"
+    STATUS_DEAD = "dead"
+
+    @property
+    def is_retryable(self) -> bool:
+        return self.status in (self.STATUS_PENDING, self.STATUS_FAILED, self.STATUS_DEAD)
