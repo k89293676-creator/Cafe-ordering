@@ -3,6 +3,12 @@
 All environment-variable reads live here so the rest of the codebase
 imports typed constants instead of sprinkling ``os.environ.get`` calls
 throughout routes and services.
+
+Fixes applied:
+  Bug #4  — Duplicate SLOW_REQUEST_MS definition removed; single source of truth
+              at module level, also exposed through FlaskConfig for app.config reads.
+  Enhancement — SENTRY_DSN / SENTRY_TRACES_SAMPLE_RATE added.
+  Enhancement — SESSION_COOKIE_NAME namespaced to avoid collisions with other apps.
 """
 from __future__ import annotations
 
@@ -32,7 +38,7 @@ APP_VERSION = (
 APP_START_TIME: float = 0.0
 
 
-# ── Database ─────────────────────────────────────────────────────────────────
+# ── Database ──────────────────────────────────────────────────────────────────
 def _coerce_db_url(raw: str) -> str:
     if raw.startswith("postgres://"):
         return raw.replace("postgres://", "postgresql://", 1)
@@ -46,18 +52,9 @@ SQLALCHEMY_DATABASE_URI = (
     _RAW_DB_URL if _RAW_DB_URL else f"sqlite:///{DATA_DIR / 'app.db'}"
 )
 
-# ── DB pool sizing — Issue #2: prevent connection pool exhaustion ─────────────
-# Each gunicorn worker maintains its own pool. With N workers × pool_size
-# connections the total must stay within Postgres's max_connections limit.
-# Defaults: pool_size=5 + max_overflow=5 per worker (was 10+10 — halved to
-# leave headroom when WEB_CONCURRENCY scales up). Override via env.
 _DB_POOL_SIZE = int(os.environ.get("DB_POOL_SIZE", "5"))
 _DB_MAX_OVERFLOW = int(os.environ.get("DB_MAX_OVERFLOW", "5"))
 _DB_POOL_TIMEOUT = int(os.environ.get("DB_POOL_TIMEOUT", "20"))
-
-# ── Issue #4: Query timeout protection ───────────────────────────────────────
-# statement_timeout tells Postgres to cancel any query running longer than N ms.
-# This prevents a single slow query from exhausting the connection pool.
 _DB_STATEMENT_TIMEOUT_MS = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "30000"))
 _DB_CONNECT_TIMEOUT_S = int(os.environ.get("DB_CONNECT_TIMEOUT_S", "10"))
 
@@ -71,7 +68,6 @@ if _RAW_DB_URL:
         "connect_args": {
             "application_name": "cafe-ordering",
             "connect_timeout": _DB_CONNECT_TIMEOUT_S,
-            # Issue #4: enforce query timeout at the Postgres level
             "options": f"-c statement_timeout={_DB_STATEMENT_TIMEOUT_MS}ms",
         },
     }
@@ -79,15 +75,15 @@ else:
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
 
 REDIS_URL: str | None = os.environ.get("REDIS_URL") or None
-
 CDN_URL: str = (os.environ.get("CDN_URL") or "").rstrip("/")
-
 RQ_REDIS_URL: str | None = os.environ.get("RQ_REDIS_URL") or REDIS_URL
 RQ_DEFAULT_TIMEOUT: int = int(os.environ.get("RQ_DEFAULT_TIMEOUT", "300"))
 
 SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET", "")
 TRUSTED_PROXIES = max(1, int(os.environ.get("TRUSTED_PROXIES", "1") or "1"))
-SLOW_REQUEST_MS = int(os.environ.get("SLOW_REQUEST_MS", "1500") or "1500")
+
+# ── Single source of truth for SLOW_REQUEST_MS (Bug #4 fix) ──────────────────
+SLOW_REQUEST_MS: int = int(os.environ.get("SLOW_REQUEST_MS", "1500") or "1500")
 
 MAIL_SERVER = os.environ.get("MAIL_SERVER", "smtp.sendgrid.net")
 MAIL_PORT = int(os.environ.get("MAIL_PORT", "587"))
@@ -97,13 +93,8 @@ MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD") or os.environ.get("SENDGRID_API_
 MAIL_DEFAULT_SENDER = os.environ.get("MAIL_DEFAULT_SENDER")
 
 RATE_LIMIT_STORAGE_URI = REDIS_URL or "memory://"
-
 IDEMPOTENCY_TTL_SECONDS = int(os.environ.get("IDEMPOTENCY_TTL_SECONDS", "86400") or "86400")
 
-# ── Issue #5: Server-side session store ──────────────────────────────────────
-# When Redis is available, sessions are stored server-side (only a session-key
-# cookie is sent to the browser). Falls back to Flask's signed-cookie sessions
-# when Redis is not configured.
 SESSION_TYPE = "redis" if REDIS_URL else "filesystem"
 SESSION_PERMANENT = True
 SESSION_USE_SIGNER = True
@@ -112,6 +103,11 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_SECURE = IS_PRODUCTION
 SESSION_FILE_DIR = str(DATA_DIR / ".flask_sessions")
+
+# ── Sentry error tracking ─────────────────────────────────────────────────────
+SENTRY_DSN: str = os.environ.get("SENTRY_DSN", "")
+SENTRY_TRACES_SAMPLE_RATE: float = float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.05"))
+SENTRY_PROFILES_SAMPLE_RATE: float = float(os.environ.get("SENTRY_PROFILES_SAMPLE_RATE", "0.01"))
 
 CSP: dict = {
     "default-src": "'self'",
@@ -134,6 +130,8 @@ class FlaskConfig:
     """Flask config dict — consumed by ``app.config.from_object``."""
 
     SECRET_KEY = SECRET_KEY
+    # Namespaced cookie name avoids collisions when multiple apps run on the same domain
+    SESSION_COOKIE_NAME = "cafe_session"
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = IS_PRODUCTION
@@ -154,18 +152,20 @@ class FlaskConfig:
     MAIL_USERNAME = MAIL_USERNAME
     MAIL_PASSWORD = MAIL_PASSWORD
     MAIL_DEFAULT_SENDER = MAIL_DEFAULT_SENDER
-    # Compression — Optimization #5 (already enabled; ensure brotli first)
     COMPRESS_ALGORITHM = ["br", "gzip", "deflate"]
     COMPRESS_BR_LEVEL = 4
     COMPRESS_LEVEL = 6
     COMPRESS_MIN_SIZE = 500
-    # Issue #5: server-side session config
     SESSION_TYPE = SESSION_TYPE
     SESSION_PERMANENT = SESSION_PERMANENT
     SESSION_USE_SIGNER = SESSION_USE_SIGNER
     SESSION_KEY_PREFIX = SESSION_KEY_PREFIX
-    SESSION_COOKIE_HTTPONLY = True
     SESSION_FILE_DIR = SESSION_FILE_DIR
+    # Expose slow-request threshold to app.config (Bug #4 fix — single definition)
+    SLOW_REQUEST_MS = SLOW_REQUEST_MS
+    # Sentry
+    SENTRY_DSN = SENTRY_DSN
+    SENTRY_TRACES_SAMPLE_RATE = SENTRY_TRACES_SAMPLE_RATE
 
 
 BILLING_STEPUP_REFUND_THRESHOLD = int(os.getenv("BILLING_STEPUP_REFUND_THRESHOLD", "500"))
@@ -209,9 +209,7 @@ FEATURE_AI_SUGGESTIONS = os.getenv("FEATURE_AI_SUGGESTIONS", "").lower() in {"1"
 FEATURE_ANALYTICS_V2 = os.getenv("FEATURE_ANALYTICS_V2", "").lower() in {"1", "true", "yes", "on"}
 
 RQ_QUEUE_NAME = os.getenv("RQ_QUEUE_NAME", "default")
-
 OPS_HEALTH_TOKEN = os.getenv("OPS_HEALTH_TOKEN", "")
-
 OWNER_SIGNUP_MODE = os.getenv("OWNER_SIGNUP_MODE", "approval")
 
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
@@ -222,11 +220,8 @@ VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
 VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
 VAPID_CLAIM_EMAIL = os.getenv("VAPID_CLAIM_EMAIL", "mailto:support@example.com")
 
-SLOW_REQUEST_MS = int(os.getenv("SLOW_REQUEST_MS", "1500"))
-
 SECURITY_CONTACT = os.getenv("SECURITY_CONTACT", "mailto:security@example.com")
 
-# ── Circuit breaker defaults — Issue #12 ─────────────────────────────────────
 CIRCUIT_BREAKER_FAILURE_THRESHOLD = int(os.getenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5"))
 CIRCUIT_BREAKER_RECOVERY_TIMEOUT = float(os.getenv("CIRCUIT_BREAKER_RECOVERY_TIMEOUT", "30"))
 

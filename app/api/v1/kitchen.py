@@ -1,4 +1,11 @@
-"""Kitchen API — /api/v1/kitchen/orders, status updates, SSE stream."""
+"""Kitchen API — /api/v1/kitchen/orders, status updates, SSE stream.
+
+Fixes applied:
+  Bug #3 — Double ORDER BY when include_completed=True: the previous code set
+             .order_by(desc) and then immediately overrode it with .order_by(asc),
+             so completed orders were always shown oldest-first instead of newest.
+             Fixed by branching the final .order_by() on include_completed.
+"""
 from __future__ import annotations
 
 import json
@@ -29,24 +36,35 @@ bp = Blueprint("api_v1_kitchen", __name__)
 def kitchen_orders_json():
     from app.models import Order
     from app.services.auth import logged_in_owner_id
+
     owner_id = logged_in_owner_id()
     active_statuses = ["pending", "preparing", "ready"]
+
     try:
         limit = int(request.args.get("limit", "100"))
         limit = max(1, min(limit, 500))
     except (TypeError, ValueError):
         limit = 100
+
     try:
-        include_completed = request.args.get("include_completed", "").lower() in {"1", "true"}
+        include_completed = request.args.get("include_completed", "").lower() in {
+            "1", "true"
+        }
     except Exception:
         include_completed = False
 
     query = Order.query.filter_by(owner_id=owner_id)
     if not include_completed:
         query = query.filter(Order.status.in_(active_statuses))
+
+    # Bug #3 fix: apply a single, unambiguous ORDER BY.
+    # Active orders → oldest first (kitchen processes in arrival order).
+    # Completed orders → newest first (most recent activity at the top).
+    if include_completed:
+        orders = query.order_by(Order.created_at.desc()).limit(limit).all()
     else:
-        query = query.order_by(Order.created_at.desc())
-    orders = query.order_by(Order.created_at.asc()).limit(limit).all()
+        orders = query.order_by(Order.created_at.asc()).limit(limit).all()
+
     return jsonify(orders=[_order_dict(o) for o in orders]), 200
 
 
@@ -57,19 +75,32 @@ def kitchen_orders_json():
 def kitchen_update_order_status(order_id: int):
     from app.models import Order
     from app.services.auth import logged_in_owner_id
-    from app.extensions import db
+
     if not request.is_json:
         abort(400, description="JSON required.")
+
     owner_id = logged_in_owner_id()
     payload = request.get_json(silent=True) or {}
     new_status = str(payload.get("status", "")).strip().lower()
+
     order = db.session.get(Order, order_id)
     if not order or order.owner_id != owner_id:
         abort(404, description="Order not found.")
+
     if not _db_update_order_status(order_id, new_status):
         return jsonify(error=f"Invalid status transition to '{new_status}'."), 400
+
     _notify_owner(owner_id, "order_updated", {"id": order_id, "status": new_status})
     _notify_order_status(order_id, new_status)
+
+    # Fire status-update email in background (non-blocking)
+    try:
+        from app.tasks import enqueue_with_fallback
+        from app.tasks.jobs import send_status_update_email
+        enqueue_with_fallback(send_status_update_email, order_id, new_status)
+    except Exception:
+        pass
+
     log_security("ORDER_STATUS_UPDATE", f"order_id={order_id} status={new_status!r}")
     return jsonify(success=True, id=order_id, status=new_status), 200
 
@@ -81,6 +112,7 @@ def kitchen_update_order_status(order_id: int):
 def orders_stream():
     """Owner-facing SSE stream for real-time order dashboard updates."""
     from app.services.auth import logged_in_owner_id
+
     owner_id = logged_in_owner_id()
     my_queue: list[str] = []
     my_event = threading.Event()
@@ -115,5 +147,9 @@ def orders_stream():
     return Response(
         stream_with_context(generate()),
         mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
