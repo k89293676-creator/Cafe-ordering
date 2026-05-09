@@ -65,9 +65,13 @@ def post_fork(server, worker) -> None:
     """Re-seed entropy and dispose pre-fork DB connections so each worker owns
     its own connection pool. Inheriting open sockets across fork() is the most
     common cause of mysterious ``InterfaceError: connection already closed``
-    errors right after a deploy."""
+    errors right after a deploy.
+
+    Import from ``app.extensions`` (not ``app``) so we get the db singleton
+    without re-triggering create_app() in the master process.
+    """
     try:
-        from app import db  # local import to avoid loading the app in master
+        from app.extensions import db  # avoids re-running create_app in master
         db.engine.dispose()
     except Exception:  # pragma: no cover — best-effort cleanup
         pass
