@@ -5,10 +5,10 @@ name: Post-Deploy Health Check
 # bad deploy is caught within minutes — not when a customer reports it.
 #
 # What it checks:
-#   1. Liveness    — ``GET /healthz``  (must be 200 plain "ok")
-#   2. Readiness   — ``GET /readyz``   (must be 200 with ``ok=true``)
-#   3. Version     — ``GET /version``  (commit must match the SHA we pushed)
-#   4. Operational — ``GET /api/ops/health`` with bearer token (per-section)
+#   1. Liveness    — ``GET /health``         (must be 200)
+#   2. Readiness   — ``GET /ready``          (must be 200 with ``ok=true``)
+#   3. Version     — ``GET /version``        (commit must match the SHA we pushed)
+#   4. Operational — ``GET /api/ops/health`` (bearer token, per-section)
 #
 # Required GitHub secrets:
 #   - RAILWAY_APP_URL    — public base URL, e.g. ``https://cafe.up.railway.app``
@@ -64,47 +64,47 @@ jobs:
           echo "Sleeping ${WAIT_SECONDS}s so Railway can pick up commit ${EXPECTED_SHA:0:8}…"
           sleep "${WAIT_SECONDS}"
 
-      - name: Probe /healthz (liveness)
+      - name: Probe /health (liveness)
         if: env.BASE_URL != ''
         run: |
           set -eo pipefail
           for i in $(seq 1 "${MAX_ATTEMPTS}"); do
-            code=$(curl -sS -o /tmp/healthz.txt -w "%{http_code}" \
-              --max-time 10 "${BASE_URL%/}/healthz" || echo 000)
+            code=$(curl -sS -o /tmp/health.txt -w "%{http_code}" \
+              --max-time 10 "${BASE_URL%/}/health" || echo 000)
             if [ "$code" = "200" ]; then
-              echo "✅ /healthz OK on attempt $i"
-              cat /tmp/healthz.txt
+              echo "✅ /health OK on attempt $i"
+              cat /tmp/health.txt
               echo
               exit 0
             fi
-            echo "Attempt $i: /healthz returned $code — retrying in ${RETRY_DELAY}s"
+            echo "Attempt $i: /health returned $code — retrying in ${RETRY_DELAY}s"
             sleep "${RETRY_DELAY}"
           done
-          echo "::error ::/healthz never returned 200 after ${MAX_ATTEMPTS} attempts"
+          echo "::error ::/health never returned 200 after ${MAX_ATTEMPTS} attempts"
           exit 1
 
-      - name: Probe /readyz (readiness)
+      - name: Probe /ready (readiness — DB ping)
         if: env.BASE_URL != ''
         run: |
           set -eo pipefail
-          code=$(curl -sS -o /tmp/readyz.json -w "%{http_code}" \
-            --max-time 15 "${BASE_URL%/}/readyz")
+          code=$(curl -sS -o /tmp/ready.json -w "%{http_code}" \
+            --max-time 15 "${BASE_URL%/}/ready")
           echo "HTTP ${code}"
-          cat /tmp/readyz.json | head -c 4000
+          cat /tmp/ready.json | head -c 4000
           echo
           if [ "$code" != "200" ]; then
-            echo "::error ::/readyz returned $code (expected 200)"
+            echo "::error ::/ready returned $code (expected 200) — DB may be unreachable"
             exit 1
           fi
-          # The body is JSON like {"ok": true, ...}. We use `python -c` instead
+          # The body is JSON like {"ok": true, ...}. We use python3 instead
           # of jq so we don't need to install it.
           python3 -c '
           import json, sys
-          data = json.load(open("/tmp/readyz.json"))
+          data = json.load(open("/tmp/ready.json"))
           if not data.get("ok", False):
-              print("::error ::/readyz reports ok=false:", json.dumps(data, indent=2))
+              print("::error ::/ready reports ok=false:", json.dumps(data, indent=2))
               sys.exit(1)
-          print("✅ /readyz reports ok=true")
+          print("✅ /ready reports ok=true (DB reachable)")
           '
 
       - name: Probe /version (commit match)
@@ -176,8 +176,8 @@ jobs:
             echo
             echo "| Probe | Status |"
             echo "| --- | --- |"
-            echo "| Liveness (\`/healthz\`)   | ✅ |"
-            echo "| Readiness (\`/readyz\`)   | ✅ |"
+            echo "| Liveness (\`/health\`)    | ✅ |"
+            echo "| Readiness (\`/ready\`)    | ✅ |"
             echo "| Version match           | (see logs) |"
             if [ -n "${OPS_HEALTH_TOKEN}" ]; then
               echo "| Ops health (\`/api/ops/health\`) | ✅ |"

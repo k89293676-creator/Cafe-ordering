@@ -8,21 +8,24 @@
 # Pipeline:
 #   0. Verify critical Python packages are importable (catches a missing pip
 #      install before any DB work begins, keeping the failure message clean).
-#   1. Validate required environment variables are set.
-#   2. Skip cleanly if DATABASE_URL is unset (e.g. preview env without DB).
-#   3. If the DB already has app tables but no alembic_version (legacy DBs
+#   1. Skip cleanly if DATABASE_URL is unset (e.g. preview env without DB).
+#   2. If the DB already has app tables but no alembic_version (legacy DBs
 #      bootstrapped via db.create_all() before Flask-Migrate), stamp them at
 #      HEAD instead of replaying every CREATE TABLE on top of an already-
 #      current schema.
-#   4. flask db upgrade — apply tracked alembic migrations.
-#   5. flask sync-schema — idempotent CREATE TABLE IF NOT EXISTS + ADD COLUMN
+#   3. flask db upgrade — apply tracked alembic migrations.
+#   4. flask sync-schema — idempotent CREATE TABLE IF NOT EXISTS + ADD COLUMN
 #      IF NOT EXISTS pass that catches anything added to models since the last
 #      migration. Without this step a brand-new column would only land on the
 #      first request after deploy (worker-local, racey under load).
-#   6. flask db current — log the active revision so deploys are auditable.
+#   5. flask db current — log the active revision so deploys are auditable.
 #
 # Failure here aborts the deploy — Railway will keep the previous revision
 # serving traffic, which is exactly what we want for schema safety.
+#
+# NOTE: SECRET_KEY and other runtime env vars are NOT validated here because
+# Railway does not inject Variables into the pre-deploy environment. Runtime
+# validation runs in start.py immediately before gunicorn forks workers.
 
 set -euo pipefail
 
@@ -81,22 +84,7 @@ if [[ -n "${MISSING_PKGS}" ]]; then
 fi
 step_done
 
-# ── Step 1: Environment validation ────────────────────────────────────────
-step_start "Validating environment variables…"
-
-# SECRET_KEY must be set and long enough to be useful.
-if [[ -z "${SECRET_KEY:-}" ]]; then
-  echo "[release] FATAL: SECRET_KEY is not set. Set it in Railway Variables." >&2
-  exit 1
-fi
-if [[ "${#SECRET_KEY}" -lt 24 ]]; then
-  echo "[release] FATAL: SECRET_KEY is too short (${#SECRET_KEY} chars, need ≥ 24)." >&2
-  exit 1
-fi
-
-step_done
-
-# ── Step 2: Skip when no DB is configured ─────────────────────────────────
+# ── Step 1: Skip when no DB is configured ─────────────────────────────────
 if [[ -z "${DATABASE_URL:-}" ]]; then
   echo "[release] DATABASE_URL not set — skipping migrations." >&2
   exit 0
