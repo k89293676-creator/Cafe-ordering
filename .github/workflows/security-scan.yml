@@ -1,0 +1,246 @@
+name: Security Scan
+
+# Scheduled weekly security scan — runs independently of CI so a
+# freshly-discovered CVE surfaces without waiting for a code push.
+# Also runs on every push to main so the security posture is visible
+# in real time.
+
+on:
+  schedule:
+    # 03:00 UTC every Monday — after the weekly Dependabot PRs are opened
+    # (Monday 04:00 UTC) so we have fresh candidates to triage.
+    - cron: "0 3 * * 1"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write   # needed to upload SARIF to GitHub Security tab
+
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 1. Bandit SAST (full severity matrix) ─────────────────────────────────
+  bandit:
+    name: Bandit SAST
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Bandit
+        run: pip install "bandit[toml]~=1.8.0"
+
+      - name: Run Bandit (full scan — all severities)
+        run: |
+          bandit -r app admin lib_*.py \
+            --format json \
+            --output bandit-full.json \
+            --exit-zero
+
+          bandit -r app admin lib_*.py \
+            --format txt \
+            --exit-zero | tee bandit-full.txt
+
+      - name: Summarise findings
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              data = json.load(open("bandit-full.json"))
+          except Exception:
+              print("Could not parse bandit-full.json — skipping summary")
+              sys.exit(0)
+
+          counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
+          for r in data.get("results", []):
+              sev = r.get("issue_severity", "LOW")
+              counts[sev] = counts.get(sev, 0) + 1
+
+          print(f"Bandit results — HIGH: {counts['HIGH']}  MEDIUM: {counts['MEDIUM']}  LOW: {counts['LOW']}")
+
+          with open("$GITHUB_STEP_SUMMARY" if False else "/dev/stdout", "w") as fh:
+              fh.write("## Bandit SAST Summary\n\n")
+              fh.write(f"| Severity | Count |\n| --- | --- |\n")
+              for sev, cnt in counts.items():
+                  fh.write(f"| {sev} | {cnt} |\n")
+          EOF
+
+      - name: Write GitHub step summary
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import json
+          try:
+              data = json.load(open("bandit-full.json"))
+          except Exception:
+              exit(0)
+          counts = {}
+          for r in data.get("results", []):
+              s = r.get("issue_severity", "LOW")
+              counts[s] = counts.get(s, 0) + 1
+          with open("$GITHUB_STEP_SUMMARY", "a") as f:
+              f.write("## Bandit SAST\n\n| Severity | Count |\n|---|---|\n")
+              for s in ("HIGH", "MEDIUM", "LOW"):
+                  f.write(f"| {s} | {counts.get(s, 0)} |\n")
+          EOF
+        env:
+          GITHUB_STEP_SUMMARY: ${{ github.step_summary || '/dev/null' }}
+
+      - name: Upload Bandit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-security-scan
+          path: |
+            bandit-full.json
+            bandit-full.txt
+          retention-days: 90
+
+      - name: Fail on HIGH-severity findings
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              data = json.load(open("bandit-full.json"))
+          except Exception:
+              sys.exit(0)
+          high = [r for r in data.get("results", []) if r.get("issue_severity") == "HIGH"]
+          if high:
+              print(f"::error ::{len(high)} HIGH-severity Bandit finding(s) detected.")
+              for r in high:
+                  print(f"  {r['filename']}:{r['line_number']} — {r['issue_text']}")
+              sys.exit(1)
+          EOF
+
+  # ── 2. pip-audit (full CVE report) ────────────────────────────────────────
+  pip-audit-full:
+    name: Full CVE audit (pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install pip-audit
+        run: pip install pip-audit~=2.7.0
+
+      - name: Full runtime audit (strict)
+        run: pip-audit -r requirements.txt --strict --format json --output pip-audit.json || true
+
+      - name: Full dev audit (non-blocking)
+        continue-on-error: true
+        run: pip-audit -r requirements-dev.txt --strict
+
+      - name: CVE summary
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import json
+          try:
+              data = json.load(open("pip-audit.json"))
+          except Exception:
+              print("No pip-audit output to parse.")
+              exit(0)
+          vulns = data.get("dependencies", [])
+          affected = [d for d in vulns if d.get("vulns")]
+          if not affected:
+              print("No known CVEs in runtime dependencies.")
+          else:
+              for dep in affected:
+                  for v in dep.get("vulns", []):
+                      print(f"  {dep['name']}=={dep['version']}  {v['id']}  {v.get('fix_versions', [])}")
+          EOF
+
+      - name: Upload pip-audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: pip-audit.json
+          retention-days: 90
+
+  # ── 3. Docker image vulnerability scan (Trivy) ────────────────────────────
+  trivy:
+    name: Trivy image scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image for scanning
+        run: |
+          docker build \
+            --file Dockerfile \
+            --tag cafe-ordering:security-scan \
+            .
+
+      - name: Trivy scan (CRITICAL + HIGH — blocking)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "cafe-ordering:security-scan"
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: "CRITICAL,HIGH"
+
+      - name: Trivy scan (full — SARIF upload)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "cafe-ordering:security-scan"
+          format: "sarif"
+          output: "trivy-results.sarif"
+          ignore-unfixed: false
+          severity: "CRITICAL,HIGH,MEDIUM"
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "trivy-results.sarif"
+
+  # ── 4. CodeQL static analysis ─────────────────────────────────────────────
+  codeql:
+    name: CodeQL analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"

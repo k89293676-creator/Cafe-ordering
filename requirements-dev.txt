@@ -1,6 +1,18 @@
 # Dev / CI tooling. Not installed on Railway — runtime deps live in requirements.txt.
 -r requirements.txt
 
+# Testing
 pytest~=8.3.0
+pytest-cov~=6.0.0
+
+# Linting & formatting
 ruff~=0.7.0
+
+# SAST
+bandit[toml]~=1.8.0
+
+# Dependency CVE auditing
 pip-audit~=2.7.0
+
+# Type checking (non-blocking in CI — surface errors incrementally)
+mypy~=1.13.0
