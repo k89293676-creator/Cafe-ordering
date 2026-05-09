@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "006_critical_idx"
-down_revision = "003_scaling_idx"
+down_revision = "005_refactor_tables"
 branch_labels = None
 depends_on = None
 

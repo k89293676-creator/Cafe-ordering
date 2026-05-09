@@ -31,7 +31,11 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
 # Column names and type fragments must be plain identifiers + limited SQL keywords.
 _IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
 _COLTYPE_RE    = re.compile(
-    r"^[A-Z][A-Z0-9_ ,()]{0,80}$",
+    # Allow letters, digits, spaces, underscores, commas, parens, dots,
+    # and single-quoted string literals (e.g. DEFAULT 'unpaid', DEFAULT '').
+    # Single quotes are explicitly permitted because all callers use hardcoded
+    # internal strings — never user input.
+    r"^[A-Z][A-Z0-9_ ,()'\.]{0,120}$",
     re.IGNORECASE,
 )
 
