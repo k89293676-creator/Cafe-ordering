@@ -1,0 +1,19 @@
+# Nixpacks build configuration for Railway.
+#
+# Pins the Python version and build/start commands so Nixpacks never guesses.
+# The deploy pipeline is:
+#   build  → pip install -r requirements.txt
+#   deploy → bash scripts/release.sh  (migrations, schema sync — see railway.json)
+#   start  → python start.py          (env validation → gunicorn)
+
+[phases.setup]
+nixPkgs = ["python312", "gcc", "libpq"]
+
+[phases.install]
+cmds = [
+  "pip install --no-cache-dir --upgrade pip",
+  "pip install --no-cache-dir -r requirements.txt"
+]
+
+[start]
+cmd = "python start.py"

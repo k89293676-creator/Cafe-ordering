@@ -3,15 +3,25 @@ name: Deploy to Railway
 # Triggered automatically after CI passes on main, or manually via the
 # Actions tab for hotfix deploys.
 #
-# Required GitHub Secrets (Settings → Secrets → Actions):
-#   RAILWAY_TOKEN      — Service token from Railway (Settings → Tokens)
+# ── Required GitHub Secrets ────────────────────────────────────────────────
+#   RAILWAY_TOKEN        — Service token (Railway → Settings → Tokens)
 #
-# Required GitHub Variables (Settings → Variables → Actions):
-#   RAILWAY_APP_URL    — https://your-app.up.railway.app (for health probes)
-#   RAILWAY_SERVICE_NAME — Railway service name (default: "cafe-ordering")
+# ── Required GitHub Variables (Settings → Variables → Actions) ─────────────
+#   RAILWAY_SERVICE_ID   — Railway service ID (preferred; stable across renames)
+#                          Found: Railway dashboard → your service → Settings → Service ID
+#   RAILWAY_PROJECT_ID   — Railway project ID (required when using service ID)
+#                          Found: Railway dashboard → your project → Settings → Project ID
 #
-# Optional GitHub Secrets:
-#   OPS_HEALTH_TOKEN   — Same value as the OPS_HEALTH_TOKEN env var in Railway
+# ── Optional GitHub Secrets / Variables ───────────────────────────────────
+#   RAILWAY_APP_URL      — public base URL, e.g. https://cafe.up.railway.app
+#   RAILWAY_SERVICE_NAME — service name fallback when IDs are not set (default: cafe-ordering)
+#   OPS_HEALTH_TOKEN     — same value as OPS_HEALTH_TOKEN in Railway env vars
+#
+# ── How Railway CLI auth works ──────────────────────────────────────────────
+# The CLI reads RAILWAY_TOKEN automatically. Project + service context is
+# resolved from RAILWAY_PROJECT_ID + RAILWAY_SERVICE_ID env vars, or from
+# --service-id / --project-id flags. Service name (--service) is the
+# human-readable fallback but can break on renames; prefer IDs in production.
 
 on:
   workflow_run:
@@ -21,9 +31,13 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: "Force deploy without CI gate"
+        description: "Force deploy even if CI did not pass"
         type: boolean
         default: false
+      environment:
+        description: "Target Railway environment (default: production)"
+        type: string
+        default: "production"
 
 concurrency:
   group: railway-deploy
@@ -32,147 +46,264 @@ concurrency:
 permissions:
   contents: read
   statuses: write
+  deployments: write
 
 jobs:
   deploy:
     name: Deploy to Railway
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
-    # Only run if CI passed — or if manually triggered with force=true
+    # Gate: only run when CI passed, or when manually forced
     if: |
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
 
     env:
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      RAILWAY_APP_URL: ${{ vars.RAILWAY_APP_URL || secrets.RAILWAY_APP_URL }}
-      SERVICE_NAME: ${{ vars.RAILWAY_SERVICE_NAME || 'cafe-ordering' }}
+      RAILWAY_TOKEN:       ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID:  ${{ vars.RAILWAY_PROJECT_ID }}
+      RAILWAY_SERVICE_ID:  ${{ vars.RAILWAY_SERVICE_ID }}
+      RAILWAY_SERVICE_NAME: ${{ vars.RAILWAY_SERVICE_NAME || 'cafe-ordering' }}
+      RAILWAY_APP_URL:     ${{ vars.RAILWAY_APP_URL || secrets.RAILWAY_APP_URL }}
+      RAILWAY_ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+      DEPLOY_SHA:          ${{ github.event.workflow_run.head_sha || github.sha }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          # Use the SHA from the triggering CI run when available
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-
-      - name: Skip when Railway token is not configured
+      # ── 0. Guard: skip if token not configured ──────────────────────────
+      - name: Skip when RAILWAY_TOKEN is not configured
         if: env.RAILWAY_TOKEN == ''
         run: |
           echo "::warning ::RAILWAY_TOKEN secret not set — skipping Railway deploy."
-          echo "Add it under Settings → Secrets → Actions to enable automated deploys."
+          echo "Add it under Settings → Secrets → Actions and set RAILWAY_PROJECT_ID"
+          echo "and RAILWAY_SERVICE_ID under Settings → Variables → Actions."
           exit 0
 
+      # ── 1. Checkout the exact commit that CI tested ─────────────────────
+      - name: Checkout
+        if: env.RAILWAY_TOKEN != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+          fetch-depth: 1
+
+      # ── 2. Create GitHub Deployment (tracks status in PR/commit view) ────
+      - name: Create GitHub Deployment
+        if: env.RAILWAY_TOKEN != ''
+        id: gh_deploy
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              ref:   process.env.DEPLOY_SHA,
+              environment:        'production',
+              auto_merge:         false,
+              required_contexts:  [],
+              description:        `Railway deploy ${process.env.DEPLOY_SHA.slice(0,12)}`,
+            });
+            core.setOutput('deployment_id', data.id);
+
+      # ── 3. Install Railway CLI (pinned major version) ────────────────────
       - name: Install Railway CLI
         if: env.RAILWAY_TOKEN != ''
         run: |
+          # Pin to a stable install; use the official script which picks the
+          # latest stable release. Set RAILWAY_HOME so the binary lands in a
+          # known, path-friendly location.
+          export RAILWAY_HOME="$HOME/.railway"
           curl -fsSL https://railway.app/install.sh | sh
-          echo "$HOME/.railway/bin" >> "$GITHUB_PATH"
+          echo "$RAILWAY_HOME/bin" >> "$GITHUB_PATH"
+          # Verify install in same step (PATH update takes next-step effect,
+          # so we use the full path here).
+          "$RAILWAY_HOME/bin/railway" --version
 
+      # ── 4. Deploy ────────────────────────────────────────────────────────
       - name: Deploy to Railway
         if: env.RAILWAY_TOKEN != ''
         run: |
-          echo "🚀 Deploying commit $(git rev-parse --short HEAD) to Railway service: ${SERVICE_NAME}"
-          railway up --detach --service="${SERVICE_NAME}" 2>&1 || \
-            railway up --detach 2>&1
+          SHORT_SHA="${DEPLOY_SHA:0:12}"
+          echo "Deploying commit ${SHORT_SHA} to Railway..."
 
-      - name: Wait for Railway to roll the new image
+          # Build the deploy command. Prefer stable IDs over human-readable names.
+          CMD="railway up --detach"
+
+          if [[ -n "${RAILWAY_SERVICE_ID}" && -n "${RAILWAY_PROJECT_ID}" ]]; then
+            echo "Using project ID + service ID (stable)"
+            CMD="$CMD --service=${RAILWAY_SERVICE_ID}"
+            export RAILWAY_PROJECT_ID="${RAILWAY_PROJECT_ID}"
+          else
+            echo "::warning ::RAILWAY_SERVICE_ID / RAILWAY_PROJECT_ID not set — falling back to service name."
+            echo "  Set them via Settings → Variables → Actions for stable deploys."
+            CMD="$CMD --service=${RAILWAY_SERVICE_NAME}"
+          fi
+
+          echo "Running: $CMD"
+          eval "$CMD" || {
+            echo "::error ::railway up failed — check the Railway dashboard for build logs."
+            exit 1
+          }
+
+      # ── 5. Wait for Railway to build + roll the new image ────────────────
+      - name: Wait for Railway rollout
         if: env.RAILWAY_TOKEN != ''
         run: |
-          echo "Waiting 90 seconds for Railway to build and start the new container..."
+          echo "Waiting 90s for Railway to build and start the new container..."
           sleep 90
 
+      # ── 6. Liveness probe — /healthz (plain-text, no DB) ─────────────────
       - name: Probe /healthz (liveness)
         if: env.RAILWAY_TOKEN != '' && env.RAILWAY_APP_URL != ''
         run: |
-          echo "Probing ${RAILWAY_APP_URL}/healthz ..."
+          BASE="${RAILWAY_APP_URL%/}"
           MAX=20
           DELAY=15
+
+          echo "Probing ${BASE}/healthz (up to $((MAX * DELAY))s)..."
+
           for i in $(seq 1 $MAX); do
-            code=$(curl -sS -o /tmp/healthz.txt -w "%{http_code}" \
-              --max-time 10 "${RAILWAY_APP_URL%/}/healthz" || echo 000)
-            if [ "$code" = "200" ]; then
-              echo "✅ /healthz OK on attempt $i"
+            HTTP_CODE=$(curl -sS -o /tmp/healthz.txt -w "%{http_code}" \
+              --connect-timeout 10 \
+              --max-time 15 \
+              "${BASE}/healthz" 2>/dev/null || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "healthz OK on attempt $i (HTTP 200)"
               cat /tmp/healthz.txt
+              echo
               exit 0
             fi
-            echo "  Attempt $i/$MAX: HTTP $code — retrying in ${DELAY}s..."
+
+            echo "Attempt $i/$MAX — HTTP ${HTTP_CODE} — retrying in ${DELAY}s..."
             sleep $DELAY
           done
-          echo "::error ::/healthz never returned 200 after $MAX attempts"
+
+          echo "::error ::/healthz never returned HTTP 200 after $((MAX * DELAY))s — deploy may be stuck."
           exit 1
 
-      - name: Probe /readyz (readiness)
+      # ── 7. Readiness probe — /readyz (DB connectivity) ───────────────────
+      - name: Probe /readyz (readiness + DB)
         if: env.RAILWAY_TOKEN != '' && env.RAILWAY_APP_URL != ''
         run: |
-          code=$(curl -sS -o /tmp/readyz.json -w "%{http_code}" \
-            --max-time 20 "${RAILWAY_APP_URL%/}/readyz" || echo 000)
-          echo "HTTP $code"
-          cat /tmp/readyz.json 2>/dev/null | head -c 2000 || true
+          BASE="${RAILWAY_APP_URL%/}"
+          HTTP_CODE=$(curl -sS -o /tmp/readyz.json -w "%{http_code}" \
+            --connect-timeout 10 \
+            --max-time 20 \
+            "${BASE}/readyz" 2>/dev/null || echo "000")
+
+          echo "HTTP ${HTTP_CODE}"
+          cat /tmp/readyz.json 2>/dev/null || true
           echo
-          if [ "$code" = "200" ]; then
-            python3 -c '
-          import json, sys
-          data = json.load(open("/tmp/readyz.json"))
-          if data.get("ok", False):
-              print("✅ /readyz reports ok=true")
-          else:
-              print("::warning ::/readyz reports ok=false — check migrations")
-          '
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            # Parse ok field — use node since python3 may not be in path on all runners
+            node -e "
+              const data = require(process.env.HOME + '/../tmp/readyz.json');
+              if (data.ok) {
+                console.log('readyz OK — all checks passed');
+              } else {
+                const failing = Object.entries(data.checks || {})
+                  .filter(([,v]) => !v.ok)
+                  .map(([k]) => k);
+                console.log('::warning ::readyz ok=false. Failing: ' + failing.join(', '));
+              }
+            " 2>/dev/null || echo "::warning ::Could not parse /readyz JSON"
+          elif [ "$HTTP_CODE" = "503" ]; then
+            echo "::warning ::/readyz returned 503 — a dependency (DB/Redis) may not be ready yet."
+            echo "  Check Railway logs and run migrations if this is a fresh deployment."
           else
-            echo "::warning ::/readyz returned $code — app may need migrations"
+            echo "::warning ::/readyz returned HTTP ${HTTP_CODE} — unexpected status."
           fi
 
+      # ── 8. Ops health probe (token-protected, per-section) ────────────────
       - name: Probe /api/ops/health (per-section)
-        if: |
-          env.RAILWAY_TOKEN != '' &&
-          env.RAILWAY_APP_URL != '' &&
-          secrets.OPS_HEALTH_TOKEN != ''
+        if: env.RAILWAY_TOKEN != '' && env.RAILWAY_APP_URL != ''
         env:
           OPS_HEALTH_TOKEN: ${{ secrets.OPS_HEALTH_TOKEN }}
         run: |
-          code=$(curl -sS -o /tmp/ops.json -w "%{http_code}" \
+          if [ -z "${OPS_HEALTH_TOKEN}" ]; then
+            echo "::notice ::OPS_HEALTH_TOKEN not set — skipping per-section ops probe."
+            echo "  Add it to Settings → Secrets → Actions (same value as in Railway vars)."
+            exit 0
+          fi
+
+          BASE="${RAILWAY_APP_URL%/}"
+          HTTP_CODE=$(curl -sS -o /tmp/ops.json -w "%{http_code}" \
+            --connect-timeout 10 \
             --max-time 20 \
             -H "Authorization: Bearer ${OPS_HEALTH_TOKEN}" \
-            "${RAILWAY_APP_URL%/}/api/ops/health" || echo 000)
-          echo "HTTP $code"
-          python3 -c '
-          import json, sys
-          try:
-              data = json.load(open("/tmp/ops.json"))
-          except Exception:
-              print("::warning ::Could not parse /api/ops/health response")
-              sys.exit(0)
-          sections = data.get("sections", {}) or {}
-          for name, payload in sorted(sections.items()):
-              flag = "✅" if payload.get("ok", True) else "❌"
-              print(f"{flag} {name}: {json.dumps(payload)}")
-          if not data.get("ok", True):
-              print("::warning ::/api/ops/health has failing sections (non-blocking)")
-          else:
-              print("✅ All ops health sections passed")
-          ' 2>/dev/null || true
+            "${BASE}/api/ops/health" 2>/dev/null || echo "000")
 
+          echo "HTTP ${HTTP_CODE}"
+
+          node -e "
+            let data;
+            try { data = require(process.env.HOME + '/../tmp/ops.json'); }
+            catch(e) { console.log('::warning ::Could not parse ops health response'); process.exit(0); }
+            const sections = data.sections || {};
+            for (const [name, s] of Object.entries(sections).sort()) {
+              const icon = s.ok !== false ? '✅' : '❌';
+              console.log(icon + ' ' + name + ': ok=' + s.ok + (s.error ? ' error=' + s.error : ''));
+            }
+            if (!data.ok) {
+              console.log('::warning ::/api/ops/health overall ok=false — check failing sections above.');
+            } else {
+              console.log('All ops sections healthy.');
+            }
+          " 2>/dev/null || true
+
+      # ── 9. Mark GitHub Deployment as success or failure ───────────────────
+      - name: Update GitHub Deployment status
+        if: env.RAILWAY_TOKEN != '' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const id = '${{ steps.gh_deploy.outputs.deployment_id }}';
+            if (!id) return;
+            const state = '${{ job.status }}' === 'success' ? 'success' : 'failure';
+            await github.rest.repos.createDeploymentStatus({
+              owner:          context.repo.owner,
+              repo:           context.repo.repo,
+              deployment_id:  parseInt(id),
+              state,
+              environment_url: process.env.RAILWAY_APP_URL || undefined,
+              description:    state === 'success'
+                ? 'Deployed to Railway successfully'
+                : 'Railway deployment failed — check workflow logs',
+              auto_inactive:  true,
+            });
+
+      # ── 10. Step summary ──────────────────────────────────────────────────
       - name: Deployment summary
-        if: always() && env.RAILWAY_TOKEN != ''
+        if: env.RAILWAY_TOKEN != '' && always()
         run: |
-          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          STATUS="${{ job.status }}"
+          SHA="${DEPLOY_SHA:0:12}"
           {
-            echo "## 🚀 Railway Deployment"
+            echo "## Railway Deployment — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
-            echo "| **Commit** | \`${SHA:0:12}\` |"
-            echo "| **Service** | \`${SERVICE_NAME}\` |"
-            echo "| **Status** | ${{ job.status }} |"
-            echo "| **App URL** | ${RAILWAY_APP_URL:-_not configured_} |"
-            echo "| **Triggered by** | ${{ github.event_name }} |"
-            if [ -n "$RAILWAY_APP_URL" ]; then
-              echo ""
-              echo "| Probe | Result |"
+            echo "| **Commit** | \`${SHA}\` |"
+            echo "| **Service** | \`${RAILWAY_SERVICE_NAME}\` |"
+            echo "| **Environment** | \`${RAILWAY_ENVIRONMENT}\` |"
+            echo "| **Status** | **${STATUS}** |"
+            if [ -n "${RAILWAY_APP_URL}" ]; then
+              echo "| **App URL** | ${RAILWAY_APP_URL} |"
+            fi
+            echo "| **Triggered by** | \`${{ github.event_name }}\` |"
+            echo ""
+            if [ -n "${RAILWAY_APP_URL}" ]; then
+              echo "### Health probe results"
+              echo "| Probe | Endpoint |"
               echo "| --- | --- |"
-              echo "| \`/healthz\` | ✅ passed |"
-              echo "| \`/readyz\`  | see logs |"
-              echo "| \`/api/ops/health\` | see logs |"
+              echo "| Liveness  | \`${RAILWAY_APP_URL}/healthz\` |"
+              echo "| Readiness | \`${RAILWAY_APP_URL}/readyz\` |"
+              echo "| Ops       | \`${RAILWAY_APP_URL}/api/ops/health\` |"
+            fi
+            if [ "$STATUS" != "success" ]; then
+              echo ""
+              echo "> **Deploy failed.** Check the Railway dashboard and workflow logs."
+              echo "> Previous revision is still serving traffic."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

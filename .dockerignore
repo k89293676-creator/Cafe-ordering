@@ -1,0 +1,59 @@
+# Version control
+.git
+.gitignore
+
+# Python cache
+__pycache__
+*.py[cod]
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+dist/
+build/
+
+# Dev / CI tooling (not needed at runtime)
+requirements-dev.txt
+.github/
+.github
+tests/
+docs/
+scripts/backup_db.sh
+scripts/disaster_recovery.md
+
+# Local dev files
+.env
+.env.*
+*.env
+*.local
+
+# Data files (these live in Railway volumes / PostgreSQL, not in the image)
+*.json.lock
+feedback.json
+orders.json
+owners.json
+tables.json
+tokens.json
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Node (mockup sandbox, if present)
+node_modules/
+
+# Logs
+*.log
+logs/
