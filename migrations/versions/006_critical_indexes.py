@@ -1,12 +1,16 @@
 """Add critical missing indexes for query performance — Issue #3.
 
 Revision ID: 006_critical_idx
-Revises: 003_scaling_idx
+Revises: 005_refactor_tables
 Create Date: 2026-05-09
 
 Indexes that were absent from models and earlier migrations but are hit
 on every dashboard load, order-status poll, and customer lookup.
 All operations are idempotent — safe to re-run.
+
+Fix applied: _create_index now checks for column existence before attempting
+to create an index, preventing PostgreSQL errors when columns don't yet
+exist (e.g. webhook_events.status / next_attempt_at added in migration 007).
 """
 from __future__ import annotations
 
@@ -32,8 +36,22 @@ def _has_index(table: str, name: str) -> bool:
     return any(ix["name"] == name for ix in insp.get_indexes(table))
 
 
+def _has_columns(table: str, cols: list[str]) -> bool:
+    """Return True only when ALL *cols* exist on *table*."""
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    if not insp.has_table(table):
+        return False
+    existing = {c["name"] for c in insp.get_columns(table)}
+    return all(c in existing for c in cols)
+
+
 def _create_index(name: str, table: str, cols: list[str], unique: bool = False) -> None:
+    """Create an index only when the table AND all columns exist."""
     if not _has_table(table):
+        return
+    if not _has_columns(table, cols):
+        # Columns added by a later migration — that migration creates the index.
         return
     if _has_index(table, name):
         return
@@ -62,11 +80,7 @@ def upgrade() -> None:
     _create_index("ix_orders_customer_email", "orders", ["customer_email"])
 
     # orders (owner_id, created_at) — per-owner time-series analytics
-    _create_index(
-        "ix_orders_owner_created",
-        "orders",
-        ["owner_id", "created_at"],
-    )
+    _create_index("ix_orders_owner_created", "orders", ["owner_id", "created_at"])
 
     # orders (owner_id, payment_status) — billing reconciliation
     _create_index(
@@ -83,13 +97,10 @@ def upgrade() -> None:
     )
 
     # online_payments.created_at — time-range reconciliation queries
-    _create_index(
-        "ix_online_payments_created_at",
-        "online_payments",
-        ["created_at"],
-    )
+    _create_index("ix_online_payments_created_at", "online_payments", ["created_at"])
 
     # ingredients (owner_id, menu_item_id) — stock check on every order
+    # NOTE: skipped gracefully if ingredients.menu_item_id doesn't exist yet
     _create_index(
         "ix_ingredients_owner_menu_item",
         "ingredients",
@@ -101,13 +112,11 @@ def upgrade() -> None:
     _create_index("ix_customers_phone", "customers", ["phone"])
 
     # audit_log owner_id + created_at — security event timeline
-    _create_index(
-        "ix_audit_log_owner_created",
-        "audit_log",
-        ["owner_id", "created_at"],
-    )
+    _create_index("ix_audit_log_owner_created", "audit_log", ["owner_id", "created_at"])
 
-    # webhook_events (status, next_attempt_at) — retry worker hot path
+    # webhook_events (status, next_attempt_at) — retry worker hot path.
+    # These columns are added in migration 007; _create_index skips safely
+    # when they don't exist yet and migration 007 creates the index itself.
     _create_index(
         "ix_webhook_events_status_next",
         "webhook_events",
