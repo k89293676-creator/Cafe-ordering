@@ -10,6 +10,14 @@ Backward compatibility (tests, wsgi.py, extensions that do ``from app import db`
     import app as flask_app
     flask_app.app          # Flask instance
     flask_app.db           # SQLAlchemy instance
+
+Issue #1 — Circular import guard:
+  ``db`` (and other extension singletons) are imported from ``app.extensions``
+  at the TOP of this module so they are available as ``app.db`` the moment
+  Python starts executing this package — before ``create_app()`` is called.
+  A ``_CREATE_APP_IN_PROGRESS`` flag prevents re-entrant factory calls that
+  can occur when a blueprint imported inside ``create_app()`` does
+  ``from app import ...`` while this module is still being initialised.
 """
 from __future__ import annotations
 
@@ -26,6 +34,15 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from app import config as _cfg
 
 log = logging.getLogger("cafe.app")
+
+# ── Issue #1: Circular import guard ──────────────────────────────────────────
+# Import extension singletons EARLY so ``from app import db`` succeeds even
+# when Python is still executing this module (re-entrant import scenario).
+# All models and blueprints must import from ``app.extensions``, not from
+# ``app``, to avoid the re-entrancy entirely — but this guards the legacy path.
+from app.extensions import db  # noqa: E402 — must be before create_app
+
+_CREATE_APP_IN_PROGRESS = False  # re-entrancy guard
 
 # ── Global state ─────────────────────────────────────────────────────────────
 _DB_READY = False
@@ -64,7 +81,27 @@ def _initialize_runtime_state(force: bool = False) -> bool:
 
 
 def create_app(test_config: dict | None = None) -> Flask:
-    """Create and configure the Flask application."""
+    """Create and configure the Flask application.
+
+    Issue #1: guarded against re-entrant calls that can occur when a blueprint
+    imported inside this function does ``from app import X`` while this module
+    is still being initialised.
+    """
+    global _CREATE_APP_IN_PROGRESS
+    if _CREATE_APP_IN_PROGRESS:
+        raise RuntimeError(
+            "create_app() called recursively — circular import detected. "
+            "Ensure all blueprints import from 'app.extensions', not from 'app'."
+        )
+    _CREATE_APP_IN_PROGRESS = True
+    try:
+        return _create_app_impl(test_config)
+    finally:
+        _CREATE_APP_IN_PROGRESS = False
+
+
+def _create_app_impl(test_config: dict | None = None) -> Flask:
+    """Internal factory implementation — call via create_app()."""
     from pathlib import Path
     _PROJECT_ROOT = Path(__file__).resolve().parent.parent
     app = Flask(
@@ -386,6 +423,43 @@ def create_app(test_config: dict | None = None) -> Flask:
     except ImportError:
         pass
 
+    # ── Issue #10: Distributed tracing middleware ─────────────────────────────
+    try:
+        from app.middleware.tracing import init_tracing
+        init_tracing(app)
+        log.info("Distributed tracing middleware registered.")
+    except Exception as _tracing_exc:
+        log.warning("Tracing middleware failed to init: %s", _tracing_exc)
+
+    # ── Issue #5: Server-side session store (Flask-Session) ───────────────────
+    if _cfg.REDIS_URL:
+        try:
+            import redis as _redis
+            import flask_session as _flask_session
+            _redis_client = _redis.from_url(
+                _cfg.REDIS_URL,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+            )
+            app.config["SESSION_REDIS"] = _redis_client
+            _flask_session.Session(app)
+            log.info("Server-side sessions backed by Redis.")
+        except ImportError:
+            log.warning("flask-session or redis not installed; using cookie sessions.")
+        except Exception as _sess_exc:
+            log.warning("Redis session setup failed (%s); using cookie sessions.", _sess_exc)
+    else:
+        try:
+            import flask_session as _flask_session
+            import os as _os
+            _os.makedirs(_cfg.SESSION_FILE_DIR, exist_ok=True)
+            _flask_session.Session(app)
+            log.info("Server-side sessions backed by filesystem (%s).", _cfg.SESSION_FILE_DIR)
+        except ImportError:
+            log.debug("flask-session not installed; using cookie sessions.")
+        except Exception as _sess_exc:
+            log.warning("Filesystem session setup failed (%s); using cookie sessions.", _sess_exc)
+
     # ── SSE Redis pub/sub (optional) ──────────────────────────────────────────
     if not (test_config or {}).get("TESTING"):
         from app.services.notifications import init_redis_pubsub
@@ -403,8 +477,8 @@ def create_app(test_config: dict | None = None) -> Flask:
 # ``import app as flask_app; flask_app.app; flask_app.db`` must still work.
 # Python resolves the *package* before ``app.py`` so these names are exposed
 # here on the package itself.
-
-from app.extensions import db  # noqa: E402 — intentional late import
+# NOTE: ``db`` is already imported at the TOP of this module (Issue #1 fix).
+# The duplicate import that used to live here has been removed.
 
 app = create_app()
 

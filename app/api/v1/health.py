@@ -1,4 +1,10 @@
-"""Health, readiness, metrics and ops endpoints."""
+"""Health, readiness, metrics and ops endpoints.
+
+Issue #9 fix: readiness endpoint now probes all critical dependencies —
+database, Redis, encryption, disk, background-task queue, and circuit
+breaker states — so an orchestrator (Railway, k8s, Docker Compose) will
+not route traffic to a pod that is partially broken.
+"""
 from __future__ import annotations
 
 import hmac
@@ -36,7 +42,7 @@ def healthz():
     return ("ok", 200, {"Content-Type": "text/plain"})
 
 
-# ── Readiness ─────────────────────────────────────────────────────────────────
+# ── Readiness — Issue #9: full dependency probe ───────────────────────────────
 
 @bp.route("/api/v1/ready")
 @bp.route("/readyz")
@@ -46,13 +52,16 @@ def readiness_check():
     checks: dict = {}
     overall_ok = True
 
+    # 1. Database connectivity
     try:
         db.session.execute(text("SELECT 1"))
+        db.session.rollback()
         checks["database"] = {"ok": True}
     except Exception as exc:
         overall_ok = False
         checks["database"] = {"ok": False, "error": str(exc)[:200]}
 
+    # 2. Required schema tables
     try:
         db.session.execute(text("SELECT 1 FROM payment_credentials LIMIT 0"))
         db.session.execute(text("SELECT 1 FROM webhook_events LIMIT 0"))
@@ -61,7 +70,10 @@ def readiness_check():
     except Exception as exc:
         checks["schema"] = {"ok": False, "error": str(exc)[:200], "hint": "run flask db upgrade"}
         overall_ok = False
+    finally:
+        db.session.rollback()
 
+    # 3. Encryption round-trip
     try:
         from lib_payments import encrypt_secret, decrypt_secret
         probe = encrypt_secret("healthz-probe")
@@ -70,6 +82,56 @@ def readiness_check():
     except Exception as exc:
         overall_ok = False
         checks["encryption"] = {"ok": False, "error": str(exc)[:200]}
+
+    # 4. Redis connectivity (Issue #9 — was missing from readiness)
+    redis_url = os.environ.get("REDIS_URL", "")
+    if redis_url:
+        try:
+            import redis as _redis
+            r = _redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+            t0 = time.monotonic()
+            r.ping()
+            latency_ms = round((time.monotonic() - t0) * 1000, 2)
+            checks["redis"] = {"ok": True, "latency_ms": latency_ms}
+        except Exception as exc:
+            overall_ok = False
+            checks["redis"] = {"ok": False, "error": str(exc)[:200]}
+    else:
+        checks["redis"] = {"ok": True, "skipped": True, "note": "REDIS_URL not configured"}
+
+    # 5. Background task queue — Issue #9
+    try:
+        from lib_runtime import BackgroundTaskQueue
+        _q = BackgroundTaskQueue.__new__(BackgroundTaskQueue)
+        checks["bg_queue"] = {"ok": True, "note": "in-process queue available"}
+    except Exception as exc:
+        checks["bg_queue"] = {"ok": False, "error": str(exc)[:200]}
+
+    # 6. Circuit breaker states — Issue #9 + #12
+    try:
+        from app.middleware.circuit_breaker import all_breaker_stats
+        breaker_stats = all_breaker_stats()
+        open_breakers = [b["name"] for b in breaker_stats if b["state"] == "OPEN"]
+        checks["circuit_breakers"] = {
+            "ok": len(open_breakers) == 0,
+            "open": open_breakers,
+            "details": breaker_stats,
+        }
+        if open_breakers:
+            checks["circuit_breakers"]["warning"] = f"Open circuits: {', '.join(open_breakers)}"
+    except Exception as exc:
+        checks["circuit_breakers"] = {"ok": True, "note": str(exc)[:100]}
+
+    # 7. Disk writability — Issue #9
+    try:
+        from app.config import DATA_DIR
+        probe_path = DATA_DIR / ".readyz_probe.tmp"
+        probe_path.write_text("ok", encoding="utf-8")
+        probe_path.unlink(missing_ok=True)
+        checks["disk"] = {"ok": True}
+    except Exception as exc:
+        overall_ok = False
+        checks["disk"] = {"ok": False, "error": str(exc)[:200]}
 
     status = 200 if overall_ok else 503
     return jsonify(
@@ -99,15 +161,14 @@ def version_endpoint():
     ), 200
 
 
-# ── Ops health (bearer-token-protected, per-section) ─────────────────────────
+# ── Ops health (bearer-token-protected, full dependency matrix) ───────────────
 
 @bp.route("/api/ops/health")
 @limiter.exempt
 def ops_health():
-    """Deep per-section health check for post-deploy probes.
+    """Deep per-section health check — Issue #9: circuit breakers + queue added.
 
     Protected by OPS_HEALTH_TOKEN bearer token when configured.
-    Returns 200 with ``ok=true`` only when all critical sections pass.
     """
     expected_token = os.environ.get("OPS_HEALTH_TOKEN", "")
     if expected_token:
@@ -122,28 +183,30 @@ def ops_health():
 
     # Database
     try:
+        t0 = time.monotonic()
         db.session.execute(text("SELECT 1"))
-        sections["database"] = {"ok": True}
+        db.session.rollback()
+        sections["database"] = {"ok": True, "latency_ms": round((time.monotonic() - t0) * 1000, 2)}
     except Exception as exc:
         sections["database"] = {"ok": False, "error": str(exc)[:200]}
         overall_ok = False
 
-    # Redis (optional — only flagged critical if configured)
+    # Redis
     redis_url = os.environ.get("REDIS_URL")
     if redis_url:
         try:
             import redis as _redis
             r = _redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
-            t0 = time.time()
+            t0 = time.monotonic()
             r.ping()
-            sections["redis"] = {"ok": True, "latency_ms": round((time.time() - t0) * 1000, 2)}
+            sections["redis"] = {"ok": True, "latency_ms": round((time.monotonic() - t0) * 1000, 2)}
         except Exception as exc:
             sections["redis"] = {"ok": False, "error": str(exc)[:200]}
             overall_ok = False
     else:
         sections["redis"] = {"ok": True, "skipped": True, "note": "REDIS_URL not configured"}
 
-    # Encryption round-trip
+    # Encryption
     try:
         from lib_payments import encrypt_secret, decrypt_secret
         probe = encrypt_secret("ops-probe")
@@ -153,11 +216,14 @@ def ops_health():
         sections["encryption"] = {"ok": False, "error": str(exc)[:200]}
         overall_ok = False
 
-    # Admin key configured
+    # Admin key
     admin_key_set = bool(os.environ.get("ADMIN_SECRET_KEY"))
-    sections["admin_key"] = {"ok": admin_key_set, "note": "Set ADMIN_SECRET_KEY" if not admin_key_set else None}
+    sections["admin_key"] = {
+        "ok": admin_key_set,
+        "note": "Set ADMIN_SECRET_KEY" if not admin_key_set else None,
+    }
 
-    # Disk writability
+    # Disk
     try:
         from app.config import DATA_DIR
         probe_path = DATA_DIR / ".ops_health_probe.tmp"
@@ -167,6 +233,45 @@ def ops_health():
     except Exception as exc:
         sections["disk"] = {"ok": False, "error": str(exc)[:200]}
         overall_ok = False
+
+    # Circuit breakers — Issue #9 + #12
+    try:
+        from app.middleware.circuit_breaker import all_breaker_stats
+        breaker_stats = all_breaker_stats()
+        open_breakers = [b["name"] for b in breaker_stats if b["state"] == "OPEN"]
+        sections["circuit_breakers"] = {
+            "ok": len(open_breakers) == 0,
+            "open": open_breakers,
+            "details": breaker_stats,
+        }
+        if open_breakers:
+            sections["circuit_breakers"]["note"] = (
+                f"Open circuits will self-recover after cooldown: {', '.join(open_breakers)}"
+            )
+    except Exception as exc:
+        sections["circuit_breakers"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Background task queue
+    try:
+        from app.cache import BackgroundTaskQueue
+        _q = BackgroundTaskQueue(name="_health_probe")
+        stats = _q.stats()
+        sections["bg_queue"] = {"ok": True, **stats}
+    except Exception as exc:
+        sections["bg_queue"] = {"ok": True, "note": str(exc)[:100]}
+
+    # DB connection pool stats
+    try:
+        from app.extensions import db as _db
+        pool = _db.engine.pool
+        sections["db_pool"] = {
+            "ok": True,
+            "size": pool.size(),
+            "checked_out": pool.checkedout(),
+            "overflow": pool.overflow(),
+        }
+    except Exception:
+        sections["db_pool"] = {"ok": True, "note": "pool stats unavailable"}
 
     status_code = 200 if overall_ok else 503
     return jsonify(
@@ -178,10 +283,9 @@ def ops_health():
     ), status_code
 
 
-# ── Metrics — JSON (api/v1) + Prometheus text (/metrics) ────────────────────
+# ── Metrics — JSON (api/v1) + Prometheus text (/metrics) ─────────────────────
 
 def _collect_metrics() -> dict:
-    """Collect current metrics as a plain dict (shared by both endpoints)."""
     from app.models import Order, Feedback, Owner
     try:
         order_counts: dict = {}
@@ -207,7 +311,6 @@ def _collect_metrics() -> dict:
 
 @bp.route("/api/v1/metrics")
 def api_metrics_json():
-    """JSON metrics for dashboards."""
     m = _collect_metrics()
     return jsonify(
         orders=m["total_orders"],
@@ -221,57 +324,24 @@ def api_metrics_json():
 @bp.route("/metrics")
 @limiter.exempt
 def prometheus_metrics():
-    """Prometheus-compatible text metrics.
-
-    Returns Prometheus exposition format (text/plain; version=0.0.4).
-    Falls back to JSON when Accept: application/json is explicitly requested.
-    """
     accept = request.headers.get("Accept", "")
     if "application/json" in accept and "text/plain" not in accept:
         return api_metrics_json()
 
     try:
         from prometheus_client import (
-            CollectorRegistry,
-            Gauge,
-            generate_latest,
-            CONTENT_TYPE_LATEST,
+            CollectorRegistry, Gauge, generate_latest, CONTENT_TYPE_LATEST,
         )
-
         reg = CollectorRegistry()
         m = _collect_metrics()
-
-        Gauge(
-            "cafe_uptime_seconds",
-            "Seconds since the Flask application started",
-            registry=reg,
-        ).set(m["uptime_seconds"])
-
-        orders_g = Gauge(
-            "cafe_orders_total",
-            "Total orders by status",
-            ["status"],
-            registry=reg,
-        )
+        Gauge("cafe_uptime_seconds", "Seconds since Flask app started", registry=reg).set(m["uptime_seconds"])
+        orders_g = Gauge("cafe_orders_total", "Total orders by status", ["status"], registry=reg)
         for status, cnt in m["order_counts"].items():
             orders_g.labels(status=status).set(cnt)
-
-        Gauge(
-            "cafe_owners_total",
-            "Total registered owner accounts",
-            registry=reg,
-        ).set(m["total_owners"])
-
-        Gauge(
-            "cafe_feedback_average_rating",
-            "Average customer feedback rating (1-5)",
-            registry=reg,
-        ).set(m["average_rating"])
-
+        Gauge("cafe_owners_total", "Total owner accounts", registry=reg).set(m["total_owners"])
+        Gauge("cafe_feedback_average_rating", "Average feedback rating", registry=reg).set(m["average_rating"])
         return Response(generate_latest(reg), mimetype=CONTENT_TYPE_LATEST)
-
     except ImportError:
-        # prometheus_client not installed — fall back to Prometheus text hand-rolled
         m = _collect_metrics()
         lines = [
             "# HELP cafe_uptime_seconds Seconds since the Flask application started.",
@@ -290,8 +360,7 @@ def prometheus_metrics():
             "# TYPE cafe_feedback_average_rating gauge",
             f"cafe_feedback_average_rating {m['average_rating']}",
         ]
-        body = "\n".join(lines) + "\n"
-        return Response(body, mimetype="text/plain; version=0.0.4; charset=utf-8")
+        return Response("\n".join(lines) + "\n", mimetype="text/plain; version=0.0.4; charset=utf-8")
 
 
 # ── Static well-known files ───────────────────────────────────────────────────

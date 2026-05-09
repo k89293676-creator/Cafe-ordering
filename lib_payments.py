@@ -35,6 +35,20 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 SUPPORTED_PROVIDERS = ("stripe", "razorpay", "cashfree")
+
+# ── Issue #12: Module-level circuit breaker singletons ───────────────────────
+# Imported lazily so lib_payments can be imported without the middleware
+# package being present (e.g., tests or CLI scripts that only need encrypt).
+def _get_cb(name: str):
+    """Return the circuit breaker for *name*, or a no-op context if unavailable."""
+    try:
+        from app.middleware.circuit_breaker import get_breaker
+        return get_breaker(name, failure_threshold=5, recovery_timeout=30)
+    except Exception:
+        import contextlib
+        return contextlib.nullcontext()
+
+
 PROVIDER_LABELS = {"stripe": "Stripe", "razorpay": "Razorpay", "cashfree": "Cashfree"}
 
 # UI-facing setup guidance per provider — keeps the template free of
@@ -244,7 +258,8 @@ class StripeProvider(PaymentProvider):
     def test_connection(self) -> str:
         stripe = self._client()
         try:
-            acct = stripe.Account.retrieve()
+            with _get_cb("stripe"):
+                acct = stripe.Account.retrieve()
         except Exception as exc:  # noqa: BLE001
             raise PaymentProviderError(f"Stripe rejected the credentials: {exc}") from exc
         label = acct.get("business_profile", {}).get("name") or acct.get("email") or acct.get("id")
@@ -271,7 +286,8 @@ class StripeProvider(PaymentProvider):
             sep = "&" if "?" in success_url else "?"
             success_url = f"{success_url}{sep}session_id={{CHECKOUT_SESSION_ID}}"
         try:
-            session = stripe.checkout.Session.create(
+            with _get_cb("stripe"):
+              session = stripe.checkout.Session.create(
                 mode="payment",
                 payment_method_types=["card"],
                 line_items=[{
@@ -456,8 +472,8 @@ class RazorpayProvider(PaymentProvider):
     def test_connection(self) -> str:
         client = self._client()
         try:
-            # Cheapest authenticated read available: list 1 payment.
-            client.payment.all({"count": 1})
+            with _get_cb("razorpay"):
+                client.payment.all({"count": 1})
         except Exception as exc:  # noqa: BLE001
             raise PaymentProviderError(f"Razorpay rejected the credentials: {exc}") from exc
         kind = "live" if self.public_key.startswith("rzp_live_") else "test"
@@ -467,7 +483,8 @@ class RazorpayProvider(PaymentProvider):
                               customer_email="", customer_phone="", return_url=""):
         client = self._client()
         try:
-            order = client.order.create({
+            with _get_cb("razorpay"):
+              order = client.order.create({
                 "amount": int(amount_minor),
                 "currency": (currency or "INR").upper(),
                 "receipt": f"order_{order_id}",

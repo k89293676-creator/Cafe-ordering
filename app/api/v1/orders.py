@@ -1,4 +1,10 @@
-"""Orders API — /api/v1/orders (checkout, get, stream, cancel, reorder)."""
+"""Orders API — /api/v1/orders.
+
+Fixes applied:
+  Issue #6  — Request deduplication via Idempotency-Key header extended to
+               cancel and reorder endpoints.
+  Opt   #1  — ResponseCache applied to per-owner order listing (5-second TTL).
+"""
 from __future__ import annotations
 
 import json
@@ -163,7 +169,13 @@ def checkout():
 @limiter.limit("60 per minute")
 @api_login_required
 def orders_api():
+    """List orders for the logged-in owner.
+
+    Optimization #1: Results are cached for 5 seconds per owner to absorb
+    dashboard polling without hitting the database on every request.
+    """
     from app.services.auth import logged_in_owner_id
+    from app.cache import ResponseCache as _RC
     owner_id = logged_in_owner_id()
     try:
         limit = int(request.args.get("limit", "100"))
@@ -175,7 +187,14 @@ def orders_api():
         offset = 0
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
-    orders = load_orders(owner_id=owner_id, limit=limit, offset=offset)
+
+    cache_key = f"orders:{owner_id}:limit={limit}:offset={offset}"
+    _response_cache = _RC(max_entries=500)
+    orders = _response_cache.get_or_set(
+        cache_key,
+        ttl_seconds=5,
+        factory=lambda: load_orders(owner_id=owner_id, limit=limit, offset=offset),
+    )
     return {"orders": orders, "limit": limit, "offset": offset, "count": len(orders)}, 200
 
 
@@ -257,8 +276,23 @@ def customer_order_stream(order_id: int):
 @bp.route("/api/orders/<int:order_id>/cancel", methods=["POST"])
 @limiter.limit("10 per minute")
 def customer_cancel_order(order_id: int):
+    """Cancel a pending order.
+
+    Issue #6: Idempotency-Key support — duplicate cancel requests return
+    the same 200 response instead of a confusing 409.
+    """
     if not request.is_json:
         abort(400, description="JSON required.")
+
+    # Issue #6: deduplication for cancel
+    from app.cache import IdempotencyCache
+    idem_cache = IdempotencyCache(ttl_seconds=3600)
+    _idem_key = (request.headers.get("Idempotency-Key") or "").strip()[:128]
+    if _idem_key:
+        cached = idem_cache.get(f"cancel:{order_id}", _idem_key)
+        if cached is not None:
+            return cached[0], cached[1]
+
     order = _db_get_order(order_id)
     if not order:
         abort(404, description="Order not found.")
@@ -281,7 +315,11 @@ def customer_cancel_order(order_id: int):
         _notify_owner(owner_id, "order_updated", {"id": order_id, "status": "cancelled"})
     _notify_order_status(order_id, "cancelled")
     log_security("CUSTOMER_CANCEL", f"order_id={order_id}")
-    return {"success": True, "message": "Order cancelled successfully."}, 200
+
+    result = ({"success": True, "message": "Order cancelled successfully."}, 200)
+    if _idem_key:
+        idem_cache.set(f"cancel:{order_id}", _idem_key, result)
+    return result
 
 
 @bp.route("/api/v1/reorder/<int:order_id>", methods=["POST"])
@@ -289,8 +327,22 @@ def customer_cancel_order(order_id: int):
 @api_login_required
 @limiter.limit("10 per minute")
 def reorder_api(order_id: int):
+    """Re-place a previous order.
+
+    Issue #6: Idempotency-Key deduplication prevents accidental double-reorders.
+    """
     from app.services.auth import logged_in_owner_id
     from app.models import Order
+
+    # Issue #6: deduplication for reorder
+    from app.cache import IdempotencyCache
+    idem_cache = IdempotencyCache(ttl_seconds=3600)
+    _idem_key = (request.headers.get("Idempotency-Key") or "").strip()[:128]
+    if _idem_key:
+        cached = idem_cache.get(f"reorder:{order_id}", _idem_key)
+        if cached is not None:
+            return jsonify(**cached[0]), cached[1]
+
     owner_id = logged_in_owner_id()
     original = db.session.get(Order, order_id)
     if not original or original.owner_id != owner_id:
@@ -312,4 +364,7 @@ def reorder_api(order_id: int):
         "notes": original.notes or "",
     }
     new_order = place_order_in_db(new_data)
-    return jsonify(order=new_order, message="Order re-placed successfully."), 201
+    response_body = {"order": new_order, "message": "Order re-placed successfully."}
+    if _idem_key:
+        idem_cache.set(f"reorder:{order_id}", _idem_key, (response_body, 201))
+    return jsonify(**response_body), 201
