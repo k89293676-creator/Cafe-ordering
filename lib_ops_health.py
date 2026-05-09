@@ -92,7 +92,8 @@ def _safe(fn):
 
 
 def _section_inventory() -> dict[str, Any]:
-    from app import Ingredient, db
+    from app.extensions import db
+    from app.models import Ingredient
     total = db.session.query(Ingredient).count()
     low = (
         db.session.query(Ingredient)
@@ -109,7 +110,8 @@ def _section_inventory() -> dict[str, Any]:
 
 
 def _section_billing() -> dict[str, Any]:
-    from app import Order, db
+    from app.extensions import db
+    from app.models import Order
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     paid_today = (
         db.session.query(Order)
@@ -130,7 +132,7 @@ def _section_billing() -> dict[str, Any]:
 
 
 def _section_payment_methods() -> dict[str, Any]:
-    from app import db
+    from app.extensions import db
     try:
         from lib_payments import SUPPORTED_PROVIDERS  # noqa: F401
     except Exception:
@@ -154,7 +156,7 @@ def _section_payment_methods() -> dict[str, Any]:
 
 
 def _section_food_delivery() -> dict[str, Any]:
-    from app import db
+    from app.extensions import db
     try:
         from lib_integrations import SUPPORTED_PLATFORMS  # type: ignore
     except Exception:
@@ -181,7 +183,8 @@ def _section_food_delivery() -> dict[str, Any]:
 
 
 def _section_reorder() -> dict[str, Any]:
-    from app import Order, db
+    from app.extensions import db
+    from app.models import Order
     last7 = datetime.now(timezone.utc) - timedelta(days=7)
     reorder_count = (
         db.session.query(Order)
@@ -192,7 +195,8 @@ def _section_reorder() -> dict[str, Any]:
 
 
 def _section_analytics() -> dict[str, Any]:
-    from app import Order, db
+    from app.extensions import db
+    from app.models import Order
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     return {
         "ordersToday": db.session.query(Order).filter(Order.created_at >= today_start).count(),
@@ -200,7 +204,7 @@ def _section_analytics() -> dict[str, Any]:
 
 
 def _section_sales_dashboard() -> dict[str, Any]:
-    from app import db
+    from app.extensions import db
     bp_present = "sales_dashboard" in current_app.blueprints
     last7 = datetime.now(timezone.utc) - timedelta(days=7)
     last7_orders = db.session.execute(
@@ -211,14 +215,15 @@ def _section_sales_dashboard() -> dict[str, Any]:
 
 
 def _section_menu_engineering() -> dict[str, Any]:
-    from app import db
+    from app.extensions import db
     bp_present = "menu_engineering" in current_app.blueprints
     cat_count = db.session.execute(text("SELECT COUNT(*) FROM categories")).scalar() or 0
     return {"blueprintLoaded": bp_present, "categories": int(cat_count)}
 
 
 def _section_customer_ltv() -> dict[str, Any]:
-    from app import Order, db
+    from app.extensions import db
+    from app.models import Order
     bp_present = "ltv" in current_app.blueprints
     last30 = datetime.now(timezone.utc) - timedelta(days=30)
     distinct_customers = (
@@ -231,7 +236,7 @@ def _section_customer_ltv() -> dict[str, Any]:
 
 
 def _section_employees() -> dict[str, Any]:
-    from app import db
+    from app.extensions import db
     bp_present = "employees" in current_app.blueprints
     total = db.session.execute(text("SELECT COUNT(*) FROM employees")).scalar() or 0
     active = db.session.execute(
@@ -241,14 +246,14 @@ def _section_employees() -> dict[str, Any]:
 
 
 def _section_tables_overview() -> dict[str, Any]:
-    from app import db
+    from app.extensions import db
     bp_present = "tables_overview" in current_app.blueprints
     total = db.session.execute(text("SELECT COUNT(*) FROM tables")).scalar() or 0
     return {"blueprintLoaded": bp_present, "tables": int(total)}
 
 
 def _section_table_calls() -> dict[str, Any]:
-    from app import db
+    from app.extensions import db
     bp_present = "service_calls" in current_app.blueprints
     open_calls = db.session.execute(
         text("SELECT COUNT(*) FROM table_calls WHERE status = 'open'")
@@ -266,7 +271,7 @@ def _section_table_calls() -> dict[str, Any]:
 
 
 def _section_customers() -> dict[str, Any]:
-    from app import db
+    from app.extensions import db
     bp_present = "customers" in current_app.blueprints
     total = db.session.execute(text("SELECT COUNT(*) FROM customers")).scalar() or 0
     return {"blueprintLoaded": bp_present, "registered": int(total)}

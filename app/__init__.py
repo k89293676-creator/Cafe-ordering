@@ -130,7 +130,10 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     )
 
     # ── Extensions ────────────────────────────────────────────────────────────
-    from app.extensions import bcrypt, compress, csrf, db, limiter, login_manager, mail, migrate
+    from app.extensions import (
+        bcrypt, compress, csrf, db, limiter, login_manager,
+        mail, migrate, session_store,
+    )
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -149,6 +152,65 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     login_manager.login_message = "Please log in to access this page."
     login_manager.login_message_category = "warning"
     login_manager.init_app(app)
+
+    # ── Issue #10: Distributed tracing ────────────────────────────────────────
+    # Registered HERE — before blueprints and before_request hooks — so that
+    # g.trace_id is populated as the very first before_request action. Any
+    # code called by later before_request hooks can then call get_trace_id().
+    try:
+        from app.middleware.tracing import init_tracing
+        init_tracing(app)
+        log.info("Distributed tracing middleware registered.")
+    except Exception as _tracing_exc:
+        log.warning("Tracing middleware failed to init: %s", _tracing_exc)
+
+    # ── Issue #5: Server-side session store (Flask-Session) ───────────────────
+    # Initialised HERE — before db.create_all() and blueprints — so the
+    # session interface is active from the very first request. Using the
+    # singleton from app.extensions keeps the init_app() pattern consistent
+    # with every other extension and avoids inline flask_session imports.
+    if session_store is not None:
+        if _cfg.REDIS_URL:
+            try:
+                import redis as _redis
+                _redis_client = _redis.from_url(
+                    _cfg.REDIS_URL,
+                    socket_connect_timeout=2,
+                    socket_timeout=2,
+                )
+                _redis_client.ping()  # fail fast rather than at first request
+                app.config["SESSION_REDIS"] = _redis_client
+                app.config["SESSION_TYPE"] = "redis"
+                session_store.init_app(app)
+                log.info("Server-side sessions backed by Redis.")
+            except ImportError:
+                log.warning("flask-session or redis not installed; using cookie sessions.")
+            except Exception as _sess_exc:
+                log.warning(
+                    "Redis session setup failed (%s); falling back to filesystem sessions.",
+                    _sess_exc,
+                )
+                # Explicit fallback so the session interface is always initialised.
+                try:
+                    import os as _sess_os
+                    _sess_os.makedirs(_cfg.SESSION_FILE_DIR, exist_ok=True)
+                    app.config["SESSION_TYPE"] = "filesystem"
+                    session_store.init_app(app)
+                    log.info(
+                        "Server-side sessions backed by filesystem (%s) [Redis fallback].",
+                        _cfg.SESSION_FILE_DIR,
+                    )
+                except Exception as _fs_exc:
+                    log.warning("Filesystem session fallback failed (%s); using cookie sessions.", _fs_exc)
+        else:
+            try:
+                import os as _sess_os
+                _sess_os.makedirs(_cfg.SESSION_FILE_DIR, exist_ok=True)
+                app.config["SESSION_TYPE"] = "filesystem"
+                session_store.init_app(app)
+                log.info("Server-side sessions backed by filesystem (%s).", _cfg.SESSION_FILE_DIR)
+            except Exception as _sess_exc:
+                log.warning("Filesystem session setup failed (%s); using cookie sessions.", _sess_exc)
 
     # ── Talisman (security headers) ────────────────────────────────────────────
     # force_https is intentionally False: Railway (and most PaaS) terminate
@@ -422,43 +484,6 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
             return redirect(_safe_redirect_target(request.referrer, url_for("web_public.home"))), 302
     except ImportError:
         pass
-
-    # ── Issue #10: Distributed tracing middleware ─────────────────────────────
-    try:
-        from app.middleware.tracing import init_tracing
-        init_tracing(app)
-        log.info("Distributed tracing middleware registered.")
-    except Exception as _tracing_exc:
-        log.warning("Tracing middleware failed to init: %s", _tracing_exc)
-
-    # ── Issue #5: Server-side session store (Flask-Session) ───────────────────
-    if _cfg.REDIS_URL:
-        try:
-            import redis as _redis
-            import flask_session as _flask_session
-            _redis_client = _redis.from_url(
-                _cfg.REDIS_URL,
-                socket_connect_timeout=2,
-                socket_timeout=2,
-            )
-            app.config["SESSION_REDIS"] = _redis_client
-            _flask_session.Session(app)
-            log.info("Server-side sessions backed by Redis.")
-        except ImportError:
-            log.warning("flask-session or redis not installed; using cookie sessions.")
-        except Exception as _sess_exc:
-            log.warning("Redis session setup failed (%s); using cookie sessions.", _sess_exc)
-    else:
-        try:
-            import flask_session as _flask_session
-            import os as _os
-            _os.makedirs(_cfg.SESSION_FILE_DIR, exist_ok=True)
-            _flask_session.Session(app)
-            log.info("Server-side sessions backed by filesystem (%s).", _cfg.SESSION_FILE_DIR)
-        except ImportError:
-            log.debug("flask-session not installed; using cookie sessions.")
-        except Exception as _sess_exc:
-            log.warning("Filesystem session setup failed (%s); using cookie sessions.", _sess_exc)
 
     # ── SSE Redis pub/sub (optional) ──────────────────────────────────────────
     if not (test_config or {}).get("TESTING"):
