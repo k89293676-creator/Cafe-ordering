@@ -159,6 +159,18 @@ def owner_dashboard():
     except Exception:
         pass
 
+    # Build menu dict and JSON blob for the inline editor in the dashboard template.
+    import json as _json
+    _menu_row = db.session.get(Menu, owner_id)
+    _menu_categories = []
+    if _menu_row and isinstance(getattr(_menu_row, "data", None), dict):
+        for _cat in (_menu_row.data or {}).get("categories", []):
+            _cat_copy = dict(_cat)
+            _cat_copy["ownerId"] = owner_id
+            _menu_categories.append(_cat_copy)
+    _menu_dict = {"categories": _menu_categories}
+    menu_json = _json.dumps(_menu_dict, indent=2)
+
     return render_template(
         "owner_dashboard.html",
         owner=owner,
@@ -181,6 +193,8 @@ def owner_dashboard():
         is_impersonating=is_impersonating,
         impersonator_username=impersonator_username,
         owner_username=owner.username if owner else "",
+        menu=_menu_dict,
+        menu_json=menu_json,
     )
 
 
