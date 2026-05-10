@@ -52,11 +52,21 @@ SQLALCHEMY_DATABASE_URI = (
     _RAW_DB_URL if _RAW_DB_URL else f"sqlite:///{DATA_DIR / 'app.db'}"
 )
 
-_DB_POOL_SIZE = int(os.environ.get("DB_POOL_SIZE", "5"))
-_DB_MAX_OVERFLOW = int(os.environ.get("DB_MAX_OVERFLOW", "5"))
-_DB_POOL_TIMEOUT = int(os.environ.get("DB_POOL_TIMEOUT", "20"))
+# Issue 1: Raise pool defaults so the app survives traffic bursts.
+# total_connections = pool_size + max_overflow = 25 + 10 = 35 per process.
+# With WEB_CONCURRENCY=4, peak demand is 4 × 35 = 140 — well within the
+# Railway Postgres 500-connection limit. Tune via env vars for smaller DBs.
+_DB_POOL_SIZE = int(os.environ.get("DB_POOL_SIZE", "25"))      # was 5
+_DB_MAX_OVERFLOW = int(os.environ.get("DB_MAX_OVERFLOW", "10")) # was 5
+_DB_POOL_TIMEOUT = int(os.environ.get("DB_POOL_TIMEOUT", "30")) # was 20
 _DB_STATEMENT_TIMEOUT_MS = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "30000"))
 _DB_CONNECT_TIMEOUT_S = int(os.environ.get("DB_CONNECT_TIMEOUT_S", "10"))
+
+# Issue 6: slow-query threshold for the SQLAlchemy event-listener (separate
+# from SLOW_REQUEST_MS which measures the full HTTP round-trip including
+# Python serialisation).  200 ms is a sensible default for OLTP workloads;
+# lower to 50 ms in staging to surface N+1 queries early.
+SLOW_QUERY_MS: int = int(os.environ.get("SLOW_QUERY_MS", "200") or "200")
 
 if _RAW_DB_URL:
     SQLALCHEMY_ENGINE_OPTIONS: dict = {
@@ -161,8 +171,15 @@ class FlaskConfig:
     SESSION_USE_SIGNER = SESSION_USE_SIGNER
     SESSION_KEY_PREFIX = SESSION_KEY_PREFIX
     SESSION_FILE_DIR = SESSION_FILE_DIR
+    # Issue 4: Tell Flask/Werkzeug to send long-lived Cache-Control headers for
+    # static files in production (1 year). Cache-busting happens via the ?v=
+    # query parameter appended by _safe_url_for(). Zero in development so
+    # changes are visible immediately without a hard-refresh.
+    SEND_FILE_MAX_AGE_DEFAULT = 31_536_000 if IS_PRODUCTION else 0
     # Expose slow-request threshold to app.config (Bug #4 fix — single definition)
     SLOW_REQUEST_MS = SLOW_REQUEST_MS
+    # Issue 6: expose slow-query threshold so blueprints can read app.config
+    SLOW_QUERY_MS = SLOW_QUERY_MS
     # Sentry
     SENTRY_DSN = SENTRY_DSN
     SENTRY_TRACES_SAMPLE_RATE = SENTRY_TRACES_SAMPLE_RATE
