@@ -1,25 +1,30 @@
-# render.yaml — Cafe Ordering (Python / Flask / Gunicorn)
+# render.yaml — Cafe Ordering (Python / Flask / Gunicorn) — Free Tier
+#
+# NOTE: preDeployCommand is a paid feature on Render.
+# Migrations run inside startCommand: "bash scripts/release.sh && python start.py"
+# This ensures DB is migrated before gunicorn accepts traffic.
 #
 # Services:
-#   cafe-ordering         Web  — Flask + Gunicorn
-#   cafe-ordering-worker  Worker — RQ background jobs
+#   cafe-ordering         Web    — Flask + Gunicorn
+#   cafe-ordering-worker  Worker — RQ background jobs & webhook retry
 #   cafe-ordering-redis   Redis  — sessions, rate-limit, RQ queues
 #
 # Database:
-#   cafe-ordering-db      Managed PostgreSQL
+#   cafe-ordering-db      Managed PostgreSQL (free)
 #
-# Required secrets (Render Dashboard → Environment):
-#   SECRET_KEY             32+ random chars
-#   BILLING_ENCRYPTION_KEY Fernet key
-#   ADMIN_SECRET_KEY       Superadmin secret
+# Required secrets (Render Dashboard → each service → Environment):
+#   SECRET_KEY             At least 32 random characters
+#   BILLING_ENCRYPTION_KEY Fernet key for payment encryption
+#   ADMIN_SECRET_KEY       Superadmin bootstrap secret
 #
 # Optional secrets:
-#   SENDGRID_API_KEY, MAIL_DEFAULT_SENDER
-#   STRIPE_SECRET_KEY
-#   RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
-#   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_CLAIM_EMAIL
-#   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
-#   SENTRY_DSN, OPS_HEALTH_TOKEN
+#   SENDGRID_API_KEY, MAIL_DEFAULT_SENDER   — email
+#   STRIPE_SECRET_KEY                        — Stripe payments
+#   RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET    — Razorpay payments
+#   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_CLAIM_EMAIL — push notifications
+#   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER — SMS
+#   SENTRY_DSN                               — error tracking
+#   OPS_HEALTH_TOKEN                         — /api/ops/health bearer token
 
 databases:
   - name: cafe-ordering-db
@@ -30,7 +35,7 @@ databases:
 
 services:
 
-  # ── Managed Redis ───────────────────────────────────────────────────────────
+  # ── Managed Redis ────────────────────────────────────────────────────────────
   - type: redis
     name: cafe-ordering-redis
     region: oregon
@@ -38,15 +43,14 @@ services:
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
 
-  # ── Web service (Flask / Gunicorn) ──────────────────────────────────────────
+  # ── Web service (Flask / Gunicorn) ───────────────────────────────────────────
   - type: web
     name: cafe-ordering
     runtime: python
     region: oregon
     plan: free
     buildCommand: "pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r requirements.txt"
-    preDeployCommand: "bash scripts/release.sh"
-    startCommand: "python start.py"
+    startCommand: "bash scripts/release.sh && python start.py"
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
@@ -98,7 +102,7 @@ services:
       - key: TWILIO_FROM_NUMBER
         sync: false
 
-  # ── RQ background worker ────────────────────────────────────────────────────
+  # ── RQ background worker ──────────────────────────────────────────────────────
   - type: worker
     name: cafe-ordering-worker
     runtime: python
