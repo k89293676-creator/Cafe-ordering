@@ -306,6 +306,9 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         # ── Web auth blueprint ────────────────────────────────────────────
         "owner_logout":                   "web_auth.owner_logout",
         "owner_login":                    "web_auth.owner_login",
+        "owner_signup":                   "web_auth.owner_signup",
+        "owner_landing":                  "web_public.owner_landing",
+        "owner_redeem_key":               "web_auth.owner_redeem_key",
         # ── Web analytics blueprint ───────────────────────────────────────
         "owner_analytics":                "web_analytics.owner_analytics",
         "export_orders_csv":              "web_analytics.export_orders_csv",

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Two-Factor Authentication — Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/enhancements.css" />
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-logo">
+    <div class="auth-logo-wordmark">11:11</div>
+    <h1>Cafe 11:11</h1>
+    <p>Owner Management</p>
+  </div>
+
+  <div class="auth-card">
+    <h2>Two-Factor Authentication</h2>
+    <p class="subtitle">
+      Open your authenticator app{% if username %} for <strong>{{ username }}</strong>{% endif %} and enter the 6-digit code.
+    </p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+      <div class="alert alert-{{ 'error' if category in ('error','danger') else category }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <form method="post" autocomplete="off" id="totp-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="form-group">
+        <label for="totp_code">6-Digit Code</label>
+        <input
+          id="totp_code"
+          name="totp_code"
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9]{6}"
+          maxlength="6"
+          minlength="6"
+          placeholder="— — — — — —"
+          autocomplete="one-time-code"
+          required
+          autofocus
+          style="font-size:1.75rem;letter-spacing:0.45em;text-align:center;font-variant-numeric:tabular-nums;"
+        />
+      </div>
+      <button class="btn btn-primary btn-full" type="submit" style="margin-top:0.75rem;" id="verify-btn">
+        Verify &amp; Sign In →
+      </button>
+    </form>
+
+    <p class="auth-footer" style="margin-top:1.25rem;">
+      Not you? <a href="{{ url_for('web_auth.owner_login') }}">Back to sign in</a>
+    </p>
+  </div>
+</div>
+<script>
+(function () {
+  const input = document.getElementById('totp_code');
+  const btn = document.getElementById('verify-btn');
+  if (!input) return;
+
+  // Strip non-digits as user types, auto-submit at 6
+  input.addEventListener('input', function () {
+    this.value = this.value.replace(/\D/g, '').slice(0, 6);
+    if (this.value.length === 6) {
+      if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
+      this.form.submit();
+    }
+  });
+
+  // Handle paste — strip non-digits and auto-submit
+  input.addEventListener('paste', function (e) {
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData).getData('text');
+    this.value = text.replace(/\D/g, '').slice(0, 6);
+    if (this.value.length === 6) {
+      if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
+      this.form.submit();
+    }
+  });
+})();
+</script>
+</body>
+</html>
