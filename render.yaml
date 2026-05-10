@@ -1,17 +1,21 @@
 services:
   - type: web
-    name: cafe-ordering-api
-    runtime: node
+    name: cafe-ordering
+    runtime: python
     region: oregon
     plan: free
-    rootDir: .
-    buildCommand: npm install -g pnpm && pnpm install --frozen-lockfile && pnpm --filter @workspace/api-server run build
-    startCommand: node artifacts/api-server/dist/index.mjs
-    healthCheckPath: /api/healthz
+    buildCommand: pip install --no-cache-dir -r requirements.txt
+    preDeployCommand: bash scripts/release.sh
+    startCommand: python start.py
+    healthCheckPath: /healthz
     envVars:
-      - key: NODE_ENV
+      - key: FLASK_ENV
         value: production
-      - key: PORT
-        value: 10000
+      - key: WEB_CONCURRENCY
+        value: "2"
       - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: REDIS_URL
         sync: false
