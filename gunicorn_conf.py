@@ -1,4 +1,4 @@
-"""Gunicorn configuration for production (Railway) deployments.
+"""Gunicorn configuration for production (Railway / Render) deployments.
 
 Loaded by ``start.py`` via ``--config python:gunicorn_conf``. Hard-coded
 defaults are tuned for Railway free-tier (512 MB / 1 vCPU). Each value can

@@ -14,11 +14,13 @@ def _validate_env() -> None:
     errors: list[str] = []
 
     # Detect whether we are running in a production-like environment.
-    # Railway sets RAILWAY_ENVIRONMENT; IS_PRODUCTION is the manual override.
+    # Railway sets RAILWAY_ENVIRONMENT; Render sets RENDER=true;
+    # IS_PRODUCTION is the manual override.
     is_prod = (
         os.environ.get("IS_PRODUCTION", "").lower() in {"1", "true", "yes"}
         or os.environ.get("RAILWAY_ENVIRONMENT", "").lower() == "production"
         or os.environ.get("FLASK_ENV", "") == "production"
+        or os.environ.get("RENDER") is not None
     )
 
     secret_key = os.environ.get("SECRET_KEY", "")
@@ -33,7 +35,7 @@ def _validate_env() -> None:
     if is_prod and not os.environ.get("DATABASE_URL"):
         errors.append(
             "DATABASE_URL is not set. Orders would be lost on container restart. "
-            "Attach a Railway PostgreSQL service and confirm DATABASE_URL is wired."
+            "Attach a Postgres service (Railway / Render) and confirm DATABASE_URL is wired."
         )
 
     if errors:
@@ -45,7 +47,8 @@ def _validate_env() -> None:
     port = os.environ.get("PORT", "8000")
     workers = os.environ.get("WEB_CONCURRENCY", "auto")
     commit = (
-        os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:12]
+        (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12]
+        or (os.environ.get("RENDER_GIT_COMMIT") or "")[:12]
         or os.environ.get("APP_VERSION", "dev")
     )
     env_label = "production" if is_prod else "development"

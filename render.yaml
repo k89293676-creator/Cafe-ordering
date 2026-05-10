@@ -1,0 +1,125 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# Deploy in one click:
+#   1. Push this file to your GitHub repo (already done).
+#   2. In Render dashboard → New → Blueprint → connect this repo.
+#   3. Render reads this file, creates the web service + Postgres DB,
+#      wires DATABASE_URL automatically, and runs migrations pre-deploy.
+#
+# Environment variables marked `generateValue: true` are auto-generated
+# by Render (random secrets). All others can be overridden in the Render
+# dashboard after the first deploy.
+
+services:
+  - type: web
+    name: cafe-ordering
+    runtime: python
+    # Render reads runtime.txt (python-3.12) for the Python version.
+    # Explicitly pinning here as a belt-and-suspenders fallback.
+    pythonVersion: "3.12"
+
+    # ── Build ──────────────────────────────────────────────────────────────
+    buildCommand: pip install --no-cache-dir -r requirements.txt
+
+    # ── Pre-deploy (runs BEFORE new containers receive traffic) ────────────
+    # Applies Alembic migrations atomically: old container keeps serving
+    # while the new one migrates. Identical to the Railway release step.
+    preDeployCommand: bash scripts/release.sh
+
+    # ── Start ──────────────────────────────────────────────────────────────
+    # start.py validates env vars, then exec-s gunicorn with gunicorn_conf.py
+    startCommand: python start.py
+
+    # ── Health check ───────────────────────────────────────────────────────
+    # /healthz is a plain-text liveness probe with no DB dependency.
+    # Render marks the deploy successful only after this returns 200.
+    healthCheckPath: /healthz
+
+    # ── Auto-deploy on every push to main ──────────────────────────────────
+    autoDeploy: true
+
+    # ── Environment variables ───────────────────────────────────────────────
+    envVars:
+      # Flask app module (required for `flask db upgrade` in release.sh)
+      - key: FLASK_APP
+        value: app
+
+      # Session signing + CSRF secret — Render generates a secure random value.
+      - key: SECRET_KEY
+        generateValue: true
+
+      # Tell the app it is running in production (skips dev-only fallbacks).
+      - key: IS_PRODUCTION
+        value: "true"
+
+      # DATABASE_URL is injected automatically from the linked Postgres service.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cafe-ordering-db
+          property: connectionString
+
+      # Signup gating: 'approval' requires superadmin to approve new owners.
+      # Never use 'open' in production — it lets anyone self-register a cafe.
+      - key: OWNER_SIGNUP_MODE
+        value: approval
+
+      # Render terminates TLS at the edge; trust 1 proxy header hop.
+      - key: TRUSTED_PROXIES
+        value: "1"
+
+      # Single worker on Render's free tier (512 MB RAM, shared CPU).
+      # Increase only after upgrading to a paid instance type.
+      - key: WEB_CONCURRENCY
+        value: "1"
+
+      # Connection pool tuned for Render's free Postgres (max 25 connections).
+      # pool_size=5 + max_overflow=5 = 10 max connections per worker process.
+      - key: DB_POOL_SIZE
+        value: "5"
+      - key: DB_MAX_OVERFLOW
+        value: "5"
+
+      # ── Optional — uncomment and fill in to enable these features ─────────
+
+      # Redis URL (Render Redis add-on or external Redis Cloud / Upstash).
+      # Enables distributed rate-limiting, SSE pub/sub, background task queue,
+      # and server-side sessions (required when WEB_CONCURRENCY > 1).
+      # - key: REDIS_URL
+      #   value: rediss://...
+
+      # Superadmin bootstrap credentials (creates the account on first boot).
+      # - key: SUPERADMIN_USERNAME
+      #   value: superadmin
+      # - key: SUPERADMIN_PASSWORD
+      #   generateValue: true
+
+      # Admin portal secret key (legacy /admin route).
+      # - key: ADMIN_SECRET_KEY
+      #   generateValue: true
+
+      # Sentry error monitoring DSN.
+      # - key: SENTRY_DSN
+      #   value: https://...@sentry.io/...
+
+      # SMTP mail settings (order confirmation emails).
+      # - key: MAIL_SERVER
+      #   value: smtp.sendgrid.net
+      # - key: MAIL_PORT
+      #   value: "587"
+      # - key: MAIL_USE_TLS
+      #   value: "true"
+      # - key: MAIL_USERNAME
+      #   value: apikey
+      # - key: MAIL_PASSWORD
+      #   value: ""
+      # - key: MAIL_DEFAULT_SENDER
+      #   value: orders@example.com
+
+# ── PostgreSQL database ─────────────────────────────────────────────────────
+databases:
+  - name: cafe-ordering-db
+    databaseName: cafe_ordering
+    user: cafe
+    # Free tier: 1 GB storage, 25 max connections, no standby replica.
+    # Upgrade to 'starter' or higher for production workloads.
+    plan: free

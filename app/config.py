@@ -29,11 +29,14 @@ IS_PRODUCTION = (
     os.environ.get("IS_PRODUCTION", "").lower() in {"1", "true", "yes", "on"}
     or os.environ.get("FLASK_ENV") == "production"
     or os.environ.get("RAILWAY_ENVIRONMENT") is not None
+    or os.environ.get("RENDER") is not None  # Render sets RENDER=true
 )
 
 APP_VERSION = (
     os.environ.get("APP_VERSION")
-    or os.environ.get("RAILWAY_GIT_COMMIT_SHA", "dev")[:12]
+    or (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12]
+    or (os.environ.get("RENDER_GIT_COMMIT") or "")[:12]
+    or "dev"
 )
 APP_START_TIME: float = 0.0
 
