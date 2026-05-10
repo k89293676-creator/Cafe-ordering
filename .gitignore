@@ -1,5 +1,3 @@
-# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
-
 # compiled output
 dist
 tmp
@@ -41,23 +39,18 @@ testem.log
 .DS_Store
 Thumbs.db
 
-.cursor/rules/nx-rules.mdc
-.github/instructions/nx.instructions.md
+# Replit internal (never push)
+.cache/
+.local/
+.replit
+.replitignore
+attached_assets/
 
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.egg-info/
-.eggs/
-dist/
-build/
-*.so
+# Secrets / environment
 .env
 .env.*
 !.env.example
 
-# Replit
-.cache/
-.local/
+# Cursor / GitHub Copilot rules
+.cursor/
+.github/instructions/
