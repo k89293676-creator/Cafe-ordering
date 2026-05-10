@@ -323,7 +323,7 @@ def create_owner():
         flash(f"Username '{username}' already exists.", "danger")
         return redirect(url_for("admin.dashboard"))
     pw_hash = store._make_password_hash(password)
-    create_owner_in_db(username, email, pw_hash, cafe_name, cafe_id)
+    create_owner_in_db(username, email, pw_hash, cafe_name)
     flash(f"Owner <strong>{username}</strong> created successfully.", "success")
     return redirect(url_for("admin.dashboard"))
 
