@@ -52,6 +52,47 @@ _DB_INIT_LAST_ATTEMPT: float = 0.0
 
 _REQUEST_ID_HEADER = "X-Request-ID"
 
+# ── Issue 6: slow-query monitoring ────────────────────────────────────────────
+# Guard prevents duplicate listener registrations when create_app() is called
+# more than once (e.g. test suite running multiple factory invocations).
+_SLOW_QUERY_REGISTERED = False
+
+
+def _register_slow_query_listener() -> None:
+    """Register a one-time SQLAlchemy Engine-class event for slow-query logging.
+
+    Using the Engine *class* (not an instance) means the listener fires on
+    every engine created in this process — including the one Flask-SQLAlchemy
+    creates lazily after db.init_app().  The listener stacks perf_counter
+    timestamps on conn.info so it is gevent-safe and re-entrant.
+    """
+    global _SLOW_QUERY_REGISTERED
+    if _SLOW_QUERY_REGISTERED:
+        return
+    _SLOW_QUERY_REGISTERED = True
+
+    import time as _time
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    @event.listens_for(Engine, "before_cursor_execute")
+    def _sq_before(conn, cursor, stmt, params, ctx, exec_many):
+        conn.info.setdefault("_sq_t", []).append(_time.perf_counter())
+
+    @event.listens_for(Engine, "after_cursor_execute")
+    def _sq_after(conn, cursor, stmt, params, ctx, exec_many):
+        stack = conn.info.get("_sq_t")
+        if not stack:
+            return
+        elapsed_ms = (_time.perf_counter() - stack.pop(-1)) * 1000
+        if elapsed_ms >= _cfg.SLOW_QUERY_MS:
+            msg = "slow_query durationMs=%.1f stmt=%.200s"
+            try:
+                from flask import current_app
+                current_app.logger.warning(msg, elapsed_ms, stmt)
+            except RuntimeError:
+                log.warning(msg, elapsed_ms, stmt)
+
 
 def _initialize_runtime_state(force: bool = False) -> bool:
     global _DB_READY, _DB_INIT_ERROR, _DB_INIT_LAST_ATTEMPT
@@ -136,6 +177,7 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     )
 
     db.init_app(app)
+    _register_slow_query_listener()  # Issue 6: slow-query event listener
     migrate.init_app(app, db)
     bcrypt.init_app(app)
     mail.init_app(app)
@@ -352,9 +394,18 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
 
     def _safe_url_for(endpoint: str, **values):  # type: ignore[override]
         """url_for() that resolves legacy monolith endpoint names and returns
-        '#' instead of raising BuildError for not-yet-migrated endpoints."""
+        '#' instead of raising BuildError for not-yet-migrated endpoints.
+
+        Issue 4: injects ?v=<APP_VERSION> into static asset URLs so that the
+        long-lived Cache-Control: max-age=31536000 header (set via
+        SEND_FILE_MAX_AGE_DEFAULT) is safe — a new deploy changes the version
+        string, busting every cached asset without renaming files.
+        """
         from flask import url_for as _uf
         resolved = _ENDPOINT_ALIASES.get(endpoint, endpoint)
+        # Issue 4: append cache-busting version to static URLs only.
+        if resolved == "static" and "v" not in values and _cfg.APP_VERSION:
+            values["v"] = _cfg.APP_VERSION
         try:
             return _uf(resolved, **values)
         except _BuildError:
