@@ -388,6 +388,61 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         "home":                           "web_public.home",
         # ── Extension blueprints ──────────────────────────────────────────
         "tables_overview_view":           "tables_overview.view",
+        # ── Billing blueprint ─────────────────────────────────────────────
+        "owner_billing_overview":                  "billing.owner_billing_overview",
+        "owner_billing_open":                      "billing.owner_billing_open",
+        "owner_billing_order_detail":              "billing.owner_billing_order_detail",
+        "owner_billing_adjust":                    "billing.owner_billing_adjust",
+        "owner_billing_add_item":                  "billing.owner_billing_add_item",
+        "owner_billing_remove_item":               "billing.owner_billing_remove_item",
+        "owner_billing_settle":                    "billing.owner_billing_settle",
+        "owner_billing_void":                      "billing.owner_billing_void",
+        "owner_billing_refund":                    "billing.owner_billing_refund",
+        "owner_billing_invoice":                   "billing.owner_billing_invoice",
+        "owner_billing_eod":                       "billing.owner_billing_eod",
+        "owner_billing_eod_csv":                   "billing.owner_billing_eod_csv",
+        "owner_billing_refunds":                   "billing.owner_billing_refunds",
+        "owner_billing_aging":                     "billing.owner_billing_aging",
+        "owner_billing_drawer":                    "billing.owner_billing_drawer",
+        "owner_billing_health":                    "billing.owner_billing_health",
+        "owner_billing_health_json":               "billing.owner_billing_health_json",
+        "owner_billing_logs":                      "billing.owner_billing_logs",
+        "owner_billing_settings":                  "billing.owner_billing_settings",
+        "owner_billing_payment_methods":           "billing.owner_billing_payment_methods",
+        "owner_billing_payment_methods_save":      "billing.owner_billing_payment_methods_save",
+        "owner_billing_payment_methods_test":      "billing.owner_billing_payment_methods_test",
+        "owner_billing_payment_methods_rotate_webhook": "billing.owner_billing_payment_methods_rotate_webhook",
+        "owner_billing_payment_methods_delete":    "billing.owner_billing_payment_methods_delete",
+        "owner_billing_create_charge":             "billing.owner_billing_create_charge",
+        "billing_pay_page":                        "billing.billing_pay_page",
+        "billing_pay_status":                      "billing.billing_pay_status",
+        "billing_pay_razorpay_verify":             "billing.billing_pay_razorpay_verify",
+        # ── Aggregators blueprint ─────────────────────────────────────────
+        "owner_aggregators":                       "aggregators.owner_aggregators",
+        "owner_aggregators_save":                  "aggregators.owner_aggregators_save",
+        "owner_aggregators_test":                  "aggregators.owner_aggregators_test",
+        "owner_aggregators_delete":                "aggregators.owner_aggregators_delete",
+        "owner_aggregator_order_action":           "aggregators.owner_aggregator_order_action",
+        # ── Integrations hub blueprint ────────────────────────────────────
+        "owner_integrations_hub":                  "integrations.owner_integrations_hub",
+        "owner_integrations_test_all":             "integrations.owner_integrations_test_all",
+        "owner_integrations_checklist_json":       "integrations.owner_integrations_checklist_json",
+        # ── Superadmin extras ─────────────────────────────────────────────
+        "superadmin_analytics":                    "web_superadmin.superadmin_analytics",
+        # ── New owner routes ──────────────────────────────────────────────
+        "reorder_view":                            "web_owner.reorder_view",
+        "owner_customers":                         "web_owner.owner_customers",
+        "download_all_table_qr_posters":           "web_owner.download_all_table_qr_posters",
+        # ── Inventory extras ──────────────────────────────────────────────
+        "import_inventory_csv":                    "web_inventory.import_inventory_csv",
+        "export_inventory_csv":                    "web_inventory.export_inventory_csv",
+        "restock_ingredient":                      "web_inventory.restock_ingredient",
+        # ── Menu extras ───────────────────────────────────────────────────
+        "export_menu_csv":                         "web_owner_menu.export_menu_csv",
+        "save_menu_item":                          "web_owner_menu.save_menu_item",
+        "owner_upload_item_image":                 "web_owner_menu.owner_upload_item_image",
+        # ── Daily report PDF ──────────────────────────────────────────────
+        "daily_report_pdf":                        "billing.owner_billing_eod",
     }
 
     from werkzeug.routing import BuildError as _BuildError
