@@ -298,8 +298,11 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     # endpoint that has not been migrated yet so template rendering never 500s.
     _ENDPOINT_ALIASES: dict[str, str] = {
         # ── Web owner blueprint ───────────────────────────────────────────
+        "owner_dashboard":                "web_owner.owner_dashboard",
+        "owner_panel":                    "web_owner.owner_dashboard",   # legacy alias
         "kitchen_view":                   "web_owner.kitchen",
         "owner_profile":                  "web_owner.owner_profile",
+        "owner_tables":                   "web_owner.owner_tables",
         "create_table":                   "web_owner.owner_add_table",
         "delete_table":                   "web_owner.owner_delete_table",
         "rename_table":                   "web_owner.owner_rename_table",
@@ -309,18 +312,38 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         "owner_signup":                   "web_auth.owner_signup",
         "owner_landing":                  "web_public.owner_landing",
         "owner_redeem_key":               "web_auth.owner_redeem_key",
+        # Legacy TOTP route name used by pre-refactor templates
+        "owner_login_otp":                "web_auth.owner_login_totp_verify",
+        "owner_login_totp_verify":        "web_auth.owner_login_totp_verify",
         # ── Web analytics blueprint ───────────────────────────────────────
         "owner_analytics":                "web_analytics.owner_analytics",
         "export_orders_csv":              "web_analytics.export_orders_csv",
         # ── Web inventory blueprint ───────────────────────────────────────
         "inventory_view":                 "web_inventory.owner_inventory",
+        "add_ingredient":                 "web_inventory.owner_add_ingredient",
+        "update_ingredient":              "web_inventory.owner_update_ingredient",
+        "delete_ingredient":              "web_inventory.owner_delete_ingredient",
         # ── Web superadmin blueprint ──────────────────────────────────────
         "superadmin_dashboard":           "web_superadmin.superadmin_dashboard",
+        "superadmin_verify_key":          "web_superadmin.superadmin_verify_key",
+        "superadmin_toggle_owner":        "web_superadmin.superadmin_toggle_owner",
+        "superadmin_delete_owner":        "web_superadmin.superadmin_delete_owner",
+        "superadmin_approve_owner":       "web_superadmin.superadmin_approve_owner",
+        "superadmin_generate_admin_key":  "web_superadmin.superadmin_generate_admin_key",
+        "superadmin_revoke_admin_key":    "web_superadmin.superadmin_generate_admin_key",  # same form
+        "superadmin_leads":               "web_superadmin.superadmin_leads",
+        "superadmin_security_log":        "web_superadmin.superadmin_security_log",
         # ── Web owner_menu blueprint ──────────────────────────────────────
+        "owner_menu":                     "web_owner_menu.owner_menu",
         "create_menu_category":           "web_owner_menu.owner_add_category",
         "delete_menu_category":           "web_owner_menu.owner_delete_category",
+        "save_menu_item":                 "web_owner_menu.owner_add_item",
         "delete_menu_item":               "web_owner_menu.owner_delete_item",
         "toggle_menu_item_availability":  "web_owner_menu.owner_toggle_item",
+        "update_menu":                    "web_owner_menu.owner_import_menu",
+        # ── Web public blueprint ──────────────────────────────────────────
+        "table_order":                    "web_public.table_order",
+        "home":                           "web_public.home",
         # ── Extension blueprints ──────────────────────────────────────────
         "tables_overview_view":           "tables_overview.view",
     }
