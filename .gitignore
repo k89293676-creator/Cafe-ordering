@@ -1,56 +1,70 @@
-# compiled output
-dist
-tmp
-out-tsc
+# ── Compiled output ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
 *.tsbuildinfo
-.expo
-.expo-shared
 
-# dependencies
-node_modules
+# ── Virtual environments ────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.Python
 
-# IDEs and editors
-/.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
+# ── Dependencies ────────────────────────────────────────────────────────────
+node_modules/
 
-# IDE - VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-
-# misc
-/.sass-cache
-/connect.lock
-/coverage
-/libpeerconnection.log
-npm-debug.log
-yarn-error.log
-testem.log
-/typings
-
-# System Files
-.DS_Store
-Thumbs.db
-
-# Replit internal (never push)
-.cache/
-.local/
-.replit
-.replitignore
-attached_assets/
-
-# Secrets / environment
+# ── Secrets & environment ──────────────────────────────────────────────────
 .env
 .env.*
 !.env.example
+*.key
+*.pem
+secrets.json
 
-# Cursor / GitHub Copilot rules
-.cursor/
-.github/instructions/
+# ── Data files (runtime-generated) ────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+.flask_sessions/
+flask_session/
+
+# ── Logs ──────────────────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+yarn-error.log
+
+# ── OS files ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDEs ──────────────────────────────────────────────────────────────────
+.idea/
+.vscode/*
+!.vscode/settings.json
+*.sublime-workspace
+.project
+.classpath
+
+# ── Replit (NEVER commit these) ────────────────────────────────────────────
+.replit
+.replitignore
+replit.md
+.cache/
+.local/
+.npmrc
+attached_assets/
+
+# ── Coverage & testing ─────────────────────────────────────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
