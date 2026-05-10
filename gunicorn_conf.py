@@ -85,3 +85,19 @@ def worker_int(worker) -> None:
 def worker_abort(worker) -> None:
     """SIGABRT — usually a hung request killed by the master timeout."""
     worker.log.warning("worker aborted (timeout?)")
+
+
+def worker_exit(server, worker) -> None:
+    """Issue 8: Dispose the worker's DB connection pool on graceful shutdown.
+
+    This ensures PostgreSQL does not accumulate idle-in-transaction connections
+    after a rolling Railway deploy.  Belt-and-suspenders alongside the
+    post_fork dispose — that one runs after fork, this one runs on exit so
+    every normal worker lifecycle is book-ended with a clean pool state.
+    """
+    try:
+        from app.extensions import db
+        db.engine.dispose()
+        worker.log.info("worker_exit: DB connection pool disposed cleanly.")
+    except Exception:  # pragma: no cover — best-effort
+        pass
