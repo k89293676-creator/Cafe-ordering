@@ -311,3 +311,179 @@ def kitchen():
     owner = logged_in_owner_obj()
     settings = load_settings(owner_id)
     return render_template("kitchen.html", owner=owner, settings=settings)
+
+
+# ---------------------------------------------------------------------------
+# Reorder — look up past orders by customer phone
+# ---------------------------------------------------------------------------
+
+@bp.route("/owner/reorder")
+@login_required
+def reorder_view():
+    from app.models import Order
+    from app.services.menu import load_owner_menu
+    owner_id = logged_in_owner_id()
+    owner = logged_in_owner_obj()
+    phone = request.args.get("phone", "").strip()[:30]
+    past_orders = []
+    if phone:
+        past_orders = (Order.query
+                       .filter_by(owner_id=owner_id, customer_phone=phone)
+                       .order_by(Order.created_at.desc())
+                       .limit(20).all())
+
+    def _order_dict(o):
+        return {
+            "id": o.id,
+            "tableId": o.table_id or "",
+            "tableName": o.table_name or "",
+            "customerName": o.customer_name or "Guest",
+            "customerPhone": o.customer_phone or "",
+            "items": o.items or [],
+            "total": float(o.total or 0),
+            "status": o.status or "pending",
+            "createdAt": o.created_at.isoformat() if o.created_at else None,
+        }
+
+    return render_template(
+        "reorder.html",
+        phone=phone,
+        past_orders=[_order_dict(o) for o in past_orders],
+        owner=owner,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Customers — aggregated customer ledger from order history
+# ---------------------------------------------------------------------------
+
+@bp.route("/owner/customers")
+@login_required
+def owner_customers():
+    import csv as _csv
+    import io as _io
+    from datetime import datetime as _dt
+    from flask import Response as _Resp
+    from app.models import Order
+
+    owner_id = logged_in_owner_id()
+    owner = logged_in_owner_obj()
+    search = (request.args.get("q") or "").strip().lower()[:80]
+    export = request.args.get("export") == "csv"
+
+    orders = (Order.query
+              .filter_by(owner_id=owner_id)
+              .order_by(Order.created_at.desc())
+              .all())
+
+    customer_map: dict = {}
+    for o in orders:
+        key = (o.customer_phone or o.customer_email or o.customer_name or f"guest-{o.id}").lower().strip()
+        if key not in customer_map:
+            customer_map[key] = {
+                "name": o.customer_name or "Guest",
+                "email": o.customer_email or "",
+                "phone": o.customer_phone or "",
+                "orderCount": 0,
+                "completedCount": 0,
+                "totalSpend": 0.0,
+                "lastOrder": o.created_at.isoformat() if o.created_at else None,
+                "firstOrder": o.created_at.isoformat() if o.created_at else None,
+            }
+        c = customer_map[key]
+        c["orderCount"] += 1
+        if o.status == "completed":
+            c["completedCount"] += 1
+            c["totalSpend"] += float(o.total or 0)
+        ts = o.created_at.isoformat() if o.created_at else None
+        if ts and (not c["firstOrder"] or ts < c["firstOrder"]):
+            c["firstOrder"] = ts
+
+    for c in customer_map.values():
+        c["totalSpend"] = round(c["totalSpend"], 2)
+        c["avgOrder"] = round(c["totalSpend"] / c["completedCount"], 2) if c["completedCount"] else 0.0
+
+    customers = sorted(customer_map.values(), key=lambda c: c["totalSpend"], reverse=True)
+    if search:
+        customers = [c for c in customers
+                     if search in c["name"].lower()
+                     or search in c["email"].lower()
+                     or search in c["phone"]]
+
+    if export:
+        out = _io.StringIO()
+        w = _csv.writer(out)
+        w.writerow(["name", "email", "phone", "order_count", "completed_orders",
+                    "total_spend", "avg_order", "first_order", "last_order"])
+        for c in customers:
+            w.writerow([c["name"], c["email"], c["phone"], c["orderCount"],
+                        c["completedCount"], c["totalSpend"], c["avgOrder"],
+                        c["firstOrder"] or "", c["lastOrder"] or ""])
+        out.seek(0)
+        fname = f"customers_{_dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        return _Resp(out.getvalue(), mimetype="text/csv",
+                     headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+    return render_template(
+        "owner_customers.html",
+        customers=customers,
+        search=search,
+        owner=owner,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Download all table QR posters as a zip
+# ---------------------------------------------------------------------------
+
+@bp.route("/owner/tables/qr-posters.zip")
+@login_required
+def download_all_table_qr_posters():
+    import io as _io
+    import re as _re
+    import zipfile
+    from app.services.tables import load_tables, load_settings
+
+    owner_id = logged_in_owner_id()
+    owner = logged_in_owner_obj()
+    tables = [t for t in load_tables() if t.get("ownerId") == owner_id]
+    if not tables:
+        flash("Add at least one table before downloading posters.")
+        return redirect(url_for("web_owner.owner_tables"))
+
+    cafe_name = (owner.cafe_name if owner else None) or "Welcome"
+    branding = load_settings(owner_id) if owner_id else {}
+    brand_color = branding.brandColor if hasattr(branding, "brandColor") else "#4f46e5"
+    logo_url = branding.logoUrl if hasattr(branding, "logoUrl") else ""
+
+    # Try PIL / qrcode for branded posters; fall back to raw QR bytes if unavailable
+    try:
+        import qrcode as _qr
+        from PIL import Image as _Image, ImageDraw as _Draw, ImageFont as _Font
+        _have_pil = True
+    except ImportError:
+        _have_pil = False
+
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for table in tables:
+            table_url = url_for("web_public.table_order", table_id=table["id"], _external=True)
+            png_buf = _io.BytesIO()
+            if _have_pil:
+                qr = _qr.make(table_url)
+                qr.save(png_buf, format="PNG")
+            else:
+                import qrcode as _qr2
+                _qr2.make(table_url).save(png_buf, format="PNG")
+            safe_name = _re.sub(r"[^a-zA-Z0-9_\-]+", "_",
+                                str(table.get("name") or table["id"]))[:40] or table["id"]
+            zf.writestr(f"qr-{safe_name}-{table['id']}.png", png_buf.getvalue())
+    buf.seek(0)
+
+    safe_cafe = _re.sub(r"[^a-zA-Z0-9_\-]+", "_", cafe_name)[:40] or "cafe"
+    from flask import Response as _Resp
+    return _Resp(
+        buf.read(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_cafe}-table-qr-posters.zip"'},
+    )
