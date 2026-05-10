@@ -36,6 +36,11 @@ def init_extensions(app: "Flask") -> None:
         ("multi_tenant_bp", "bp"),
         ("tables_overview_bp", "bp"),
         ("exports_bp", "bp"),
+        # ── New feature blueprints ────────────────────────────────────────
+        ("billing_bp", "bp"),
+        ("aggregators_bp", "bp"),
+        ("integrations_bp", "bp"),
+        ("metrics_bp", "bp"),
     ]
     for module_name, bp_attr in blueprints_to_try:
         try:
