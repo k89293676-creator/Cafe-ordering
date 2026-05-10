@@ -173,6 +173,58 @@ def readiness_check():
         overall_ok = False
         checks["disk"] = {"ok": False, "error": str(exc)[:200]}
 
+    # 8. DB connection-pool utilisation — Issue 1.
+    # A saturated pool means all new requests will block for up to
+    # pool_timeout seconds then raise OperationalError.  Alert before that.
+    try:
+        pool = db.engine.pool
+        pool_used = pool.checkedout()
+        pool_cap = pool.size() + pool.overflow()
+        pool_full = pool_used >= pool_cap
+        checks["db_pool"] = {
+            "ok": not pool_full,
+            "size": pool.size(),
+            "max_overflow": pool.overflow(),
+            "checked_out": pool_used,
+            "capacity": pool_cap,
+        }
+        if pool_full:
+            overall_ok = False
+            checks["db_pool"]["error"] = (
+                "DB connection pool exhausted — all connections in use. "
+                "Raise DB_POOL_SIZE or scale down WEB_CONCURRENCY."
+            )
+    except Exception as exc:
+        checks["db_pool"] = {"ok": True, "note": str(exc)[:100]}
+
+    # 9. Webhook dead-letter queue depth — Issue 7.
+    # A growing dead-letter queue means the retry worker is not running or
+    # the downstream webhook endpoints are persistently rejecting events.
+    try:
+        from sqlalchemy import text as _sqtext
+        _dead = db.session.execute(
+            _sqtext("SELECT COUNT(*) FROM outbound_webhooks WHERE status = 'dead'")
+        ).scalar() or 0
+        _pending = db.session.execute(
+            _sqtext(
+                "SELECT COUNT(*) FROM outbound_webhooks "
+                "WHERE status IN ('pending', 'retrying')"
+            )
+        ).scalar() or 0
+        checks["webhook_queue"] = {
+            "ok": _dead < 100,
+            "pending": _pending,
+            "dead": _dead,
+        }
+        if _dead >= 100:
+            checks["webhook_queue"]["warning"] = (
+                f"{_dead} events in the dead-letter queue. "
+                "POST /api/ops/webhooks/<id>/requeue to retry individual events."
+            )
+        db.session.rollback()
+    except Exception as exc:
+        checks["webhook_queue"] = {"ok": True, "note": str(exc)[:100]}
+
     status = 200 if overall_ok else 503
     return jsonify(
         ok=overall_ok,
