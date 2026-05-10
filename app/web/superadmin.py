@@ -160,3 +160,32 @@ def superadmin_leads():
     from app.models import OwnerLead
     leads = OwnerLead.query.order_by(OwnerLead.created_at.desc()).limit(200).all()
     return render_template("superadmin_leads.html", leads=leads)
+
+
+@bp.route("/superadmin/analytics")
+@superadmin_required
+def superadmin_analytics():
+    from app.models import Cafe, Owner, Order
+    per_cafe = []
+    cafes = Cafe.query.all()
+    for cafe in cafes:
+        owners = Owner.query.filter_by(cafe_id=cafe.id).all()
+        owner_ids = [o.id for o in owners]
+        if not owner_ids:
+            continue
+        orders = Order.query.filter(Order.owner_id.in_(owner_ids)).all()
+        revenue = sum(float(o.total or 0) for o in orders if o.status == "completed")
+        per_cafe.append({
+            "cafe": {"id": cafe.id, "name": cafe.name, "slug": cafe.slug},
+            "total_orders": len(orders),
+            "revenue": round(revenue, 2),
+            "owner_count": len(owners),
+        })
+    orphan_orders = db.session.query(db.func.count()).select_from(
+        __import__("app.models.orders", fromlist=["Order"]).Order
+    ).filter(__import__("app.models.orders", fromlist=["Order"]).Order.cafe_id.is_(None)).scalar() or 0
+    return render_template(
+        "superadmin/analytics.html",
+        per_cafe=per_cafe,
+        orphan_orders=orphan_orders,
+    )
