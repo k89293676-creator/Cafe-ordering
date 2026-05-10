@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <title>{{ table.name }} — Service Request</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600;700&display=swap" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --brand: {{ settings.brandColor | default('#4f46e5') }};
+      --brand-light: {{ settings.brandColor | default('#4f46e5') }}1a;
+    }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: #faf9f7;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1.25rem;
+      color: #0f172a;
+    }
+    .card {
+      background: #fff;
+      border-radius: 24px;
+      box-shadow: 0 8px 48px rgba(15,23,42,.09);
+      padding: 3rem 2.5rem 2.5rem;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+    }
+    .logo-wrap {
+      margin-bottom: 1.75rem;
+    }
+    .logo-wrap img {
+      max-height: 56px;
+      object-fit: contain;
+    }
+    .brand-mark {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 2.2rem;
+      font-weight: 700;
+      color: var(--brand);
+      line-height: 1;
+    }
+    .icon-circle {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: var(--brand-light);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 1.5rem;
+    }
+    .icon-circle svg {
+      color: var(--brand);
+    }
+    h1 {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 1.85rem;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 0.65rem;
+      line-height: 1.2;
+    }
+    .table-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: var(--brand-light);
+      color: var(--brand);
+      font-size: 0.82rem;
+      font-weight: 700;
+      padding: 0.35rem 0.9rem;
+      border-radius: 999px;
+      margin-bottom: 1.25rem;
+    }
+    p {
+      font-size: 1rem;
+      color: #475569;
+      line-height: 1.6;
+      margin-bottom: 1.5rem;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: #f0fdf4;
+      color: #16a34a;
+      font-size: 0.88rem;
+      font-weight: 600;
+      padding: 0.55rem 1.1rem;
+      border-radius: 999px;
+      margin-bottom: 2rem;
+    }
+    .status-pill .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #16a34a;
+      animation: pulse 1.6s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+    .btn-order {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      background: var(--brand);
+      color: #fff;
+      font-size: 0.92rem;
+      font-weight: 700;
+      padding: 0.75rem 1.6rem;
+      border-radius: 12px;
+      text-decoration: none;
+      transition: opacity .18s, transform .18s;
+      letter-spacing: .01em;
+    }
+    .btn-order:hover { opacity: .88; transform: translateY(-1px); }
+    .footer-note {
+      margin-top: 2rem;
+      font-size: 0.78rem;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo-wrap">
+      {% if settings.logoUrl %}
+        <img src="{{ settings.logoUrl }}" alt="Cafe logo" />
+      {% else %}
+        <div class="brand-mark">11:11</div>
+      {% endif %}
+    </div>
+
+    <div class="icon-circle">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M18 8h1a4 4 0 010 8h-1"/>
+        <path d="M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/>
+        <line x1="6" y1="1" x2="6" y2="4"/>
+        <line x1="10" y1="1" x2="10" y2="4"/>
+        <line x1="14" y1="1" x2="14" y2="4"/>
+      </svg>
+    </div>
+
+    <div class="table-badge">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 10h18M3 6h18M3 14h18M3 18h18"/></svg>
+      {{ table.name }}
+    </div>
+
+    <h1>We're on our way!</h1>
+
+    <div class="status-pill">
+      <span class="dot"></span>
+      Staff notified
+    </div>
+
+    <p>
+      Your request for service at <strong>{{ table.name }}</strong> has been received.
+      A member of our team will be with you shortly.
+    </p>
+
+    <a href="{{ url_for('web_public.table_order', table_id=table.id) }}" class="btn-order">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18M16 10a4 4 0 01-8 0"/></svg>
+      Order from menu
+    </a>
+
+    <p class="footer-note">Powered by Cafe 11:11</p>
+  </div>
+</body>
+</html>
