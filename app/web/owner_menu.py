@@ -152,3 +152,155 @@ def owner_import_menu():
     save_owner_menu(owner_id, menu)
     flash("Menu imported successfully.", "success")
     return redirect(url_for("web_owner_menu.owner_menu"))
+
+
+# ---------------------------------------------------------------------------
+# Export menu as CSV
+# ---------------------------------------------------------------------------
+
+@bp.route("/owner/export/menu")
+@login_required
+def export_menu_csv():
+    import csv as _csv
+    import io as _io
+    from datetime import datetime as _dt
+    from flask import Response as _Resp
+    owner_id = logged_in_owner_id()
+    menu = load_owner_menu(owner_id)
+    out = _io.StringIO()
+    w = _csv.writer(out)
+    w.writerow(["category", "id", "name", "price", "description", "available"])
+    for cat in menu.get("categories", []):
+        for item in cat.get("items", []):
+            w.writerow([
+                cat.get("name", ""),
+                item.get("id", ""),
+                item.get("name", ""),
+                item.get("price", ""),
+                (item.get("description") or "")[:300],
+                "yes" if item.get("available", True) else "no",
+            ])
+    out.seek(0)
+    fname = f"menu_{_dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return _Resp(out.getvalue(), mimetype="text/csv",
+                 headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
+# ---------------------------------------------------------------------------
+# Full save_menu_item — update or insert (handles dashboard item-edit modal)
+# ---------------------------------------------------------------------------
+
+@bp.route("/owner/menu/item", methods=["POST"])
+@login_required
+@limiter.limit("60 per hour")
+def save_menu_item():
+    """Upsert a menu item: if itemId matches an existing item, update it;
+    otherwise delegate to owner_add_item logic inline. Used by the
+    owner dashboard #menu inline edit form."""
+    owner_id = logged_in_owner_id()
+    form = request.form
+    category_id = _safe_text(str(form.get("categoryId", "")), max_len=100)
+    item_id = _safe_text(str(form.get("itemId", "")), max_len=100)
+    name = _safe_text(str(form.get("itemName", "")), max_len=200)
+    description = _safe_text(str(form.get("itemDescription", "")), max_len=500)
+    price_text = str(form.get("itemPrice", "")).strip()[:20]
+    image_url = _safe_text(str(form.get("itemImageUrl", "")), max_len=500)
+    try:
+        prep_time = max(0, min(300, int(form.get("itemPrepTime") or 0)))
+    except (TypeError, ValueError):
+        prep_time = 0
+    tags_text = _safe_text(str(form.get("itemTags", "")), max_len=300)
+    dietary_text = _safe_text(str(form.get("itemDietaryTags", "")), max_len=300)
+
+    if not category_id or not name or not price_text:
+        flash("Item name, price, and category are required.")
+        return redirect(url_for("web_owner_menu.owner_menu"))
+    try:
+        price = round(float(price_text), 2)
+        if price < 0 or price > 99999.99:
+            raise ValueError
+    except ValueError:
+        flash("Price must be a positive number up to 99,999.99.")
+        return redirect(url_for("web_owner_menu.owner_menu"))
+
+    available = form.get("itemAvailable", "1") not in ("0", "false", "False", "")
+    tags = [t.strip() for t in tags_text.replace(",", " ").split() if t.strip()][:20]
+    dietary = [t.strip() for t in dietary_text.replace(",", " ").split() if t.strip()][:10]
+
+    menu = load_owner_menu(owner_id)
+    # Try to find and update existing item
+    found = False
+    for cat in menu.get("categories", []):
+        if cat.get("id") != category_id:
+            continue
+        for item in cat.get("items", []):
+            if item.get("id") == item_id:
+                item["name"] = name
+                item["description"] = description
+                item["price"] = price
+                item["available"] = available
+                if image_url:
+                    item["imageUrl"] = image_url
+                item["tags"] = tags
+                item["dietaryTags"] = dietary
+                item["prepTime"] = prep_time
+                found = True
+                break
+        if found:
+            break
+    if not found:
+        # Insert as new item
+        for cat in menu.get("categories", []):
+            if cat.get("id") == category_id:
+                cat.setdefault("items", []).append({
+                    "id": item_id or str(uuid.uuid4()),
+                    "name": name,
+                    "description": description,
+                    "price": price,
+                    "available": available,
+                    "imageUrl": image_url,
+                    "tags": tags,
+                    "dietaryTags": dietary,
+                    "prepTime": prep_time,
+                })
+                break
+    save_owner_menu(owner_id, menu)
+    flash(f"Menu item '{name}' saved.", "success")
+    return redirect(url_for("web_owner_menu.owner_menu"))
+
+
+# ---------------------------------------------------------------------------
+# Image upload for a menu item
+# ---------------------------------------------------------------------------
+
+@bp.route("/owner/menu/item/<item_id>/upload-image", methods=["POST"])
+@login_required
+@limiter.limit("20 per hour")
+def owner_upload_item_image(item_id: str):
+    """Store a base64-inlined image URL on the menu item (small images only).
+    For production use, point to an object storage CDN instead."""
+    import base64 as _b64
+    owner_id = logged_in_owner_id()
+    file = request.files.get("image")
+    if not file or not file.filename:
+        flash("No image selected.", "error")
+        return redirect(url_for("web_owner_menu.owner_menu"))
+    file_bytes = file.read(512 * 1024 + 1)
+    if len(file_bytes) > 512 * 1024:
+        flash("Image too large (max 512 KB).", "error")
+        return redirect(url_for("web_owner_menu.owner_menu"))
+    err, file_type = validate_uploaded_file(file, file_bytes)
+    if err:
+        flash(err, "error")
+        return redirect(url_for("web_owner_menu.owner_menu"))
+    mime = "image/jpeg" if file_type == "jpeg" else f"image/{file_type}"
+    data_url = f"data:{mime};base64,{_b64.b64encode(file_bytes).decode()}"
+
+    menu = load_owner_menu(owner_id)
+    for cat in menu.get("categories", []):
+        for item in cat.get("items", []):
+            if item.get("id") == item_id:
+                item["imageUrl"] = data_url
+    save_owner_menu(owner_id, menu)
+    flash("Image uploaded.", "success")
+    return redirect(url_for("web_owner_menu.owner_menu"))
