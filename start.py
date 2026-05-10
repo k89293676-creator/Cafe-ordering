@@ -55,6 +55,31 @@ def _validate_env() -> None:
         flush=True,
     )
 
+    # Issue 9: warn when running multiple workers without a shared session store.
+    # Each gunicorn worker gets its own in-memory/filesystem session cache when
+    # REDIS_URL is absent, so a user whose requests land on different workers
+    # will appear to be randomly logged out.  Redis makes sticky sessions
+    # unnecessary by giving all workers a single shared session backend.
+    if not os.environ.get("REDIS_URL"):
+        try:
+            import multiprocessing as _mp
+            _n_str = str(workers).lower()
+            if _n_str == "auto":
+                _n_workers = min((_mp.cpu_count() * 2) + 1, 8)
+            else:
+                _n_workers = int(_n_str)
+        except Exception:
+            _n_workers = 1
+        if _n_workers > 1:
+            print(
+                f"[start] WARN: WEB_CONCURRENCY={_n_workers} but REDIS_URL is not "
+                "set. Without a shared session store, users on different workers "
+                "will lose their sessions. Set REDIS_URL for any multi-worker "
+                "production deploy.",
+                file=sys.stderr,
+                flush=True,
+            )
+
 
 def main() -> None:
     """Launch gunicorn using ``gunicorn_conf.py``.
