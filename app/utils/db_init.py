@@ -26,6 +26,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "billing_logs", "cash_drawer_counts", "payment_credentials",
     "webhook_events", "audit_log", "online_payments",
     "aggregator_credentials", "aggregator_orders", "system_flags",
+    "webhook_event_logs",
 })
 
 # Column names and type fragments must be plain identifiers + limited SQL keywords.
@@ -107,6 +108,11 @@ def _init_db() -> None:
         _add_column_if_missing(conn, "owners", "notes", "TEXT DEFAULT ''")
         _add_column_if_missing(conn, "owners", "cafe_id", "INTEGER")
         _add_column_if_missing(conn, "owners", "google_place_id", "TEXT DEFAULT ''")
+        # Stripe subscription columns
+        _add_column_if_missing(conn, "owners", "stripe_customer_id", "TEXT")
+        _add_column_if_missing(conn, "owners", "stripe_subscription_id", "TEXT")
+        # Onboarding wizard
+        _add_column_if_missing(conn, "owners", "onboarding_complete", "BOOLEAN DEFAULT FALSE")
         # settings evolution
         _add_column_if_missing(conn, "settings", "tax_rate_percent", "NUMERIC(5,2) DEFAULT 0")
         _add_column_if_missing(conn, "settings", "tax_label", "TEXT DEFAULT 'GST'")

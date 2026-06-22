@@ -102,6 +102,32 @@ def checkout():
 
     grand_total = round(order_summary["total"] + tip, 2)
 
+    # ── Plan monthly order limit gate ────────────────────────────────────────
+    if owner_id:
+        try:
+            from app.models import Owner
+            from sqlalchemy import func as _func
+            from app.models.orders import Order as _Order
+            _owner = db.session.get(Owner, owner_id)
+            if _owner:
+                _limit = getattr(_owner, "monthly_order_limit", None)
+                if _limit is not None:
+                    _now = datetime.now(timezone.utc)
+                    _month_start = _now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                    _count = (
+                        db.session.query(_func.count(_Order.id))
+                        .filter(_Order.owner_id == owner_id, _Order.created_at >= _month_start)
+                        .scalar()
+                        or 0
+                    )
+                    if _count >= _limit:
+                        return jsonify(
+                            error="Monthly order limit reached. The café owner must upgrade their plan.",
+                            code="ORDER_LIMIT_EXCEEDED",
+                        ), 403
+        except Exception:
+            pass  # Never block an order on a monitoring failure
+
     if owner_id:
         ok, msg = _check_stock_available(owner_id, order_summary["items"])
         if not ok:

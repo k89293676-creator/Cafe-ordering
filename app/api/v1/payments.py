@@ -98,6 +98,10 @@ def stripe_webhook():
     try:
         with _stripe_cb:
             result = handle_stripe_webhook(event)
+
+        # ── Subscription lifecycle: update plan tier and limits ────────────
+        _handle_subscription_event(event)
+
         return jsonify(result), 200
     except CircuitOpenError as e:
         log.warning("Stripe circuit open during webhook: %s", e)
@@ -105,6 +109,77 @@ def stripe_webhook():
     except Exception as e:
         log.error("Stripe webhook processing failed: %s", e)
         return jsonify({"error": "Processing failed"}), 500
+
+
+def _handle_subscription_event(event: "stripe.Event") -> None:  # type: ignore[name-defined]
+    """Mutate Owner plan_tier + limits based on Stripe subscription lifecycle events."""
+    etype = event.get("type", "")
+    if etype not in {
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+        "invoice.payment_failed",
+    }:
+        return
+
+    try:
+        from app.extensions import db
+        from app.models import Owner
+        from flask import current_app
+
+        sub = event["data"]["object"]
+        customer_id = sub.get("customer")
+        if not customer_id:
+            return
+
+        owner: Owner | None = (
+            db.session.query(Owner)
+            .filter_by(stripe_customer_id=customer_id)
+            .first()
+        )
+        if owner is None:
+            return
+
+        cfg = current_app.config
+        price_starter = cfg.get("STRIPE_PRICE_STARTER", "")
+        price_growth = cfg.get("STRIPE_PRICE_GROWTH", "")
+        price_pro = cfg.get("STRIPE_PRICE_PRO", "")
+
+        _PLAN_META: dict[str, dict] = {
+            "starter": {"max_tables": 5,  "monthly_order_limit": 500},
+            "growth":  {"max_tables": 20, "monthly_order_limit": 3000},
+            "pro":     {"max_tables": None, "monthly_order_limit": None},
+            "free":    {"max_tables": 2,  "monthly_order_limit": 50},
+        }
+
+        _PRICE_TO_PLAN: dict[str, str] = {}
+        if price_starter:
+            _PRICE_TO_PLAN[price_starter] = "starter"
+        if price_growth:
+            _PRICE_TO_PLAN[price_growth] = "growth"
+        if price_pro:
+            _PRICE_TO_PLAN[price_pro] = "pro"
+
+        if etype in {"customer.subscription.deleted", "invoice.payment_failed"}:
+            plan_key = "free"
+        else:
+            status = sub.get("status", "")
+            if status in ("canceled", "past_due", "unpaid"):
+                plan_key = "free"
+            else:
+                items = sub.get("items", {}).get("data", [])
+                price_id = items[0]["price"]["id"] if items else ""
+                plan_key = _PRICE_TO_PLAN.get(price_id, owner.plan_tier or "free")
+
+        meta = _PLAN_META.get(plan_key, _PLAN_META["free"])
+        owner.plan_tier = plan_key
+        owner.max_tables = meta["max_tables"]
+        owner.monthly_order_limit = meta["monthly_order_limit"]
+        owner.stripe_subscription_id = sub.get("id") or owner.stripe_subscription_id
+        db.session.commit()
+        log.info("Subscription event %s → owner %s plan=%s", etype, owner.id, plan_key)
+    except Exception as exc:
+        log.error("_handle_subscription_event failed: %s", exc)
 
 
 @bp.route("/razorpay/webhook", methods=["POST"])

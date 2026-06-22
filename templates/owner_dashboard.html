@@ -434,6 +434,55 @@
         </div>
       </div>
 
+      <!-- ── Today at a Glance widget ── -->
+      <div id="today-glance-widget" style="margin-bottom:1.25rem;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:1.1rem 1.3rem;">
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.85rem;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span style="font-size:.85rem;font-weight:700;color:#1e293b;">Today at a glance</span>
+          <span id="today-live-dot" style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;animation:pulse 1.8s infinite;"></span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;">
+          <div style="text-align:center;">
+            <div id="tg-orders" style="font-size:1.6rem;font-weight:800;color:#4f46e5;">—</div>
+            <div style="font-size:.72rem;color:#64748b;margin-top:.15rem;">Orders</div>
+          </div>
+          <div style="text-align:center;">
+            <div id="tg-revenue" style="font-size:1.6rem;font-weight:800;color:#22c55e;">—</div>
+            <div style="font-size:.72rem;color:#64748b;margin-top:.15rem;">Revenue</div>
+          </div>
+          <div style="text-align:center;">
+            <div id="tg-pending" style="font-size:1.6rem;font-weight:800;color:#f59e0b;">—</div>
+            <div style="font-size:.72rem;color:#64748b;margin-top:.15rem;">Pending</div>
+          </div>
+          <div style="text-align:center;">
+            <div id="tg-avg" style="font-size:1.6rem;font-weight:800;color:#64748b;">—</div>
+            <div style="font-size:.72rem;color:#64748b;margin-top:.15rem;">Avg Order</div>
+          </div>
+        </div>
+      </div>
+      <style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}</style>
+      <script>
+      (function(){
+        var sym = "{{ currency_symbol | default('£') }}";
+        function fmt(v){ return sym + Number(v).toFixed(2); }
+        function load(){
+          fetch('/api/v1/stats/today')
+            .then(function(r){ return r.json(); })
+            .then(function(d){
+              document.getElementById('tg-orders').textContent = d.orders ?? '—';
+              document.getElementById('tg-revenue').textContent = d.revenue != null ? fmt(d.revenue) : '—';
+              document.getElementById('tg-pending').textContent = d.pending ?? '—';
+              document.getElementById('tg-avg').textContent = d.avg_order != null ? fmt(d.avg_order) : '—';
+            })
+            .catch(function(){});
+        }
+        load();
+        // Refresh every 60 s and also on SSE order events
+        setInterval(load, 60000);
+        document.addEventListener('owner:order-event', load);
+      })();
+      </script>
+
       <!-- ── Live Activity Feed ── -->
       <div class="af-panel" id="owner-activity-panel" style="margin-bottom:1.25rem;">
         <div class="af-header">

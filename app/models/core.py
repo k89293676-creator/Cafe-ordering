@@ -36,6 +36,11 @@ class Owner(db.Model):
     trial_ends_at = db.Column(db.DateTime(timezone=True), nullable=True)
     notes = db.Column(db.Text, default="", server_default="")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    # Stripe subscription columns (added additively)
+    stripe_customer_id = db.Column(db.Text, nullable=True)
+    stripe_subscription_id = db.Column(db.Text, nullable=True)
+    # Onboarding wizard state
+    onboarding_complete = db.Column(db.Boolean, default=False, server_default="false")
 
     @property
     def is_authenticated(self) -> bool:

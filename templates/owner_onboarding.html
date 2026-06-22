@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <title>Welcome Setup — Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" />
+  <style>
+    :root { --brand: #4f46e5; --brand-light: #eef2ff; --text: #1e293b; --muted: #64748b; --border: #e2e8f0; --bg: #f8fafc; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem 4rem; }
+    .wizard-wrap { width: 100%; max-width: 580px; }
+    .wizard-header { text-align: center; margin-bottom: 2.5rem; }
+    .wizard-header .brand { font-size: 1.25rem; font-weight: 700; color: var(--brand); margin-bottom: .75rem; }
+    .wizard-header h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: .4rem; }
+    .wizard-header p { color: var(--muted); font-size: .95rem; }
+
+    /* Progress bar */
+    .progress-bar-wrap { margin-bottom: 2rem; }
+    .steps-labels { display: flex; justify-content: space-between; margin-bottom: .5rem; }
+    .step-label { font-size: .78rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; transition: color .3s; }
+    .step-label.active { color: var(--brand); }
+    .step-label.done { color: #22c55e; }
+    .progress-track { height: 6px; background: var(--border); border-radius: 99px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--brand); border-radius: 99px; transition: width .4s ease; }
+
+    /* Card */
+    .wizard-card { background: #fff; border: 1px solid var(--border); border-radius: 20px; padding: 2rem; box-shadow: 0 4px 24px rgba(0,0,0,.06); }
+    .step { display: none; }
+    .step.active { display: block; }
+    .step h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: .35rem; }
+    .step .desc { color: var(--muted); font-size: .9rem; margin-bottom: 1.5rem; }
+
+    /* Form fields */
+    .field { margin-bottom: 1.1rem; }
+    .field label { display: block; font-size: .85rem; font-weight: 600; color: var(--muted); margin-bottom: .4rem; }
+    .field input[type="text"], .field input[type="color"] { width: 100%; padding: .7rem .9rem; border: 1.5px solid var(--border); border-radius: 10px; font: inherit; font-size: .95rem; color: var(--text); outline: none; transition: border-color .2s; }
+    .field input:focus { border-color: var(--brand); }
+    .field input[type="color"] { height: 44px; padding: .3rem .5rem; cursor: pointer; }
+    .color-row { display: flex; gap: .75rem; align-items: center; }
+    .color-preview { width: 44px; height: 44px; border-radius: 10px; border: 1.5px solid var(--border); transition: background .2s; }
+
+    /* Buttons */
+    .btn { display: inline-block; padding: .75rem 1.5rem; border-radius: 10px; font: inherit; font-weight: 600; font-size: .95rem; cursor: pointer; border: none; transition: opacity .15s, transform .15s; }
+    .btn:hover { opacity: .9; transform: translateY(-1px); }
+    .btn-primary { background: var(--brand); color: #fff; width: 100%; text-align: center; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-row { display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; }
+
+    /* QR display */
+    .qr-wrap { text-align: center; margin: 1rem 0; }
+    .qr-wrap img { border-radius: 12px; border: 1px solid var(--border); max-width: 180px; }
+    .qr-wrap .qr-label { margin-top: .5rem; font-size: .85rem; color: var(--muted); }
+
+    /* Status messages */
+    .msg { padding: .7rem 1rem; border-radius: 8px; font-size: .875rem; margin-bottom: 1rem; }
+    .msg-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .msg-error { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+    .hidden { display: none !important; }
+
+    /* Skip link */
+    .skip-link { position: fixed; bottom: 1.5rem; right: 1.5rem; font-size: .8rem; color: var(--muted); text-decoration: underline; cursor: pointer; background: none; border: none; }
+    .skip-link:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+
+<div class="wizard-wrap">
+  <div class="wizard-header">
+    <div class="brand">☕ Cafe 11:11</div>
+    <h1>Set up your café</h1>
+    <p>Takes about 2 minutes. You can always change these later.</p>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="progress-bar-wrap">
+    <div class="steps-labels">
+      <span class="step-label active" id="lbl-1">1 · Your Café</span>
+      <span class="step-label" id="lbl-2">2 · First Table</span>
+      <span class="step-label" id="lbl-3">3 · First Item</span>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" id="progress-fill" style="width:33%"></div>
+    </div>
+  </div>
+
+  <div class="wizard-card">
+
+    <!-- Step 1: Café name + brand colour -->
+    <div class="step active" id="step-1">
+      <h2>Tell us about your café</h2>
+      <p class="desc">Set your café name and brand colour — this appears on the customer menu.</p>
+      <div id="step1-msg"></div>
+      <div class="field">
+        <label for="cafe-name-input">Café name</label>
+        <input type="text" id="cafe-name-input" placeholder="e.g. The Corner Cup" maxlength="100"
+          value="{{ owner.cafe_name or '' }}" />
+      </div>
+      <div class="field">
+        <label>Brand colour</label>
+        <div class="color-row">
+          <input type="color" id="brand-color-input" value="#4f46e5" />
+          <div class="color-preview" id="color-preview" style="background:#4f46e5"></div>
+          <span style="font-size:.85rem;color:var(--muted);" id="color-hex-label">#4f46e5</span>
+        </div>
+      </div>
+      <div class="btn-row">
+        <span></span>
+        <button class="btn btn-primary" id="step1-save-btn">Save &amp; Continue →</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Create first table + show QR -->
+    <div class="step" id="step-2">
+      <h2>Add your first table</h2>
+      <p class="desc">Customers scan a QR code on the table to order. You can add more tables later.</p>
+      <div id="step2-msg"></div>
+      <div class="field">
+        <label for="table-name-input">Table name</label>
+        <input type="text" id="table-name-input" placeholder="e.g. Table 1" maxlength="50" value="Table 1" />
+      </div>
+      <div id="qr-display" class="hidden qr-wrap">
+        <img id="qr-img" src="" alt="Table QR code" />
+        <div class="qr-label" id="qr-label">Print and place on the table.</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="goStep(1)">← Back</button>
+        <button class="btn btn-primary" id="step2-save-btn">Create Table →</button>
+      </div>
+    </div>
+
+    <!-- Step 3: First menu item -->
+    <div class="step" id="step-3">
+      <h2>Add your first menu item</h2>
+      <p class="desc">Add one item to kick things off. You'll add more from the Menu page.</p>
+      <div id="step3-msg"></div>
+      <div class="field">
+        <label for="item-cat-input">Category</label>
+        <input type="text" id="item-cat-input" placeholder="e.g. Beverages" maxlength="100" value="Beverages" />
+      </div>
+      <div class="field">
+        <label for="item-name-input">Item name</label>
+        <input type="text" id="item-name-input" placeholder="e.g. Flat White" maxlength="100" />
+      </div>
+      <div class="field">
+        <label for="item-price-input">Price</label>
+        <input type="text" id="item-price-input" placeholder="e.g. 3.50" maxlength="10" />
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="goStep(2)">← Back</button>
+        <button class="btn btn-primary" id="step3-save-btn">Add Item &amp; Finish →</button>
+      </div>
+    </div>
+
+  </div><!-- /wizard-card -->
+</div><!-- /wizard-wrap -->
+
+<!-- Skip link -->
+<form method="post" action="{{ url_for('web_onboarding.onboarding_complete') }}" id="skip-form" style="display:none">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+</form>
+<button class="skip-link" onclick="document.getElementById('skip-form').submit()">Skip setup</button>
+
+<script>
+(function () {
+  const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+  let currentStep = 1;
+  let createdTableId = null;
+
+  // ── Colour picker ─────────────────────────────────────────────
+  const colorInput = document.getElementById('brand-color-input');
+  const colorPreview = document.getElementById('color-preview');
+  const colorLabel = document.getElementById('color-hex-label');
+  colorInput.addEventListener('input', () => {
+    colorPreview.style.background = colorInput.value;
+    colorLabel.textContent = colorInput.value;
+  });
+
+  // ── Step navigation ───────────────────────────────────────────
+  window.goStep = function (n) {
+    document.getElementById('step-' + currentStep).classList.remove('active');
+    currentStep = n;
+    document.getElementById('step-' + n).classList.add('active');
+    updateProgress(n);
+  };
+
+  function updateProgress(step) {
+    const pct = step === 1 ? 33 : step === 2 ? 66 : 100;
+    document.getElementById('progress-fill').style.width = pct + '%';
+    ['lbl-1','lbl-2','lbl-3'].forEach((id, idx) => {
+      const el = document.getElementById(id);
+      el.classList.remove('active','done');
+      if (idx + 1 === step) el.classList.add('active');
+      else if (idx + 1 < step) el.classList.add('done');
+    });
+  }
+
+  function showMsg(elId, text, isError) {
+    const el = document.getElementById(elId);
+    el.className = 'msg ' + (isError ? 'msg-error' : 'msg-success');
+    el.textContent = text;
+  }
+
+  function clearMsg(elId) {
+    const el = document.getElementById(elId);
+    el.className = '';
+    el.textContent = '';
+  }
+
+  // ── Step 1: Save profile ──────────────────────────────────────
+  document.getElementById('step1-save-btn').addEventListener('click', async () => {
+    const name = document.getElementById('cafe-name-input').value.trim();
+    const color = document.getElementById('brand-color-input').value;
+    if (!name) { showMsg('step1-msg', 'Please enter your café name.', true); return; }
+    clearMsg('step1-msg');
+    const btn = document.getElementById('step1-save-btn');
+    btn.textContent = 'Saving…';
+    btn.disabled = true;
+    try {
+      const fd = new FormData();
+      fd.append('csrf_token', CSRF);
+      fd.append('cafe_name', name);
+      fd.append('brand_color', color);
+      const r = await fetch('/owner/profile', { method: 'POST', body: fd });
+      if (r.ok || r.redirected) {
+        goStep(2);
+      } else {
+        showMsg('step1-msg', 'Could not save. Please try again.', true);
+      }
+    } catch (e) {
+      showMsg('step1-msg', 'Network error. Please try again.', true);
+    } finally {
+      btn.textContent = 'Save & Continue →';
+      btn.disabled = false;
+    }
+  });
+
+  // ── Step 2: Create table ──────────────────────────────────────
+  document.getElementById('step2-save-btn').addEventListener('click', async () => {
+    const name = document.getElementById('table-name-input').value.trim() || 'Table 1';
+    clearMsg('step2-msg');
+    const btn = document.getElementById('step2-save-btn');
+    btn.textContent = 'Creating…';
+    btn.disabled = true;
+    try {
+      const fd = new FormData();
+      fd.append('csrf_token', CSRF);
+      fd.append('name', name);
+      const r = await fetch('/owner/tables/add', { method: 'POST', body: fd, redirect: 'manual' });
+      if (r.ok || r.type === 'opaqueredirect' || r.status === 0 || r.redirected) {
+        // Try to show QR — we'll use a fresh tables fetch to get the new table id
+        try {
+          const tr = await fetch('/api/v1/tables');
+          if (tr.ok) {
+            const data = await tr.json();
+            const tables = data.tables || data;
+            const t = Array.isArray(tables) ? tables.find(x => x.name === name) : null;
+            if (t) {
+              createdTableId = t.id;
+              document.getElementById('qr-img').src = '/api/v1/tables/' + t.id + '/qr';
+              document.getElementById('qr-label').textContent = 'Place this on ' + t.name;
+              document.getElementById('qr-display').classList.remove('hidden');
+            }
+          }
+        } catch (_) {}
+        btn.textContent = 'Next →';
+        btn.removeEventListener('click', arguments.callee);
+        btn.addEventListener('click', () => goStep(3));
+        showMsg('step2-msg', 'Table created!', false);
+      } else {
+        showMsg('step2-msg', 'Could not create table. You may have hit your plan limit.', true);
+      }
+    } catch (e) {
+      showMsg('step2-msg', 'Network error. Please try again.', true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ── Step 3: Add menu item then complete ───────────────────────
+  document.getElementById('step3-save-btn').addEventListener('click', async () => {
+    const catName = document.getElementById('item-cat-input').value.trim() || 'Beverages';
+    const itemName = document.getElementById('item-name-input').value.trim();
+    const priceRaw = document.getElementById('item-price-input').value.trim();
+    if (!itemName) { showMsg('step3-msg', 'Please enter an item name.', true); return; }
+    clearMsg('step3-msg');
+    const btn = document.getElementById('step3-save-btn');
+    btn.textContent = 'Saving…';
+    btn.disabled = true;
+    try {
+      // First ensure category exists (best-effort)
+      const cfd = new FormData();
+      cfd.append('csrf_token', CSRF);
+      cfd.append('name', catName);
+      await fetch('/owner/menu/add-category', { method: 'POST', body: cfd, redirect: 'manual' });
+
+      // Add item
+      const ifd = new FormData();
+      ifd.append('csrf_token', CSRF);
+      ifd.append('categoryName', catName);
+      ifd.append('itemName', itemName);
+      ifd.append('price', priceRaw || '0');
+      await fetch('/owner/menu/add-item', { method: 'POST', body: ifd, redirect: 'manual' });
+
+      // Mark complete
+      const cmpFd = new FormData();
+      cmpFd.append('csrf_token', CSRF);
+      const cmpR = await fetch('/owner/onboarding/complete', { method: 'POST', body: cmpFd });
+      window.location.href = '/owner/dashboard';
+    } catch (e) {
+      showMsg('step3-msg', 'Network error. Redirecting anyway…', false);
+      setTimeout(() => { window.location.href = '/owner/dashboard'; }, 1500);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+})();
+</script>
+</body>
+</html>

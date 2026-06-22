@@ -261,11 +261,23 @@ def owner_add_table():
     from app.services.tables import normalize_id, unique_id, next_table_number
     owner_id = logged_in_owner_id()
     owner = logged_in_owner_obj()
+
+    # ── Plan limit gate ───────────────────────────────────────────
+    existing_tables = load_owner_tables(owner_id)
+    max_t = getattr(owner, "max_tables", None)
+    if max_t is not None and len(existing_tables) >= max_t:
+        flash(
+            f"Table limit reached ({max_t} tables on your current plan). "
+            "Upgrade your plan to add more tables.",
+            "danger",
+        )
+        return redirect(url_for("web_owner.owner_tables"))
+
     name = _safe_text(request.form.get("name"), max_len=50)
     if not name:
-        num = next_table_number(load_owner_tables(owner_id))
+        num = next_table_number(existing_tables)
         name = f"Table {num}"
-    existing_ids = {t["id"] for t in load_owner_tables(owner_id)}
+    existing_ids = {t["id"] for t in existing_tables}
     table_id = unique_id(normalize_id(name), existing_ids)
     table = CafeTable(id=table_id, name=name, owner_id=owner_id, cafe_id=owner.cafe_id)
     db.session.add(table)

@@ -273,6 +273,27 @@ def save_menu_item():
 # Image upload for a menu item
 # ---------------------------------------------------------------------------
 
+@bp.route("/owner/menu/ai-suggest", methods=["POST"])
+@login_required
+@limiter.limit("10 per hour")
+def owner_menu_ai_suggest():
+    """Call Gemini AI to suggest menu items for the given cuisine / price range."""
+    from flask import current_app, jsonify
+    from app.services.ai_menu import suggest_menu_items
+
+    gemini_key = current_app.config.get("GEMINI_API_KEY", "")
+    if not gemini_key:
+        return jsonify(error="AI suggestions are not enabled on this instance."), 403
+
+    cuisine = _safe_text(request.form.get("cuisine"), max_len=80) or "café"
+    price_range = _safe_text(request.form.get("price_range"), max_len=20) or "mid-range"
+    try:
+        items = suggest_menu_items(gemini_key, cuisine, price_range)
+        return jsonify(suggestions=items)
+    except Exception as exc:
+        return jsonify(error=f"AI suggestion failed: {exc}"), 500
+
+
 @bp.route("/owner/menu/item/<item_id>/upload-image", methods=["POST"])
 @login_required
 @limiter.limit("20 per hour")

@@ -299,6 +299,7 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     from app.api.v1.feedback import bp as feedback_bp
     from app.api.v1.payments import bp as payments_bp
     from app.api.v1.webhooks import bp as webhooks_bp
+    from app.api.v1.stats import bp as stats_bp
     from app.web.public import bp as public_bp
     from app.web.auth import bp as auth_bp
     from app.web.owner import bp as owner_bp
@@ -306,13 +307,16 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     from app.web.analytics import bp as analytics_bp
     from app.web.inventory import bp as inventory_bp
     from app.web.superadmin import bp as superadmin_bp
+    from app.web.billing_subscription import bp as billing_subscription_bp
+    from app.web.onboarding import bp as onboarding_bp
     from admin.routes import admin_bp
 
     for bp in (
         health_bp, menu_bp, orders_bp, kitchen_bp, feedback_bp,
-        payments_bp, webhooks_bp,
+        payments_bp, webhooks_bp, stats_bp,
         public_bp, auth_bp, owner_bp, owner_menu_bp,
         analytics_bp, inventory_bp, superadmin_bp,
+        billing_subscription_bp, onboarding_bp,
         admin_bp,
     ):
         app.register_blueprint(bp)
@@ -331,6 +335,12 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         return path
 
     app.jinja_env.globals["cdn_url"] = cdn_url
+
+    # ── Currency symbol — Jinja2 global ───────────────────────────────────────
+    _currency_code = _cfg.STRIPE_CURRENCY or "gbp"
+    app.jinja_env.globals["currency_symbol"] = _cfg.CURRENCY_SYMBOLS.get(
+        _currency_code.lower(), _currency_code.upper()
+    )
 
     # ── Safe url_for: legacy endpoint-name aliases + graceful BuildError ──────
     # The template was written against the original monolith where all routes

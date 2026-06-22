@@ -186,6 +186,12 @@ class FlaskConfig:
     # Sentry
     SENTRY_DSN = SENTRY_DSN
     SENTRY_TRACES_SAMPLE_RATE = SENTRY_TRACES_SAMPLE_RATE
+    STRIPE_SECRET_KEY = STRIPE_SECRET_KEY
+    STRIPE_PRICE_STARTER = STRIPE_PRICE_STARTER
+    STRIPE_PRICE_GROWTH = STRIPE_PRICE_GROWTH
+    STRIPE_PRICE_PRO = STRIPE_PRICE_PRO
+    STRIPE_CURRENCY = STRIPE_CURRENCY
+    GEMINI_API_KEY = GEMINI_API_KEY
 
 
 BILLING_STEPUP_REFUND_THRESHOLD = int(os.getenv("BILLING_STEPUP_REFUND_THRESHOLD", "500"))
@@ -223,6 +229,28 @@ BACKUP_UPLOAD_AUTH_HEADER = os.getenv("BACKUP_UPLOAD_AUTH_HEADER", "")
 BACKUP_DIR = os.getenv("BACKUP_DIR", "./backups")
 BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", "14"))
 BACKUP_LABEL = os.getenv("BACKUP_LABEL", "cafe")
+
+# ── Stripe subscription pricing ───────────────────────────────────────────────
+STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_PRICE_STARTER: str = os.getenv("STRIPE_PRICE_STARTER", "")
+STRIPE_PRICE_GROWTH: str = os.getenv("STRIPE_PRICE_GROWTH", "")
+STRIPE_PRICE_PRO: str = os.getenv("STRIPE_PRICE_PRO", "")
+STRIPE_CURRENCY: str = os.getenv("STRIPE_CURRENCY", "gbp").lower()
+
+CURRENCY_SYMBOLS: dict = {
+    "gbp": "£",
+    "usd": "$",
+    "eur": "€",
+    "inr": "₹",
+    "aud": "A$",
+    "cad": "C$",
+    "sgd": "S$",
+    "aed": "د.إ",
+    "nzd": "NZ$",
+}
+
+# ── Gemini AI ─────────────────────────────────────────────────────────────────
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 
 FEATURE_NEW_CHECKOUT = os.getenv("FEATURE_NEW_CHECKOUT", "").lower() in {"1", "true", "yes", "on"}
 FEATURE_AI_SUGGESTIONS = os.getenv("FEATURE_AI_SUGGESTIONS", "").lower() in {"1", "true", "yes", "on"}

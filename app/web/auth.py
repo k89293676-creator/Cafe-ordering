@@ -162,6 +162,10 @@ def owner_login():
         _complete_login(owner)
         log_security("LOGIN_SUCCESS", f"owner_id={owner.id}")
 
+        # Redirect new owners to onboarding wizard if not yet complete
+        if not getattr(owner, "onboarding_complete", True):
+            return make_response(redirect(url_for("web_onboarding.onboarding")))
+
         resp = make_response(redirect(_safe_redirect_target(
             request.args.get("next"), url_for("web_owner.owner_dashboard")
         )))
@@ -210,6 +214,8 @@ def owner_login_totp_verify():
                 session.pop("pending_totp_remember", None)
                 _complete_login(owner)
                 log_security("TOTP_LOGIN_SUCCESS", f"owner_id={owner.id}")
+                if not getattr(owner, "onboarding_complete", True):
+                    return make_response(redirect(url_for("web_onboarding.onboarding")))
                 resp = make_response(redirect(url_for("web_owner.owner_dashboard")))
                 if remember_me:
                     raw = create_remember_token(owner.id)

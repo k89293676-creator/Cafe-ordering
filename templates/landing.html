@@ -473,5 +473,90 @@
     });
   })();
 </script>
+
+<!-- ── Pricing Section ──────────────────────────────────────────────────────── -->
+<style>
+  #pricing { background: #f8fafc; padding: 5rem 1.5rem; text-align: center; }
+  .pricing-eyebrow { font-size: .8rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: #4f46e5; margin-bottom: .6rem; }
+  .pricing-title { font-size: 2rem; font-weight: 800; color: #1e293b; margin-bottom: .5rem; }
+  .pricing-sub { color: #64748b; font-size: 1rem; margin-bottom: 3rem; }
+  .pricing-cards { display: flex; flex-wrap: wrap; gap: 1.5rem; justify-content: center; max-width: 900px; margin: 0 auto 2rem; }
+  .pricing-card { background: #fff; border: 1.5px solid #e2e8f0; border-radius: 20px; padding: 2rem 1.75rem; width: 260px; text-align: left; transition: transform .2s, box-shadow .2s; }
+  .pricing-card:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,.09); }
+  .pricing-card.featured { border-color: #4f46e5; box-shadow: 0 0 0 2px #4f46e5; }
+  .pricing-badge { display: inline-block; background: #eef2ff; color: #4f46e5; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: .25rem .65rem; border-radius: 99px; margin-bottom: .75rem; }
+  .pricing-plan { font-size: 1.1rem; font-weight: 800; color: #1e293b; margin-bottom: .2rem; }
+  .pricing-price { font-size: 2.2rem; font-weight: 900; color: #4f46e5; margin-bottom: .15rem; }
+  .pricing-price span { font-size: 1rem; font-weight: 500; color: #94a3b8; }
+  .pricing-desc { font-size: .85rem; color: #64748b; margin-bottom: 1.25rem; }
+  .pricing-features { list-style: none; padding: 0; margin: 0 0 1.5rem; }
+  .pricing-features li { font-size: .88rem; color: #475569; padding: .35rem 0; display: flex; gap: .5rem; align-items: flex-start; }
+  .pricing-features li::before { content: "✓"; color: #22c55e; font-weight: 700; flex-shrink: 0; }
+  .pricing-cta { display: block; width: 100%; padding: .8rem 0; border-radius: 10px; font-weight: 700; font-size: .95rem; text-align: center; text-decoration: none; transition: opacity .15s; }
+  .pricing-cta-primary { background: #4f46e5; color: #fff !important; }
+  .pricing-cta-primary:hover { opacity: .9; }
+  .pricing-cta-secondary { background: #f1f5f9; color: #1e293b !important; }
+  .pricing-cta-secondary:hover { background: #e2e8f0; }
+  .pricing-note { color: #94a3b8; font-size: .82rem; margin-top: .5rem; text-align: center; }
+</style>
+
+<section id="pricing">
+  <div class="pricing-eyebrow">Simple, transparent pricing</div>
+  <h2 class="pricing-title">Pick the plan that fits your café</h2>
+  <p class="pricing-sub">14-day free trial on all plans. No credit card required.</p>
+
+  <div class="pricing-cards">
+
+    <!-- Starter -->
+    <div class="pricing-card">
+      <div class="pricing-plan">Starter</div>
+      <div class="pricing-price">£29 <span>/ month</span></div>
+      <div class="pricing-desc">Perfect for a small café or pop-up.</div>
+      <ul class="pricing-features">
+        <li>Up to 5 tables</li>
+        <li>500 orders / month</li>
+        <li>QR ordering &amp; live kitchen view</li>
+        <li>Stripe payments</li>
+        <li>Email support</li>
+      </ul>
+      <a href="/owner/signup" class="pricing-cta pricing-cta-secondary">Start free trial</a>
+    </div>
+
+    <!-- Growth -->
+    <div class="pricing-card featured">
+      <div class="pricing-badge">Most popular</div>
+      <div class="pricing-plan">Growth</div>
+      <div class="pricing-price">£59 <span>/ month</span></div>
+      <div class="pricing-desc">For busy cafés that are scaling up.</div>
+      <ul class="pricing-features">
+        <li>Up to 20 tables</li>
+        <li>3,000 orders / month</li>
+        <li>QR ordering &amp; live kitchen view</li>
+        <li>Stripe payments + analytics</li>
+        <li>Priority support</li>
+      </ul>
+      <a href="/owner/signup" class="pricing-cta pricing-cta-primary">Start free trial</a>
+    </div>
+
+    <!-- Pro -->
+    <div class="pricing-card">
+      <div class="pricing-plan">Pro</div>
+      <div class="pricing-price">£99 <span>/ month</span></div>
+      <div class="pricing-desc">Unlimited scale, white-label ready.</div>
+      <ul class="pricing-features">
+        <li>Unlimited tables</li>
+        <li>Unlimited orders</li>
+        <li>QR ordering &amp; live kitchen view</li>
+        <li>Stripe payments + analytics</li>
+        <li>White-label &amp; API access</li>
+        <li>Priority support</li>
+      </ul>
+      <a href="/owner/signup" class="pricing-cta pricing-cta-secondary">Start free trial</a>
+    </div>
+
+  </div>
+
+  <p class="pricing-note">All prices exclude VAT. Cancel anytime. Downgrade resets to Free (2 tables, 50 orders/month).</p>
+</section>
 </body>
 </html>
