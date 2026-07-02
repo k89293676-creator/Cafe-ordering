@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
+import urllib.parse
 from datetime import timedelta
 from pathlib import Path
 
@@ -43,8 +44,34 @@ APP_START_TIME: float = 0.0
 
 # ── Database ──────────────────────────────────────────────────────────────────
 def _coerce_db_url(raw: str) -> str:
+    """Normalise DATABASE_URL for SQLAlchemy.
+
+    1. Converts legacy postgres:// scheme to postgresql://.
+    2. Percent-encodes any unencoded special characters in the password so
+       SQLAlchemy's URL parser doesn't choke on characters like @, # or ?.
+    """
+    if not raw:
+        return raw
+    # Fix legacy scheme prefix.
     if raw.startswith("postgres://"):
-        return raw.replace("postgres://", "postgresql://", 1)
+        raw = raw.replace("postgres://", "postgresql://", 1)
+    # Re-encode the password component so that special characters that are
+    # valid in a password but not in a URL (e.g. @, #, ?) don't break
+    # SQLAlchemy's make_url() regex parser.
+    try:
+        p = urllib.parse.urlparse(raw)
+        if p.password is not None:
+            username = urllib.parse.quote(p.username or "", safe="")
+            password = urllib.parse.quote(p.password, safe="")
+            host = p.hostname or ""
+            netloc = f"{username}:{password}@{host}"
+            if p.port:
+                netloc += f":{p.port}"
+            raw = urllib.parse.urlunparse(
+                (p.scheme, netloc, p.path, p.params, p.query, p.fragment)
+            )
+    except Exception:
+        pass
     return raw
 
 

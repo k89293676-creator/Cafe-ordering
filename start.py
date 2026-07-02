@@ -32,11 +32,29 @@ def _validate_env() -> None:
             "use at least 32 random bytes."
         )
 
-    if is_prod and not os.environ.get("DATABASE_URL"):
+    _raw_db_url = os.environ.get("DATABASE_URL", "")
+    if is_prod and not _raw_db_url:
         errors.append(
             "DATABASE_URL is not set. Orders would be lost on container restart. "
             "Attach a Postgres service (Railway / Render) and confirm DATABASE_URL is wired."
         )
+    elif _raw_db_url:
+        # Validate that the URL is actually parseable — a non-empty but malformed
+        # DATABASE_URL (e.g. a DSN string, unexpanded template, or missing scheme)
+        # will pass the presence check above but crash SQLAlchemy on startup.
+        import re as _re
+        _coerced = _raw_db_url
+        if _coerced.startswith("postgres://"):
+            _coerced = _coerced.replace("postgres://", "postgresql://", 1)
+        if not _re.match(r"^[\w+]+://", _coerced):
+            _preview = _coerced[:60].replace("
+", " ")
+            errors.append(
+                f"DATABASE_URL does not look like a valid connection URL. "
+                f"Expected postgresql://user:pass@host:port/db, "
+                f"got: {_preview!r}. "
+                f"Check the Environment Variables section in your Render dashboard."
+            )
 
     if errors:
         for msg in errors:

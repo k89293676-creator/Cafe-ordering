@@ -176,6 +176,28 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         mail, migrate, session_store,
     )
 
+    # Pre-flight: validate that the DB URL is parseable before calling init_app.
+    # db.init_app() raises an opaque "Could not parse SQLAlchemy URL" error;
+    # this block surfaces the actual URL prefix so it can be debugged quickly.
+    _db_uri = app.config.get("SQLALCHEMY_DATABASE_URI") or ""
+    if not _db_uri:
+        raise RuntimeError(
+            "SQLALCHEMY_DATABASE_URI is empty. Set DATABASE_URL to a valid "
+            "postgresql:// URL in your Render/Railway environment variables."
+        )
+    try:
+        import sqlalchemy as _sa_url_check
+        _sa_url_check.engine.make_url(_db_uri)
+    except Exception as _url_exc:
+        _scheme = _db_uri.split("://")[0] if "://" in _db_uri else repr(_db_uri[:40])
+        raise RuntimeError(
+            f"DATABASE_URL cannot be parsed as a valid SQLAlchemy URL "
+            f"(received scheme/prefix: {_scheme!r}). "
+            f"In Render: go to your web service → Environment → DATABASE_URL "
+            f"and ensure it starts with postgresql:// pointing to your Postgres instance. "
+            f"If you see a bare DSN string (host=... dbname=...) instead of a URL, "
+            f"convert it to the URL format."
+        ) from _url_exc
     db.init_app(app)
     _register_slow_query_listener()  # Issue 6: slow-query event listener
     migrate.init_app(app, db)
