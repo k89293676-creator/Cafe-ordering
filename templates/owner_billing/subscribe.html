@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Subscription — Cafe 11:11</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: #1e293b; }
+    .plan-card { transition: transform .2s, box-shadow .2s; }
+    .plan-card:hover { transform: translateY(-3px); box-shadow: 0 8px 30px rgba(0,0,0,.1); }
+    .plan-card.featured { border-color: #4f46e5; box-shadow: 0 0 0 2px #4f46e5; }
+  </style>
+</head>
+<body>
+<div class="max-w-5xl mx-auto px-4 py-10">
+
+  <a href="{{ url_for('web_owner.owner_dashboard') }}" class="text-indigo-600 text-sm hover:underline">← Back to Dashboard</a>
+
+  <h1 class="text-3xl font-bold mt-4 mb-1">Subscription Plan</h1>
+  <p class="text-slate-500 mb-8">Manage your café's plan. Changes take effect immediately.</p>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+      <div class="mb-4 px-4 py-3 rounded-lg text-sm font-medium
+        {% if cat == 'success' %}bg-green-50 border border-green-200 text-green-800
+        {% else %}bg-red-50 border border-red-200 text-red-800{% endif %}">
+        {{ msg }}
+      </div>
+    {% endfor %}
+  {% endwith %}
+
+  <!-- Usage summary -->
+  <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-8 grid grid-cols-1 sm:grid-cols-3 gap-6">
+    <div>
+      <div class="text-xs uppercase tracking-wider text-slate-400 mb-1">Current Plan</div>
+      <div class="text-2xl font-bold text-indigo-600 capitalize">{{ owner.plan_tier or 'Free' }}</div>
+      {% if owner.trial_ends_at %}
+        <div class="text-xs text-amber-600 mt-1">Trial ends {{ owner.trial_ends_at.strftime('%d %b %Y') }}</div>
+      {% endif %}
+    </div>
+    <div>
+      <div class="text-xs uppercase tracking-wider text-slate-400 mb-1">Tables Used</div>
+      <div class="text-2xl font-bold">
+        {{ tables_used }}
+        {% if owner.max_tables %}<span class="text-slate-400 text-base font-normal"> / {{ owner.max_tables }}</span>{% else %}<span class="text-slate-400 text-base font-normal"> / ∞</span>{% endif %}
+      </div>
+    </div>
+    <div>
+      <div class="text-xs uppercase tracking-wider text-slate-400 mb-1">Orders This Month</div>
+      <div class="text-2xl font-bold">
+        {{ monthly_orders }}
+        {% if owner.monthly_order_limit %}<span class="text-slate-400 text-base font-normal"> / {{ owner.monthly_order_limit }}</span>{% else %}<span class="text-slate-400 text-base font-normal"> / ∞</span>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Plan cards -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+
+    {% for plan_key, plan in plans.items() %}
+    <div class="plan-card bg-white rounded-2xl border border-slate-200 p-6 flex flex-col
+      {% if owner.plan_tier == plan_key %}featured{% endif %}">
+      {% if owner.plan_tier == plan_key %}
+        <span class="self-start mb-3 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full">Current plan</span>
+      {% endif %}
+      <div class="text-xl font-bold mb-1">{{ plan.name }}</div>
+      <div class="text-3xl font-extrabold text-indigo-600 mb-1">{{ plan.price }}</div>
+      <div class="text-slate-400 text-sm mb-5">billed monthly, cancel anytime</div>
+      <ul class="text-sm text-slate-600 space-y-2 mb-6 flex-1">
+        <li>✓ {% if plan.max_tables %}Up to {{ plan.max_tables }} tables{% else %}Unlimited tables{% endif %}</li>
+        <li>✓ {% if plan.monthly_order_limit %}{{ '{:,}'.format(plan.monthly_order_limit) }} orders/month{% else %}Unlimited orders{% endif %}</li>
+        <li>✓ QR ordering + live kitchen dashboard</li>
+        <li>✓ Stripe payments + analytics</li>
+        {% if plan_key in ('growth', 'pro') %}<li>✓ Priority support</li>{% endif %}
+        {% if plan_key == 'pro' %}<li>✓ White-label & API access</li>{% endif %}
+      </ul>
+      {% if owner.plan_tier != plan_key %}
+      <form method="post" action="{{ url_for('web_billing_subscription.subscribe') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="plan" value="{{ plan_key }}" />
+        <button type="submit"
+          class="w-full py-2.5 px-4 rounded-xl font-semibold text-sm
+            {% if plan_key == 'growth' %}bg-indigo-600 text-white hover:bg-indigo-700
+            {% else %}bg-slate-100 text-slate-800 hover:bg-slate-200{% endif %}
+            transition-colors">
+          {% if owner.plan_tier == 'free' or not owner.plan_tier %}Start free trial{% else %}Switch to {{ plan.name }}{% endif %}
+        </button>
+      </form>
+      {% else %}
+      <div class="text-center text-sm text-slate-400 py-2.5">Active plan</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+
+  </div>
+
+  <p class="text-center text-xs text-slate-400">
+    14-day free trial on all plans. No credit card charged until trial ends.
+    Downgrading or cancelling sets your account back to the Free tier (2 tables, 50 orders/month).
+  </p>
+
+</div>
+</body>
+</html>

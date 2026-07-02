@@ -1,0 +1,226 @@
+# Environment Configuration
+
+This document describes the environment variables that control the Cafe 11:11
+ordering system. Set these in Railway (Project → Variables) or, for local dev,
+in a `.env` file loaded by your shell.
+
+## Required (security-critical)
+
+| Variable | Purpose | Notes |
+| --- | --- | --- |
+| `SECRET_KEY` | Flask session signing + CSRF token secret. | Must be a long, random string (32+ bytes). Rotating it logs everyone out. **Never share or commit.** |
+| `DATABASE_URL` | PostgreSQL connection URL (`postgresql://...`). | Provided automatically by Railway when a Postgres plugin is attached. |
+
+## Admin / Superadmin access
+
+| Variable | Purpose | Notes |
+| --- | --- | --- |
+| `ADMIN_SECRET_KEY` | Legacy `/admin` portal key. Lets an operator without a superadmin Owner reach the admin dashboard. | **Optional** if at least one Owner row already has `is_superadmin=True`. Treat as sensitive. |
+| `SUPERADMIN_KEY` | Master key required for non-superadmin admins to reach `/superadmin`. | Required for the legacy `/admin → /superadmin` elevation flow. Rotate periodically. |
+
+## Owner signup gating
+
+| Variable | Purpose | Notes |
+| --- | --- | --- |
+| `OWNER_SIGNUP_MODE` | Controls who may create new owner accounts. | **Must be `approval` or `invite_only` in production.** `open` is for development only — it allows the public to self-register cafés. Default: `approval`. |
+
+## Optional infrastructure
+
+| Variable | Purpose | Notes |
+| --- | --- | --- |
+| `REDIS_URL` | Redis connection string. | Enables multi-worker SSE pub/sub, distributed rate-limit storage, and the background task queue. If unset, the app falls back to in-memory implementations (single-worker only). |
+| `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_DEFAULT_SENDER` | Flask-Mail SMTP settings. | Required for order-confirmation and password-reset emails. |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_CLAIM_EMAIL` | Web push notification keys. | Generate with `python extensions/generate_vapid.py`. |
+| `TRUSTED_PROXIES` | Comma-separated list of trusted proxy IPs/CIDRs in front of the app. | Required so Flask-Talisman correctly applies HSTS behind Railway's reverse proxy. Example: `0.0.0.0/0` for Railway's edge. |
+
+## Gunicorn tuning (defaults live in `gunicorn_conf.py`)
+
+The defaults in `gunicorn_conf.py` are tuned for Railway's free tier
+(512 MB RAM, 1 vCPU): 1 worker, 2 threads, 60 s timeout, 500 max-requests,
+50 jitter, gevent worker class. Each value can be overridden via env vars
+without editing code:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `WEB_CONCURRENCY` | `1` | Number of gunicorn workers. Bump only after raising container memory. |
+| `GUNICORN_THREADS` | `2` | Threads per worker (I/O concurrency on top of gevent). |
+| `GUNICORN_TIMEOUT` | `60` | Seconds before a stuck worker is killed. |
+| `GUNICORN_GRACEFUL_TIMEOUT` | `30` | Drain window on SIGTERM (Railway redeploys). |
+| `GUNICORN_KEEPALIVE` | `5` | HTTP keep-alive seconds. |
+| `GUNICORN_MAX_REQUESTS` | `500` | Recycle workers after N requests to bound memory creep. |
+| `GUNICORN_MAX_REQUESTS_JITTER` | `50` | Random offset to avoid thundering-herd recycles. |
+| `GUNICORN_WORKER_CONNECTIONS` | `1000` | gevent concurrent connections per worker. |
+| `GUNICORN_LOG_LEVEL` | `info` | gunicorn log level. |
+| `FORWARDED_ALLOW_IPS` | `*` | Trust X-Forwarded-* from any IP (Railway terminates TLS at the edge). |
+
+## Observability & error tracking
+
+| Variable | Purpose | Notes |
+| --- | --- | --- |
+| `SENTRY_DSN` | Enables Sentry error + performance monitoring. | Leave unset to disable. The Sentry SDK is loaded lazily so it costs nothing when off. |
+| `OPS_HEALTH_TOKEN` | Bearer token for the per-section operational health endpoint at `GET /api/ops/health`. | **Closed by default.** If the variable is unset the endpoint returns `401`. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Set the same value in the GitHub Actions secret `OPS_HEALTH_TOKEN` so the post-deploy check can probe it. |
+| `RAILWAY_APP_URL` | (GitHub-Actions secret, **not** an app env var.) The public base URL of your Railway deployment, e.g. `https://cafe.up.railway.app`. | Used by `.github/workflows/post-deploy-healthcheck.yml`. Without it the workflow exits early with a warning instead of failing CI. |
+| `SENTRY_TRACES_SAMPLE_RATE` | Fraction of requests to sample for performance tracing (0.0–1.0). | Defaults to `0.0`. Start small (e.g. `0.05`) on production. |
+| `SENTRY_PROFILES_SAMPLE_RATE` | Fraction of sampled traces to profile. | Defaults to `0.0`. |
+| `APP_VERSION` | Build identifier surfaced at `/version`, `/health`, and as the Sentry release tag. | Falls back to the first 12 chars of `RAILWAY_GIT_COMMIT_SHA`. |
+| `SLOW_REQUEST_MS` | Requests slower than this (in milliseconds) are logged at WARNING with their `X-Request-ID`. | Default: `1500`. |
+| `SECURITY_CONTACT` | Email/URL surfaced at `/.well-known/security.txt` for vuln disclosure. | Default: `mailto:security@example.com` — change before going live. |
+| `IDEMPOTENCY_TTL_SECONDS` | TTL of the in-process idempotency cache used by `POST /api/checkout`. | Default: `86400` (24h). Clients pass `Idempotency-Key: <uuid>` in the request header to opt in. |
+| `FEATURE_<NAME>` | Generic feature-flag pattern. Set to `on` / `1` / `true` to enable a flag at runtime; anything else (or unset) disables. | Read in code via `feature_enabled("name")`. Lets you dark-launch risky changes without a redeploy. |
+
+## Export limits & rate-limiting
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `EXPORTS_MAX_ROWS` | `50000` | Hard cap on how many rows any single CSV export may emit. Stops a runaway date range from exhausting the dyno's memory. The CSV is truncated with a clearly-marked sentinel row instead of being silently cut off. Applies to `/owner/export/orders` and the new `/owner/exports/*` blueprint. |
+| `EXPORTS_RATE_LIMIT` | `30/hour` | Per-owner rate limit applied to the secure export blueprint (`/owner/exports/*`). The legacy `/owner/export/orders` route uses its own decorator (`30/hour`). |
+
+## Health-check endpoints
+
+| Path | Purpose |
+| --- | --- |
+| `/health` | Liveness — always cheap, no DB. Use as Railway's healthcheck. |
+| `/ready` | Readiness — DB ping. Returns 503 while the DB is unreachable. |
+| `/health/full` | Deep diagnostics: DB latency, disk, redis, pool stats, SSE subs. |
+| `/metrics` | JSON runtime metrics (orders today, active orders, version). |
+| `/metrics/prom` | Prometheus text-format exposition for `cafe_*` gauges. |
+| `/version` | Build identifier (commit, branch, deployedAt). Useful for post-deploy smoke tests. |
+| `/api/ops/health` | **Token-protected** per-section health (inventory, billing, payment_methods, food_delivery, reorder, analytics, sales_dashboard, menu_engineering, customer_ltv, employees, tables_overview, table_calls, customers, exports). Requires `Authorization: Bearer $OPS_HEALTH_TOKEN`. Each section returns `{ok, latency_ms, detail}` so a paging alert can point at the broken page. |
+
+## Quick checklist for production
+
+- [ ] `SECRET_KEY` is set and is at least 32 random bytes
+- [ ] `DATABASE_URL` points at the production Postgres instance
+- [ ] `SUPERADMIN_KEY` is set (and `ADMIN_SECRET_KEY` only if you still need
+      the legacy admin portal)
+- [ ] `OWNER_SIGNUP_MODE` is `approval` or `invite_only` (never `open`)
+- [ ] `REDIS_URL` is set if you run more than one gunicorn worker
+- [ ] `TRUSTED_PROXIES` is set so HSTS / secure cookies work behind Railway
+
+## Integrations Hub (`/owner/integrations`)
+
+The unified Integrations Hub gives the owner a single screen for every
+external service (payment gateways, food-delivery aggregators, notifications)
+and is read by `lib_integrations.py`. The variables below are **only** used
+by that screen — they don't affect order taking, billing, or payment
+verification.
+
+| Variable | Purpose | Notes |
+| --- | --- | --- |
+| `TWILIO_ACCOUNT_SID` | Twilio account SID for the optional "SMS me the setup link" button. | Lazy-loaded — when unset, the SMS button is hidden in the UI. No SDK is shipped; the helper uses a stdlib HTTP POST. |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token. Paired with the SID. | Treat as sensitive. |
+| `TWILIO_FROM_NUMBER` | E.164 sender number registered on your Twilio account. | Example: `+15551234567`. |
+| `IS_PRODUCTION` | Forces the production-readiness checker into "production mode" even when not on Railway. | Set to `1` / `true` to make blocker checks active in any environment. Otherwise auto-detected from `FLASK_ENV=production` or `RAILWAY_ENVIRONMENT`. |
+| `BILLING_ENCRYPTION_KEY` | Independent Fernet key for the encrypted-at-rest payment + aggregator credentials. | Optional. Defaults to a key derived from `SECRET_KEY`. Set this if you want to rotate session secrets without re-encrypting every credential. |
+
+The "Email me the setup link" button reuses the existing `MAIL_*` /
+`SENDGRID_API_KEY` envs above — no extra config is needed for the email
+channel.
+
+### Production-readiness JSON
+
+`GET /owner/integrations/checklist.json` (auth required) returns a JSON
+snapshot of the readiness checks above plus per-integration status, with
+**no secret material**. Useful for external uptime monitors.
+
+## Billing dashboard v2
+
+These knobs tune the hardened billing dashboard (refunds, voids, drawer,
+health). All have safe defaults — only set them if you need to deviate
+from the shipping policy. Numbers are in INR for amounts, plain integers
+for counts, and seconds for durations.
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `BILLING_STEPUP_REFUND_THRESHOLD` | Refund amount that forces the owner to re-enter their password before the refund is committed. | `500` |
+| `BILLING_STEPUP_VOID_THRESHOLD` | Bill total that forces the owner to re-enter their password before voiding. | `2000` |
+| `BILLING_STEPUP_TTL_SECONDS` | How long a successful step-up is cached on the session before we re-prompt. | `300` |
+| `BILLING_REFUND_DAILY_CAP_PCT` | Max percentage of today's gross any single owner can refund before the route returns "daily cap reached". | `30` |
+| `BILLING_REFUND_VELOCITY_PER_HOUR` | Hard ceiling on refund events per owner per rolling hour. | `20` |
+| `BILLING_DRAWER_VARIANCE_ALERT_PCT` | Cash-drawer variance percentage above which the row is flagged `alert` (red pill). Below half of this is `warn`. | `2` |
+
+These are read by `lib_billing_security.py` at request time, so changing
+them only requires restarting the worker — no schema migration.
+
+### Public billing health probe
+
+`GET /health/billing` is unauthenticated and returns
+`{"ok": true, "checks": [...]}` with HTTP 200 when the database is
+reachable and the webhook log is writable, or HTTP 503 otherwise. Wire
+this into your load-balancer / uptime monitor — it never leaks
+per-owner data. The signed-in `/owner/billing/health.json` returns the
+richer per-cafe view (stale tabs, refund ratio, aggregator credentials,
+webhook volume).
+
+## Error tracking, alerting & backups (3.6 / 3.9)
+
+These envs configure the production-grade additions: file-backed error
+tracking, outbound webhook retry queue, alerting hub, encrypted DB
+backups, and unified notification dispatcher. None of them are
+required — every feature degrades gracefully when its config is
+missing (e.g. SMS just returns "not configured" instead of crashing).
+
+### Error tracking
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `ERROR_LOG_MAX_BYTES` | Max bytes of `errors.jsonl` before in-place truncation. Keeps the file from filling the data volume. | `5242880` (5 MB) |
+| `ERROR_INMEM_RING_MAX` | Max events kept in the per-worker in-memory ring (drives `/superadmin/last-error`). | `100` |
+| `OPS_HEALTH_TOKEN` | Bearer token that protects `/api/ops/health`, `/api/ops/errors`, and `/api/ops/webhooks`. Same value, three endpoints. | (unset → endpoints return 401) |
+
+`/api/ops/errors?source=jsonl&limit=100` returns the cross-worker
+recent-errors view. `?source=memory` (default) returns the
+per-worker view, which is faster but only sees the worker the
+request happened to land on.
+
+### Outbound webhook retry
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `WEBHOOK_MAX_ATTEMPTS` | Per-row attempt budget before the row is moved to `dead`. | `8` |
+| `WEBHOOK_BASE_BACKOFF_SECONDS` | Floor for the exp-backoff delay. | `5` |
+| `WEBHOOK_MAX_BACKOFF_SECONDS` | Ceiling for the exp-backoff delay. | `3600` |
+| `WEBHOOK_TIMEOUT_SECONDS` | Per-attempt HTTP timeout. | `10` |
+| `WEBHOOK_POLL_SECONDS` | Worker idle poll interval (events from `enqueue` wake it instantly). | `5` |
+| `WEBHOOK_BATCH_SIZE` | Max rows processed per worker tick. | `10` |
+| `WEBHOOK_SIGNATURE_HEADER` | Header name carrying the HMAC-SHA256 signature. | `X-Cafe-Signature` |
+| `WEBHOOK_TIMESTAMP_HEADER` | Header name carrying the signed timestamp (replay protection). | `X-Cafe-Timestamp` |
+| `DISABLE_WEBHOOK_WORKER` | Set truthy in tests / one-off scripts to skip starting the daemon thread. | (unset) |
+
+Operator UI: `GET /api/ops/webhooks` lists the dead-letter queue;
+`POST /api/ops/webhooks/<id>/requeue` puts a row back to `pending`.
+Both protected by `OPS_HEALTH_TOKEN`.
+
+### Notifications (SMS via Twilio)
+
+The existing `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` /
+`TWILIO_FROM_NUMBER` envs now feed both the legacy "send setup link"
+button **and** the new `lib_notifications.send_sms()` API. SMS sent
+through the new helper goes via the webhook retry queue by default,
+so a Twilio 5xx blip won't drop an OTP.
+
+### Alerting hub
+
+Configure any subset of these — every configured channel fires for
+every alert:
+
+| Variable | Purpose |
+| --- | --- |
+| `ALERT_SLACK_WEBHOOK` | Slack incoming-webhook URL. |
+| `ALERT_DISCORD_WEBHOOK` | Discord incoming-webhook URL. |
+| `ALERT_EMAIL` | Comma-separated recipients (uses Flask-Mail). |
+| `ALERT_COOLDOWN_SECONDS` | Per-`dedup_key` cooldown so the same alert doesn't page twice. Default `300`. |
+
+### Backups
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL_BACKUP` *(GitHub secret)* | Read-only Postgres URL used by the daily backup workflow. |
+| `BACKUP_GPG_PASSPHRASE` | Symmetric GPG passphrase (16+ chars). **Store this OUTSIDE Railway** (password manager). Without it the backups are unrecoverable. |
+| `BACKUP_UPLOAD_URL` | Base PUT URL for an S3-compatible bucket. Optional — without it backups stay in `BACKUP_DIR`. |
+| `BACKUP_UPLOAD_AUTH_HEADER` | Full header line, e.g. `Authorization: Bearer ...`. |
+| `BACKUP_DIR` | Local backup directory before upload. Default `./backups`. |
+| `BACKUP_RETENTION_DAYS` | Local cleanup horizon. Default `14`. |
+| `BACKUP_LABEL` | Filename prefix for dumps. Default `cafe`. |
+
+The full restore procedure lives in `scripts/disaster_recovery.md`.

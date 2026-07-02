@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Menu — Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/enhancements.css" />
+  <style>
+    .page-title { font-family: 'Playfair Display', Georgia, serif; font-size: 1.65rem; font-weight: 700; color: #0f172a; }
+    .page-header { display: flex; align-items: center; gap: .85rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .count-badge { background: #e0e7ff; color: #3730a3; font-size: 0.78rem; font-weight: 700; padding: .25rem .7rem; border-radius: 999px; }
+    .section-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+    .btn-primary { background: #4f46e5; color: #fff; border: none; border-radius: 10px; padding: .55rem 1.1rem; font-size: .88rem; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: .4rem; transition: background .15s; text-decoration: none; }
+    .btn-primary:hover { background: #4338ca; }
+    .btn-outline { background: #fff; color: #374151; border: 1.5px solid #d1d5db; border-radius: 10px; padding: .5rem 1rem; font-size: .88rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: .4rem; text-decoration: none; transition: border-color .15s; }
+    .btn-outline:hover { border-color: #4f46e5; color: #4f46e5; }
+    .btn-danger-sm { background: #fee2e2; color: #b91c1c; border: none; border-radius: 8px; padding: .32rem .7rem; font-size: .78rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: .3rem; transition: background .15s; }
+    .btn-danger-sm:hover { background: #fecaca; }
+    .btn-toggle { background: #f0fdf4; color: #166534; border: none; border-radius: 8px; padding: .32rem .7rem; font-size: .78rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: .3rem; transition: background .15s; }
+    .btn-toggle:hover { background: #dcfce7; }
+    .btn-toggle.unavailable { background: #f1f5f9; color: #64748b; }
+    .category-card {
+      background: #fff;
+      border: 1.5px solid #e5e7eb;
+      border-radius: 18px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(15,23,42,.04);
+    }
+    .category-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      background: #fafbfd;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .category-name { font-size: 1rem; font-weight: 700; color: #0f172a; }
+    .category-count { font-size: 0.75rem; color: #6b7280; font-weight: 500; }
+    .items-table { width: 100%; border-collapse: collapse; }
+    .items-table th { text-align: left; padding: .6rem 1rem; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #475569; background: #fafbfd; border-bottom: 1px solid #f1f5f9; }
+    .items-table td { padding: .7rem 1rem; border-bottom: 1px solid #f5f6f9; font-size: .88rem; color: #0f172a; vertical-align: middle; }
+    .items-table tr:last-child td { border-bottom: none; }
+    .items-table tr:hover td { background: rgba(99,102,241,.025); }
+    .item-name { font-weight: 600; }
+    .item-desc { font-size: .78rem; color: #64748b; margin-top: .15rem; }
+    .item-price { font-weight: 700; color: #0f172a; white-space: nowrap; }
+    .avail-pill { display: inline-flex; align-items: center; gap: .3rem; font-size: .75rem; font-weight: 600; padding: .2rem .6rem; border-radius: 999px; }
+    .avail-pill.yes { background: #f0fdf4; color: #16a34a; }
+    .avail-pill.no  { background: #f1f5f9; color: #64748b; }
+    .add-item-row td { background: #fafbfd; padding: .75rem 1rem; }
+    .add-item-form { display: flex; gap: .5rem; flex-wrap: wrap; align-items: flex-end; }
+    .add-item-form input, .add-item-form textarea {
+      border: 1.5px solid #d3d7e2; border-radius: 9px; padding: .42rem .75rem;
+      font-size: .86rem; background: #fff; color: #0f172a; font-family: inherit;
+      outline: none;
+    }
+    .add-item-form input:focus, .add-item-form textarea:focus { border-color: #4f46e5; }
+    .add-item-form input.w-name { flex: 1; min-width: 130px; }
+    .add-item-form input.w-price { width: 90px; }
+    .add-item-form input.w-desc { flex: 2; min-width: 160px; }
+    .add-item-form .btn-add-item { background: #4f46e5; color: #fff; border: none; border-radius: 9px; padding: .45rem 1rem; font-size: .86rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+    .add-item-form .btn-add-item:hover { background: #4338ca; }
+    .empty-cat { padding: 1.25rem 1rem; color: #94a3b8; font-size: .88rem; text-align: center; font-style: italic; }
+    .add-category-bar {
+      background: linear-gradient(135deg, #f0f4ff 0%, #fafaff 100%);
+      border: 2px dashed #c7d2fe;
+      border-radius: 18px;
+      padding: 1.5rem;
+      margin-top: 1.5rem;
+    }
+    .add-category-bar h3 { font-size: .92rem; font-weight: 700; color: #3730a3; margin-bottom: .85rem; }
+    .add-cat-form { display: flex; gap: .6rem; flex-wrap: wrap; }
+    .add-cat-form input { flex: 1; min-width: 180px; border: 1.5px solid #d3d7e2; border-radius: 10px; padding: .5rem .85rem; font-size: .9rem; }
+    .add-cat-form input:focus { border-color: #4f46e5; outline: none; }
+    .add-cat-form .btn-add-cat { background: #4f46e5; color: #fff; border: none; border-radius: 10px; padding: .5rem 1.1rem; font-size: .9rem; font-weight: 700; cursor: pointer; }
+    .add-cat-form .btn-add-cat:hover { background: #4338ca; }
+    .toolbar { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.25rem; }
+    .toolbar input[type=search] { flex: 1; min-width: 200px; border: 1.5px solid #d3d7e2; border-radius: 10px; padding: .5rem .85rem; font-size: .9rem; background: #fff; outline: none; }
+    .toolbar input[type=search]:focus { border-color: #4f46e5; }
+    .empty-state { text-align: center; padding: 4rem 2rem; color: #64748b; }
+    .empty-state svg { margin-bottom: 1rem; opacity: .4; }
+  </style>
+</head>
+<body>
+<div class="dashboard-wrapper">
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-inner">
+        <div class="brand-wordmark">11:11</div>
+        <div class="brand-text"><h2>Cafe 11:11</h2><span>Menu</span></div>
+      </div>
+    </div>
+    <div class="sidebar-nav">
+      <div class="sidebar-section-label">Management</div>
+      <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Dashboard
+      </a>
+      <a class="sidebar-link" href="{{ url_for('owner_tables') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h18M3 6h18M3 14h18M3 18h18"/></svg>
+        Tables
+      </a>
+      <a class="sidebar-link active" href="{{ url_for('owner_menu') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        Menu
+      </a>
+      <a class="sidebar-link" href="{{ url_for('owner_analytics') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Analytics
+      </a>
+      <a class="sidebar-link" href="{{ url_for('owner_customers') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        Customers
+      </a>
+      <a class="sidebar-link" href="{{ url_for('inventory_view') }}">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8"/><path d="M10 12h4"/></svg>
+        Inventory
+      </a>
+    </div>
+    <div class="sidebar-footer">
+      <a href="{{ url_for('owner_profile') }}" class="sidebar-link">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Profile
+      </a>
+      <a href="{{ url_for('owner_logout') }}" class="sidebar-link sidebar-link--danger">
+        <svg class="link-icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Sign out
+      </a>
+    </div>
+  </nav>
+
+  <main class="main-content" style="padding:2rem;">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div style="margin-bottom:1rem;padding:.8rem 1.1rem;border-radius:12px;font-size:.9rem;background:{% if category=='success' %}#f0fdf4{% elif category=='error' %}#fef2f2{% else %}#eff6ff{% endif %};color:{% if category=='success' %}#166534{% elif category=='error' %}#b91c1c{% else %}#1e40af{% endif %};border:1px solid {% if category=='success' %}#bbf7d0{% elif category=='error' %}#fecaca{% else %}#bfdbfe{% endif %};">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="page-header">
+      <h1 class="page-title">Menu</h1>
+      {% set total_items = menu.categories | sum(attribute='items') | list | length if menu.categories else 0 %}
+      <span class="count-badge">{{ menu.categories | length if menu.categories else 0 }} categories</span>
+      <div style="margin-left:auto;display:flex;gap:.5rem;flex-wrap:wrap;">
+        <a href="{{ url_for('export_menu_csv') }}" class="btn-outline">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Export CSV
+        </a>
+        <button class="btn-outline" onclick="document.getElementById('import-form').classList.toggle('open')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+          Import JSON
+        </button>
+      </div>
+    </div>
+
+    <!-- Import form (hidden by default) -->
+    <div id="import-form" style="display:none;background:#fff;border:1.5px solid #e5e7eb;border-radius:14px;padding:1.25rem 1.5rem;margin-bottom:1.5rem;">
+      <div id="import-form" class="" style="display:block">
+        <p style="font-size:.85rem;color:#475569;margin-bottom:.85rem;">Upload a JSON file with <code>{ "categories": [...] }</code> structure. Existing menu will be replaced.</p>
+        <form method="post" action="{{ url_for('update_menu') }}" enctype="multipart/form-data" style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <input type="file" name="menu_file" accept=".json" required style="font-size:.88rem;" />
+          <button type="submit" class="btn-primary" style="padding:.48rem 1rem;">Import</button>
+        </form>
+      </div>
+    </div>
+
+    {% if menu.categories %}
+      {% for category in menu.categories %}
+      <div class="category-card">
+        <div class="category-header">
+          <div>
+            <span class="category-name">{{ category.name }}</span>
+            <span class="category-count" style="margin-left:.6rem;">{{ category.items | length if category.items else 0 }} items</span>
+          </div>
+          <form method="post" action="{{ url_for('delete_menu_category', category_id=category.id) }}" onsubmit="return confirm('Delete category \'{{ category.name }}\' and all its items?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button type="submit" class="btn-danger-sm">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+              Delete category
+            </button>
+          </form>
+        </div>
+
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Price</th>
+              <th>Status</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if category.items %}
+              {% for item in category.items %}
+              <tr>
+                <td>
+                  <div class="item-name">{{ item.name }}</div>
+                  {% if item.description %}<div class="item-desc">{{ item.description | truncate(80) }}</div>{% endif %}
+                </td>
+                <td class="item-price">₹{{ "%.2f" | format(item.price | float) }}</td>
+                <td>
+                  {% if item.available %}
+                    <span class="avail-pill yes">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                      Available
+                    </span>
+                  {% else %}
+                    <span class="avail-pill no">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      Unavailable
+                    </span>
+                  {% endif %}
+                </td>
+                <td style="text-align:right;">
+                  <div style="display:flex;gap:.45rem;justify-content:flex-end;flex-wrap:wrap;">
+                    <form method="post" action="{{ url_for('toggle_menu_item_availability', item_id=item.id) }}" style="display:inline;">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                      <button type="submit" class="btn-toggle {% if not item.available %}unavailable{% endif %}">
+                        {% if item.available %}Hide{% else %}Show{% endif %}
+                      </button>
+                    </form>
+                    <form method="post" action="{{ url_for('delete_menu_item', item_id=item.id) }}" onsubmit="return confirm('Delete item \'{{ item.name }}\'?');" style="display:inline;">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                      <button type="submit" class="btn-danger-sm">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+                        Delete
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            {% endif %}
+            <!-- Add item row -->
+            <tr class="add-item-row">
+              <td colspan="4">
+                <form method="post" action="{{ url_for('create_menu_category') | replace('add-category', '') }}{{ url_for('save_menu_item') }}" class="add-item-form">
+                  {# We use the correct route for adding items to a category #}
+                </form>
+                <form method="post" action="/owner/menu/category/{{ category.id }}/add-item" class="add-item-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <input class="w-name" type="text" name="name" placeholder="Item name" maxlength="100" required />
+                  <input class="w-price" type="number" name="price" placeholder="Price" step="0.01" min="0" max="99999" required />
+                  <input class="w-desc" type="text" name="description" placeholder="Description (optional)" maxlength="500" />
+                  <button type="submit" class="btn-add-item">+ Add item</button>
+                </form>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        <p>No menu categories yet. Create your first category below.</p>
+      </div>
+    {% endif %}
+
+    <!-- AI Suggest Button (only shown when GEMINI_API_KEY is configured) -->
+    {% if config.get('GEMINI_API_KEY') %}
+    <div id="ai-suggest-bar" style="margin-bottom:1rem;background:linear-gradient(135deg,#eef2ff 0%,#f0fdf4 100%);border:1.5px solid #c7d2fe;border-radius:14px;padding:1rem 1.25rem;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" style="flex-shrink:0"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      <span style="font-size:.88rem;font-weight:600;color:#3730a3;flex:1;">AI Menu Suggestions — get item ideas in seconds</span>
+      <button type="button" id="ai-suggest-btn"
+        style="background:#4f46e5;color:#fff;border:none;border-radius:10px;padding:.55rem 1.1rem;font-size:.88rem;font-weight:700;cursor:pointer;transition:opacity .15s"
+        onclick="document.getElementById('ai-suggest-modal').style.display='flex'">
+        ✨ Suggest Items
+      </button>
+    </div>
+
+    <!-- AI Suggest Modal -->
+    <div id="ai-suggest-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center;padding:1rem;">
+      <div style="background:#fff;border-radius:20px;padding:2rem;width:100%;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.2);">
+        <h3 style="font-size:1.1rem;font-weight:800;margin-bottom:.25rem;color:#1e293b;">✨ AI Menu Suggestions</h3>
+        <p style="font-size:.85rem;color:#64748b;margin-bottom:1.25rem;">Tell the AI about your café's cuisine and price range, and it will suggest 6–8 menu items.</p>
+        <div id="ai-modal-msg" style="display:none;margin-bottom:.85rem;padding:.65rem .85rem;border-radius:8px;font-size:.85rem;"></div>
+        <div style="margin-bottom:.85rem;">
+          <label style="display:block;font-size:.8rem;font-weight:600;color:#64748b;margin-bottom:.4rem;">Cuisine / style</label>
+          <input id="ai-cuisine" type="text" placeholder="e.g. Italian, Brunch, Coffee Bar" maxlength="80"
+            style="width:100%;padding:.65rem .9rem;border:1.5px solid #e2e8f0;border-radius:10px;font-size:.9rem;outline:none;"
+            onfocus="this.style.borderColor='#4f46e5'" onblur="this.style.borderColor='#e2e8f0'" />
+        </div>
+        <div style="margin-bottom:1.25rem;">
+          <label style="display:block;font-size:.8rem;font-weight:600;color:#64748b;margin-bottom:.4rem;">Price range</label>
+          <select id="ai-price-range"
+            style="width:100%;padding:.65rem .9rem;border:1.5px solid #e2e8f0;border-radius:10px;font-size:.9rem;outline:none;background:#fff;">
+            <option value="budget">Budget (£2–£6)</option>
+            <option value="mid-range" selected>Mid-range (£6–£15)</option>
+            <option value="premium">Premium (£15–£30+)</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:.75rem;">
+          <button type="button" onclick="document.getElementById('ai-suggest-modal').style.display='none'"
+            style="flex:1;padding:.7rem;border:1.5px solid #e2e8f0;border-radius:10px;font-size:.9rem;font-weight:600;background:#fff;cursor:pointer;">Cancel</button>
+          <button type="button" id="ai-generate-btn"
+            style="flex:1;padding:.7rem;background:#4f46e5;color:#fff;border:none;border-radius:10px;font-size:.9rem;font-weight:700;cursor:pointer;"
+            onclick="runAiSuggest()">Generate →</button>
+        </div>
+        <div id="ai-results" style="display:none;margin-top:1.25rem;border-top:1px solid #f1f5f9;padding-top:1rem;max-height:300px;overflow-y:auto;">
+          <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:.6rem;">Suggestions — click to copy item name</div>
+          <div id="ai-results-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    function runAiSuggest(){
+      var btn = document.getElementById('ai-generate-btn');
+      var msgEl = document.getElementById('ai-modal-msg');
+      var resultsWrap = document.getElementById('ai-results');
+      var resultsList = document.getElementById('ai-results-list');
+      var cuisine = document.getElementById('ai-cuisine').value.trim() || 'café';
+      var priceRange = document.getElementById('ai-price-range').value;
+      btn.textContent = 'Generating…';
+      btn.disabled = true;
+      msgEl.style.display = 'none';
+      resultsWrap.style.display = 'none';
+      var fd = new FormData();
+      fd.append('csrf_token', document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').content : '');
+      fd.append('cuisine', cuisine);
+      fd.append('price_range', priceRange);
+      fetch('/owner/menu/ai-suggest', { method: 'POST', body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+          if(data.error){
+            msgEl.style.cssText = 'display:block;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;padding:.6rem .85rem;border-radius:8px;font-size:.85rem;';
+            msgEl.textContent = data.error;
+            return;
+          }
+          resultsList.innerHTML = '';
+          (data.suggestions || []).forEach(function(s){
+            var div = document.createElement('div');
+            div.style.cssText = 'display:flex;align-items:flex-start;gap:.5rem;padding:.5rem .6rem;border-radius:8px;cursor:pointer;transition:background .15s;margin-bottom:.25rem;';
+            div.innerHTML = '<span style="flex:1;font-size:.875rem;color:#1e293b;"><strong>' + s.name + '</strong> — ' + s.description + '<br><span style="font-size:.78rem;color:#64748b;">' + (s.price || '') + '</span></span>'
+              + '<button style="background:#eef2ff;color:#4f46e5;border:none;border-radius:6px;padding:.25rem .55rem;font-size:.75rem;font-weight:700;cursor:pointer;flex-shrink:0;" onclick="navigator.clipboard&&navigator.clipboard.writeText(\''+s.name.replace(/'/g,"\\'")+'\')" title="Copy name">Copy</button>';
+            resultsList.appendChild(div);
+          });
+          resultsWrap.style.display = 'block';
+        })
+        .catch(function(){ msgEl.style.cssText='display:block;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;padding:.6rem .85rem;border-radius:8px;font-size:.85rem;'; msgEl.textContent='Network error. Please try again.'; })
+        .finally(function(){ btn.textContent='Generate →'; btn.disabled=false; });
+    }
+    </script>
+    {% endif %}
+
+    <!-- Add category -->
+    <div class="add-category-bar">
+      <h3>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.5" style="vertical-align:-2px;margin-right:.35rem;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        Add Category
+      </h3>
+      <form method="post" action="{{ url_for('create_menu_category') }}" class="add-cat-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="text" name="name" placeholder="e.g. Starters, Mains, Beverages" maxlength="100" required />
+        <button type="submit" class="btn-add-cat">Add Category</button>
+      </form>
+    </div>
+
+    <!-- Search filter (JS-only, no reload) -->
+    <script>
+      (function(){
+        const input = document.createElement('input');
+        input.type = 'search';
+        input.placeholder = 'Filter items…';
+        input.style.cssText = 'margin:1.5rem 0 .5rem;width:100%;max-width:340px;border:1.5px solid #d3d7e2;border-radius:10px;padding:.5rem .85rem;font-size:.9rem;font-family:inherit;outline:none;display:block;';
+        input.addEventListener('input', function(){
+          const q = this.value.toLowerCase().trim();
+          document.querySelectorAll('.items-table tbody tr:not(.add-item-row)').forEach(row => {
+            const name = row.querySelector('.item-name');
+            if(name){
+              row.style.display = (!q || name.textContent.toLowerCase().includes(q)) ? '' : 'none';
+            }
+          });
+        });
+        const firstCard = document.querySelector('.category-card');
+        if(firstCard) firstCard.parentNode.insertBefore(input, firstCard);
+      })();
+    </script>
+  </main>
+</div>
+</body>
+</html>

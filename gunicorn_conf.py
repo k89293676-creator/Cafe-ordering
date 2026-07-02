@@ -1,0 +1,103 @@
+"""Gunicorn configuration for production (Railway / Render) deployments.
+
+Loaded by ``start.py`` via ``--config python:gunicorn_conf``. Hard-coded
+defaults are tuned for Railway free-tier (512 MB / 1 vCPU). Each value can
+be overridden through environment variables — handy when scaling up.
+
+The gevent worker class is intentionally retained because it is highly
+memory-efficient and pairs well with the SSE / long-poll routes in this
+codebase.
+"""
+from __future__ import annotations
+
+import os
+import logging
+
+
+# ── Networking ──────────────────────────────────────────────────────────────
+bind = f"0.0.0.0:{os.environ.get('PORT', '8000')}"
+
+# ── Worker model ────────────────────────────────────────────────────────────
+worker_class = "gevent"
+
+# Auto-scale workers: 2 × CPU + 1 (standard formula for I/O-bound apps).
+# Override via WEB_CONCURRENCY; cap at 8 to avoid connection-pool saturation
+# on shared Railway/Render instances.
+import multiprocessing as _mp
+
+_default_workers = min((_mp.cpu_count() * 2) + 1, 8)
+workers = int(os.environ.get("WEB_CONCURRENCY", str(_default_workers)))
+threads = int(os.environ.get("GUNICORN_THREADS", "1"))  # gevent uses green threads
+worker_connections = int(os.environ.get("GUNICORN_WORKER_CONNECTIONS", "1000"))
+
+# ── Timeouts & recycling ────────────────────────────────────────────────────
+timeout = int(os.environ.get("GUNICORN_TIMEOUT", "60"))
+graceful_timeout = int(os.environ.get("GUNICORN_GRACEFUL_TIMEOUT", "30"))
+keepalive = int(os.environ.get("GUNICORN_KEEPALIVE", "5"))
+max_requests = int(os.environ.get("GUNICORN_MAX_REQUESTS", "500"))
+max_requests_jitter = int(os.environ.get("GUNICORN_MAX_REQUESTS_JITTER", "50"))
+
+# ── Trust proxy headers (Railway terminates TLS at the edge) ────────────────
+forwarded_allow_ips = os.environ.get("FORWARDED_ALLOW_IPS", "*")
+proxy_allow_ips = os.environ.get("PROXY_ALLOW_IPS", "*")
+
+# ── Logging — emit access + error logs to stdout/stderr so Railway captures
+#     them. The app itself emits structured JSON via @app.after_request, so
+#     gunicorn's access log stays in the simpler combined format.
+accesslog = "-"
+errorlog = "-"
+loglevel = os.environ.get("GUNICORN_LOG_LEVEL", "info")
+access_log_format = (
+    '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(L)ss'
+)
+
+
+# ── Lifecycle hooks ─────────────────────────────────────────────────────────
+def on_starting(server) -> None:
+    """Logged once when the master boots. Useful as a deploy marker."""
+    logging.getLogger("gunicorn.error").info(
+        "gunicorn master starting: workers=%s threads=%s worker_class=%s",
+        workers, threads, worker_class,
+    )
+
+
+def post_fork(server, worker) -> None:
+    """Re-seed entropy and dispose pre-fork DB connections so each worker owns
+    its own connection pool. Inheriting open sockets across fork() is the most
+    common cause of mysterious ``InterfaceError: connection already closed``
+    errors right after a deploy.
+
+    Import from ``app.extensions`` (not ``app``) so we get the db singleton
+    without re-triggering create_app() in the master process.
+    """
+    try:
+        from app.extensions import db  # avoids re-running create_app in master
+        db.engine.dispose()
+    except Exception:  # pragma: no cover — best-effort cleanup
+        pass
+
+
+def worker_int(worker) -> None:
+    """SIGINT (Ctrl-C / Railway shutdown) — log and let gevent flush."""
+    worker.log.info("worker received SIGINT, draining…")
+
+
+def worker_abort(worker) -> None:
+    """SIGABRT — usually a hung request killed by the master timeout."""
+    worker.log.warning("worker aborted (timeout?)")
+
+
+def worker_exit(server, worker) -> None:
+    """Issue 8: Dispose the worker's DB connection pool on graceful shutdown.
+
+    This ensures PostgreSQL does not accumulate idle-in-transaction connections
+    after a rolling Railway deploy.  Belt-and-suspenders alongside the
+    post_fork dispose — that one runs after fork, this one runs on exit so
+    every normal worker lifecycle is book-ended with a clean pool state.
+    """
+    try:
+        from app.extensions import db
+        db.engine.dispose()
+        worker.log.info("worker_exit: DB connection pool disposed cleanly.")
+    except Exception:  # pragma: no cover — best-effort
+        pass

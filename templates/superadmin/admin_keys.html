@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Admin Access Keys — Superadmin</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+  <style>
+    :root{--accent:#6366f1;--sidebar-bg:#1a1d21;--sidebar-text:#9ba3af;--sidebar-active:#fff;}
+    body{background:#f3f4f6;font-family:'Inter',system-ui,sans-serif;}
+    .sa-layout{display:flex;min-height:100vh;}
+    .sa-sidebar{width:240px;background:var(--sidebar-bg);color:var(--sidebar-text);display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto;}
+    .sidebar-brand{padding:1.5rem 1.25rem;border-bottom:1px solid rgba(255,255,255,.07);}
+    .sidebar-brand h6{color:#fff;font-weight:700;margin:0;letter-spacing:.5px;}
+    .sidebar-brand small{color:var(--sidebar-text);font-size:.72rem;}
+    .sidebar-nav{padding:.75rem 0;flex:1;}
+    .sidebar-label{padding:.35rem 1.25rem;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:#4b5563;font-weight:600;}
+    .sidebar-link{display:flex;align-items:center;gap:.6rem;padding:.6rem 1.25rem;color:var(--sidebar-text);text-decoration:none;font-size:.88rem;border-left:3px solid transparent;transition:color .15s,background .15s;}
+    .sidebar-link:hover{color:var(--sidebar-active);background:rgba(255,255,255,.04);}
+    .sidebar-link.active{color:var(--sidebar-active);background:rgba(99,102,241,.15);border-left-color:var(--accent);}
+    .sidebar-link i{font-size:1rem;width:1.2rem;}
+    .sa-content{flex:1;overflow-x:auto;}
+    .sa-topbar{background:#fff;border-bottom:1px solid #e5e7eb;padding:.75rem 1.5rem;display:flex;align-items:center;justify-content:space-between;}
+    .sa-topbar h5{margin:0;font-weight:600;font-size:1rem;}
+    .sa-main{padding:1.5rem;}
+    .card-soft{background:#fff;border:1px solid #e5e7eb;border-radius:.75rem;}
+    .key-display{font-family:'SFMono-Regular',Consolas,Monaco,monospace;background:#0f172a;color:#a7f3d0;padding:.85rem 1rem;border-radius:.5rem;word-break:break-all;font-size:.95rem;}
+    .table th{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;font-weight:600;}
+    .badge-yes{background:#d1fae5;color:#065f46;}
+    .badge-no{background:#fef3c7;color:#92400e;}
+    .badge-sa{background:#fee2e2;color:#991b1b;}
+    @media(max-width:768px){.sa-sidebar{display:none;}.sa-layout{display:block;}}
+  </style>
+</head>
+<body>
+<div class="sa-layout">
+  <aside class="sa-sidebar">
+    <div class="sidebar-brand">
+      <h6><i class="bi bi-shield-lock-fill me-2" style="color:var(--accent)"></i>Superadmin</h6>
+      <small>CafePortal Console</small>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="sidebar-label">Overview</div>
+      <a class="sidebar-link" href="{{ url_for('superadmin_dashboard') }}"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a>
+      <a class="sidebar-link" href="{{ url_for('superadmin_analytics') }}"><i class="bi bi-bar-chart-line-fill"></i> Analytics</a>
+      <div class="sidebar-label mt-2">Security</div>
+      <a class="sidebar-link active" href="{{ url_for('superadmin_admin_keys') }}"><i class="bi bi-key-fill"></i> Admin Access Keys</a>
+      <div class="sidebar-label mt-2">Switch to</div>
+      <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}"><i class="bi bi-arrow-left-circle"></i> Owner Dashboard</a>
+      <div style="padding:1rem 1.25rem;border-top:1px solid rgba(255,255,255,.07);margin-top:auto;">
+        <a href="{{ url_for('owner_logout') }}" class="sidebar-link" style="padding:0;color:#ef4444;"><i class="bi bi-box-arrow-right"></i> Sign out</a>
+      </div>
+    </nav>
+  </aside>
+
+  <div class="sa-content">
+    <div class="sa-topbar">
+      <h5><i class="bi bi-key-fill me-2 text-primary"></i>Admin Access Keys</h5>
+      <div class="d-flex align-items-center gap-3">
+        <span class="text-muted small"><i class="bi bi-person-fill me-1"></i>{{ owner_username }}</span>
+        <span class="badge bg-danger rounded-pill">SA</span>
+      </div>
+    </div>
+
+    <div class="sa-main">
+      {% with messages = get_flashed_messages(with_categories=True) %}
+        {% for cat, msg in messages %}
+          <div class="alert alert-{% if cat == 'danger' %}danger{% elif cat == 'success' %}success{% else %}info{% endif %} alert-dismissible fade show" role="alert">
+            {{ msg|safe }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+        {% endfor %}
+      {% endwith %}
+
+      {% if new_key %}
+        <div class="card-soft p-4 mb-4 border-success">
+          <div class="d-flex align-items-center mb-2">
+            <i class="bi bi-check-circle-fill text-success me-2 fs-4"></i>
+            <h5 class="mb-0">New key for <code>{{ new_key_owner.username }}</code> (owner #{{ new_key_owner.id }})</h5>
+          </div>
+          <p class="text-muted small mb-2">This key is shown <strong>only once</strong>. Copy it now and store it securely. It is bound to this owner and grants access to <a href="{{ url_for('admin.login') }}">/admin</a>.</p>
+          <div class="key-display" id="newKeyValue">{{ new_key }}</div>
+          <button type="button" class="btn btn-sm btn-outline-primary mt-3" onclick="copyKey()">
+            <i class="bi bi-clipboard me-1"></i>Copy to clipboard
+          </button>
+        </div>
+      {% endif %}
+
+      <div class="card-soft p-4 mb-4">
+        <h6 class="mb-3"><i class="bi bi-plus-circle me-2 text-primary"></i>Generate a key for an authorised owner</h6>
+        <p class="text-muted small mb-3">
+          The generated key is hashed and stored on the server alongside the owner's ID.
+          Only that owner can use it to access the <code>/admin</code> tool and dashboard.
+          Generating a new key for an owner replaces any previous key they had.
+        </p>
+        <form method="post" action="{{ url_for('superadmin_generate_admin_key') }}" class="row g-2 align-items-end">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          <div class="col-sm-6 col-md-5">
+            <label class="form-label small text-muted mb-1">Authorised owner</label>
+            <select name="owner_id" class="form-select" required>
+              <option value="">— Select an owner —</option>
+              {% for r in rows %}
+                <option value="{{ r.owner_id }}" {% if not r.is_active %}disabled{% endif %}>
+                  {{ r.username }}{% if r.is_superadmin %} (superadmin){% endif %}{% if not r.is_active %} — inactive{% endif %}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-auto">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-key me-1"></i>Generate key
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card-soft p-4">
+        <h6 class="mb-3"><i class="bi bi-list-check me-2 text-primary"></i>Owner key status</h6>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Owner</th>
+                <th>Email</th>
+                <th>Has key</th>
+                <th>Generated</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in rows %}
+              <tr>
+                <td>
+                  <strong>{{ r.username }}</strong>
+                  {% if r.is_superadmin %}<span class="badge badge-sa ms-1">SA</span>{% endif %}
+                  {% if not r.is_active %}<span class="badge bg-secondary ms-1">inactive</span>{% endif %}
+                </td>
+                <td class="text-muted small">{{ r.email or '—' }}</td>
+                <td>
+                  {% if r.has_key %}
+                    <span class="badge badge-yes">Yes</span>
+                  {% else %}
+                    <span class="badge badge-no">No</span>
+                  {% endif %}
+                </td>
+                <td class="text-muted small">{{ r.generated_at[:19].replace('T',' ') if r.generated_at else '—' }}</td>
+                <td class="text-end">
+                  {% if r.has_key %}
+                    <form method="post" action="{{ url_for('superadmin_revoke_admin_key') }}" class="d-inline" onsubmit="return confirm('Revoke admin key for {{ r.username }}?');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                      <input type="hidden" name="owner_id" value="{{ r.owner_id }}"/>
+                      <button class="btn btn-sm btn-outline-danger"><i class="bi bi-x-circle me-1"></i>Revoke</button>
+                    </form>
+                  {% endif %}
+                  {% if r.is_active %}
+                    <form method="post" action="{{ url_for('superadmin_generate_admin_key') }}" class="d-inline">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                      <input type="hidden" name="owner_id" value="{{ r.owner_id }}"/>
+                      <button class="btn btn-sm btn-outline-primary"><i class="bi bi-arrow-repeat me-1"></i>{% if r.has_key %}Regenerate{% else %}Generate{% endif %}</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  function copyKey() {
+    const el = document.getElementById('newKeyValue');
+    if (!el) return;
+    navigator.clipboard.writeText(el.textContent.trim()).then(() => {
+      alert('Key copied to clipboard.');
+    });
+  }
+</script>
+</body>
+</html>

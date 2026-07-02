@@ -1,0 +1,261 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<h1 style="font-size:1.65rem;font-weight:800;letter-spacing:-.025em;margin:0 0 .5rem;">Today's Billing</h1>
+<p class="muted" style="margin-top:-.75rem;">
+  Live snapshot — refreshes every 10 seconds.
+  <span class="mono">As of {{ overview.as_of[:19] }} UTC</span>
+  {% if health and health.verdict != 'ok' %}
+    · <a href="{{ url_for('owner_billing_health') }}" style="color:var(--warn);">⚠ {{ health.verdict|upper }} — view health</a>
+  {% endif %}
+</p>
+
+<div class="grid grid-stats" style="margin-bottom:1.5rem;">
+  <div class="stat ok">
+    <div class="label">Net Revenue</div>
+    <div class="value">₹{{ '%.2f'|format(overview.revenue) }}</div>
+    <div class="sub">{{ overview.orders_paid }} paid orders</div>
+  </div>
+  <div class="stat">
+    <div class="label">Average Ticket</div>
+    <div class="value">₹{{ '%.2f'|format(overview.average_ticket) }}</div>
+    <div class="sub">Across today’s settled bills</div>
+  </div>
+  <div class="stat warn">
+    <div class="label">Open Tabs</div>
+    <div class="value">{{ overview.open_tabs }}</div>
+    <div class="sub">Exposure ₹{{ '%.2f'|format(overview.open_value) }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">{{ settings.tax_label or 'Tax' }} Collected</div>
+    <div class="value">₹{{ '%.2f'|format(overview.tax_collected) }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Service Charge</div>
+    <div class="value">₹{{ '%.2f'|format(overview.service_charge) }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Tips</div>
+    <div class="value">₹{{ '%.2f'|format(overview.tips) }}</div>
+    <div class="sub">{{ overview.tip_ratio }}% of net revenue</div>
+  </div>
+  <div class="stat danger">
+    <div class="label">Refunds</div>
+    <div class="value">₹{{ '%.2f'|format(overview.refunds) }}</div>
+    <div class="sub">{{ overview.refund_ratio }}% of settled revenue</div>
+  </div>
+  {% if overview.voided_today %}
+  <div class="stat warn">
+    <div class="label">Voided Today</div>
+    <div class="value">{{ overview.voided_today }}</div>
+    <div class="sub">₹{{ '%.2f'|format(overview.voided_value_today) }} written off</div>
+  </div>
+  {% endif %}
+</div>
+<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;">
+  <a class="btn btn-primary btn-sm" href="{{ url_for('owner_billing_open') }}">View open tabs</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod') }}">Run EOD report</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_logs') }}">View audit trail</a>
+</div>
+
+{% if sparkline and sparkline.labels %}
+<div class="panel" style="margin-bottom:1.5rem;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
+    <div>
+      <h2 style="margin-top:0;font-size:1.05rem;font-weight:700;letter-spacing:-.01em;">Last 7 days — Net Revenue</h2>
+      <p class="muted" style="font-size:.88rem;margin-top:-.25rem;">Total: <strong>₹{{ '%.2f'|format(sparkline.total_net) }}</strong> · Peak day: <strong>₹{{ '%.2f'|format(sparkline.peak) }}</strong> · Avg/day: <strong>₹{{ '%.2f'|format(sparkline.total_net / (sparkline.labels|length) if sparkline.labels|length else 0) }}</strong></p>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="export-7d-csv" title="Download 7-day breakdown as CSV">⬇ Export CSV</button>
+  </div>
+  <canvas id="revenueChart" width="700" height="200"></canvas>
+  <script>
+    const ctx = document.getElementById('revenueChart').getContext('2d');
+    const revenueChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: {{ sparkline.labels|tojson }},
+        datasets: [{
+          label: 'Net Revenue (₹)',
+          data: {{ sparkline.net|tojson }},
+          backgroundColor: 'rgba(34, 197, 94, 0.8)',
+          borderColor: 'rgba(34, 197, 94, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: function(value) {
+                return '₹' + value.toFixed(0);
+              }
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            display: false
+          }
+        }
+      }
+    });
+  </script>
+  <table style="margin-top:.75rem;">
+    <thead><tr><th>Day</th><th class="right">Gross</th><th class="right">Refunds %</th><th class="right">Net</th></tr></thead>
+    <tbody>
+      {% for label in sparkline.labels %}
+        <tr>
+          <td class="mono">{{ label }}</td>
+          <td class="right mono">₹{{ '%.2f'|format(sparkline.gross[loop.index0]) }}</td>
+          <td class="right mono {% if sparkline.refund_pct[loop.index0] > 10 %}muted{% endif %}" style="{% if sparkline.refund_pct[loop.index0] > 10 %}color:var(--danger);{% endif %}">{{ '%.1f'|format(sparkline.refund_pct[loop.index0]) }}%</td>
+          <td class="right mono"><strong>₹{{ '%.2f'|format(sparkline.net[loop.index0]) }}</strong></td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="panel" style="margin-bottom:1.5rem;">
+  <h2 style="margin-top:0;font-size:1.05rem;font-weight:700;letter-spacing:-.01em;">Today's Revenue by Payment Mode</h2>
+  {% if not overview.per_mode %}
+    <p class="muted">No paid orders yet today.</p>
+  {% else %}
+    <table>
+      <thead><tr><th>Method</th><th class="right">Amount</th><th class="right">% of Revenue</th></tr></thead>
+      <tbody>
+        {% set total = overview.per_mode.values()|sum %}
+        {% for mode, amt in overview.per_mode.items() %}
+          <tr>
+            <td><strong>{{ mode|title }}</strong></td>
+            <td class="right mono">₹{{ '%.2f'|format(amt) }}</td>
+            <td class="right muted">{{ '%.1f'|format((amt / total * 100) if total else 0) }}%</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <canvas id="paymentChart" width="400" height="220" style="margin-top:1rem;max-height:260px;"></canvas>
+    <script>
+      // Donut over pie — leaves room for a center label and reads
+      // better at the small sizes the overview page uses. Palette is
+      // long enough to cover every non-deprecated mode without the
+      // browser cycling colours and confusing two methods.
+      const PAYMENT_PALETTE = [
+        '#22c55e', '#f59e0b', '#ef4444', '#4f46e5', '#06b6d4',
+        '#ec4899', '#a855f7', '#84cc16', '#0ea5e9', '#f97316'
+      ];
+      const paymentCtx = document.getElementById('paymentChart').getContext('2d');
+      const paymentLabels = {{ overview.per_mode.keys()|list|tojson }};
+      const paymentValues = {{ overview.per_mode.values()|list|tojson }};
+      const paymentChart = new Chart(paymentCtx, {
+        type: 'doughnut',
+        data: {
+          labels: paymentLabels,
+          datasets: [{
+            data: paymentValues,
+            backgroundColor: paymentLabels.map((_, i) => PAYMENT_PALETTE[i % PAYMENT_PALETTE.length]),
+            borderColor: '#0a0a0a',
+            borderWidth: 2,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '62%',
+          plugins: {
+            legend: { position: 'bottom', labels: { color: '#f5f5f5' } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const sum = paymentValues.reduce((a, b) => a + b, 0) || 1;
+                  const v = ctx.parsed || 0;
+                  return ` ${ctx.label}: ₹${v.toFixed(2)} (${(v/sum*100).toFixed(1)}%)`;
+                }
+              }
+            }
+          }
+        }
+      });
+    </script>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0;font-size:1.05rem;font-weight:700;letter-spacing:-.01em;">Recent Settlements</h2>
+  {% if not recent_paid %}
+    <p class="muted">No bills settled yet today.</p>
+  {% else %}
+    <table>
+      <thead><tr><th>Invoice</th><th>Table</th><th>Customer</th><th>Method</th><th class="right">Total</th><th>Paid At</th><th></th></tr></thead>
+      <tbody>
+        {% for o in recent_paid %}
+          <tr>
+            <td class="mono">{{ o.invoiceNumber or '—' }}</td>
+            <td>{{ o.tableName or '—' }}</td>
+            <td>{{ o.customerName }}</td>
+            <td><span class="pill pill-paid">{{ o.paymentMethod or 'paid' }}</span></td>
+            <td class="right mono">₹{{ '%.2f'|format(o.total) }}{% if o.refundAmount %} <span class="muted">−₹{{ '%.2f'|format(o.refundAmount) }}</span>{% endif %}</td>
+            <td class="muted mono">{{ o.paidAt[:19] if o.paidAt else '—' }}</td>
+            <td><a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_invoice', order_id=o.id) }}">Invoice</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</div>
+{% endblock %}
+{% block extrabody %}
+<script>
+  // Auto-refresh every 10s during a busy service — but ONLY while the
+  // tab is visible. Previously this fired regardless and would page
+  // through hours of stale state when the owner came back from lunch.
+  (function () {
+    let timer = null;
+    function start() {
+      if (timer) return;
+      timer = setTimeout(() => { window.location.reload(); }, 10000);
+    }
+    function stop() {
+      if (timer) { clearTimeout(timer); timer = null; }
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') start(); else stop();
+    });
+    if (document.visibilityState === 'visible') start();
+  })();
+
+  // CSV export for the 7-day revenue breakdown — operators have asked
+  // for this to drop into their bookkeeper's spreadsheet without a
+  // round-trip to the EOD page.
+  (function () {
+    const btn = document.getElementById('export-7d-csv');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const labels    = {{ sparkline.labels|tojson if sparkline and sparkline.labels else '[]' }};
+      const gross     = {{ sparkline.gross|tojson  if sparkline and sparkline.labels else '[]' }};
+      const net       = {{ sparkline.net|tojson    if sparkline and sparkline.labels else '[]' }};
+      const refundPct = {{ sparkline.refund_pct|tojson if sparkline and sparkline.labels else '[]' }};
+      if (!labels.length) return;
+      const rows = [['Day', 'Gross (INR)', 'Refund %', 'Net (INR)']];
+      labels.forEach((d, i) => {
+        rows.push([d, (gross[i] || 0).toFixed(2),
+                  (refundPct[i] || 0).toFixed(2),
+                  (net[i] || 0).toFixed(2)]);
+      });
+      const csv = rows.map(r => r.map(c => {
+        const s = String(c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url; a.download = `revenue-7d-${stamp}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    });
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,92 @@
+{% extends "admin/base.html" %}
+{% block title %}Invitations{% endblock %}
+{% block topbar_title %}Owner Invitations{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div>
+    <h4 class="mb-0">Invitations</h4>
+    <small class="text-muted">Sign-up mode: <span class="badge bg-secondary">{{ signup_mode }}</span></small>
+  </div>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, m in messages %}<div class="alert alert-{{ cat }}">{{ m }}</div>{% endfor %}
+{% endwith %}
+
+{% if issued %}
+<div class="alert alert-success">
+  <h6 class="mb-2"><i class="bi bi-check-circle"></i> Invitation issued — copy this link, it will not be shown again:</h6>
+  <input class="form-control" readonly value="{{ issued.url }}" onclick="this.select()">
+  <small class="text-muted">For: {{ issued.email or '(any email)' }} · Plan: {{ issued.plan }} · Expires: {{ issued.expires_at }}</small>
+</div>
+{% endif %}
+
+<div class="card mb-4">
+<div class="card-header"><strong>New invitation</strong></div>
+<div class="card-body">
+<form method="post" action="{{ url_for('multi_tenant.create_invitation') }}" class="row g-2">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+  <div class="col-md-4">
+    <label class="form-label">Email (optional)</label>
+    <input class="form-control" type="email" name="email" placeholder="owner@cafe.com">
+  </div>
+  <div class="col-md-2">
+    <label class="form-label">Plan tier</label>
+    <select class="form-select" name="plan_tier">
+      {% for t in plan_tiers %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <label class="form-label">Expires (days)</label>
+    <input class="form-control" type="number" name="expires_days" value="14" min="1" max="365">
+  </div>
+  <div class="col-md-4">
+    <label class="form-label">Note</label>
+    <input class="form-control" type="text" name="note" maxlength="500" placeholder="Internal note">
+  </div>
+  <div class="col-12 text-end">
+    <button class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i> Create invitation</button>
+  </div>
+</form>
+</div></div>
+
+<div class="card"><div class="card-body p-0">
+<table class="table mb-0">
+  <thead><tr>
+    <th>Email</th><th>Plan</th><th>Created</th><th>Expires</th><th>Status</th><th>By</th><th></th>
+  </tr></thead>
+  <tbody>
+  {% for inv in invites %}
+    <tr>
+      <td>{{ inv.email or '—' }}<br><small class="text-muted">{{ inv.note }}</small></td>
+      <td><span class="badge bg-secondary">{{ inv.plan_tier }}</span></td>
+      <td><small>{{ inv.created_at.strftime('%Y-%m-%d %H:%M') if inv.created_at }}</small></td>
+      <td><small>{{ inv.expires_at.strftime('%Y-%m-%d') if inv.expires_at else '—' }}</small></td>
+      <td>
+        {% if inv.used_at %}
+          <span class="badge bg-success">used</span>
+        {% elif inv.revoked_at %}
+          <span class="badge bg-dark">revoked</span>
+        {% else %}
+          <span class="badge bg-primary">active</span>
+        {% endif %}
+      </td>
+      <td><small>{{ creators.get(inv.created_by_owner_id, '—') }}</small></td>
+      <td class="text-end">
+        {% if not inv.used_at and not inv.revoked_at %}
+        <form method="post" action="{{ url_for('multi_tenant.revoke_invitation', invite_id=inv.id) }}"
+              onsubmit="return confirm('Revoke this invitation?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          <button class="btn btn-outline-danger btn-sm"><i class="bi bi-x-lg"></i></button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="text-center text-muted py-4">No invitations issued yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div></div>
+{% endblock %}

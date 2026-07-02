@@ -1,0 +1,367 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Food Delivery{% endblock %}
+{% block content %}
+<h1>Food Delivery (Swiggy / Zomato / Uber Eats)</h1>
+<style>
+  .ag-grid{display:grid;gap:1rem;}
+  .ag-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+           padding:1.25rem 1.5rem;}
+  .ag-card h3{margin:0 0 .25rem;font-size:1.1rem;display:flex;align-items:center;gap:.5rem;
+              flex-wrap:wrap;color:var(--text);}
+  .ag-card .summary{color:var(--muted);font-size:.88rem;margin:0 0 .9rem;}
+  .ag-row{display:grid;grid-template-columns:200px 1fr;gap:.7rem;align-items:center;
+          padding:.45rem 0;border-top:1px solid var(--line);}
+  .ag-row:first-of-type{border-top:0;}
+  .ag-row label{font-size:.85rem;color:var(--muted);font-weight:600;}
+  .ag-row input[type=text],.ag-row input[type=password],.ag-row select{
+    width:100%;padding:.55rem .75rem;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:7px;font-size:.9rem;color:var(--text);
+    font-family:inherit;}
+  .ag-row input:focus,.ag-row select:focus{outline:none;border-color:var(--primary);}
+  .ag-row .hint{font-size:.78rem;color:var(--muted);margin-top:.25rem;}
+  .ag-actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.95rem;}
+  .ag-btn{padding:.55rem 1rem;border-radius:8px;font-size:.88rem;font-weight:600;
+          border:1px solid transparent;cursor:pointer;text-decoration:none;display:inline-block;
+          font-family:inherit;}
+  .ag-btn-primary{background:var(--primary);color:#0a0a0a;}
+  .ag-btn-secondary{background:transparent;color:var(--text);border-color:var(--line);}
+  .ag-btn-success{background:var(--ok);color:#0a0a0a;}
+  .ag-btn-danger{background:var(--danger);color:#fff;}
+  .ag-badge{display:inline-flex;align-items:center;gap:.35rem;padding:.15rem .55rem;
+            border-radius:999px;font-size:.7rem;font-weight:700;text-transform:uppercase;
+            letter-spacing:.04em;}
+  .ag-badge-test{background:rgba(245,158,11,.18);color:#fcd34d;}
+  .ag-badge-live{background:rgba(34,197,94,.18);color:#86efac;}
+  .ag-badge-off{background:rgba(154,154,154,.2);color:var(--muted);}
+  .ag-badge-verified{background:rgba(34,197,94,.18);color:#86efac;}
+  .ag-badge-unverified{background:rgba(239,68,68,.18);color:#fca5a5;}
+  .ag-webhook{background:#000;color:#e2e8f0;padding:.65rem .75rem;border-radius:8px;
+              font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.8rem;
+              display:flex;align-items:center;gap:.6rem;word-break:break-all;
+              border:1px solid var(--line);}
+  .ag-webhook button{background:var(--panel);color:var(--text);
+                     border:1px solid var(--line);border-radius:6px;
+                     padding:.25rem .65rem;font-size:.75rem;cursor:pointer;flex-shrink:0;
+                     font-family:inherit;}
+  .ag-webhook button:hover{border-color:var(--primary);}
+  .ag-guide{background:var(--panel-2);border:1px dashed var(--line);border-radius:8px;
+            padding:.75rem .9rem;margin-top:.75rem;font-size:.88rem;color:var(--text);}
+  .ag-guide ol{margin:.4rem 0 0 1.1rem;padding:0;}
+  .ag-guide li{margin:.25rem 0;color:var(--text);}
+  .ag-guide a{color:var(--primary);text-decoration:none;}
+  .ag-events{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem;
+             background:rgba(79,70,229,.18);color:#c7d2fe;padding:.05rem .4rem;
+             border-radius:4px;margin:0 .15rem;}
+  details.ag-details{margin-top:.5rem;}
+  details.ag-details summary{cursor:pointer;color:var(--primary);font-weight:600;
+                              font-size:.88rem;list-style:none;}
+  details.ag-details summary::-webkit-details-marker{display:none;}
+  details.ag-details summary::before{content:"▸ ";}
+  details.ag-details[open] summary::before{content:"▾ ";}
+  .ag-test-result{margin-top:.7rem;padding:.55rem .8rem;border-radius:8px;font-size:.83rem;}
+  .ag-test-ok{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#86efac;}
+  .ag-test-err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;}
+  .ag-warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);
+           color:#fcd34d;padding:.7rem .9rem;border-radius:8px;font-size:.85rem;
+           margin-bottom:1rem;}
+  .ag-orders{margin-top:1.75rem;}
+  .ag-orders h2{font-size:1.1rem;margin:0 0 .65rem;color:var(--text);}
+  .ag-orders table{width:100%;border-collapse:collapse;font-size:.88rem;
+                   background:var(--panel);border:1px solid var(--line);border-radius:10px;
+                   overflow:hidden;}
+  .ag-orders th,.ag-orders td{text-align:left;padding:.65rem .85rem;
+                              border-bottom:1px solid var(--line);vertical-align:top;}
+  .ag-orders th{background:var(--panel-2);font-size:.72rem;text-transform:uppercase;
+                color:var(--muted);font-weight:600;letter-spacing:.05em;}
+  .ag-orders tbody tr:hover{background:rgba(255,255,255,.02);}
+  .ag-orders small{color:var(--muted);}
+  .ag-pill{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.7rem;
+           font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .ag-pill-placed{background:rgba(79,70,229,.2);color:#c7d2fe;}
+  .ag-pill-accepted{background:rgba(34,197,94,.18);color:#86efac;}
+  .ag-pill-ready{background:rgba(245,158,11,.2);color:#fcd34d;}
+  .ag-pill-delivered{background:rgba(168,85,247,.2);color:#e9d5ff;}
+  .ag-pill-cancelled,.ag-pill-rejected{background:rgba(239,68,68,.18);color:#fca5a5;}
+  .ag-inline-form{display:inline;margin-right:.25rem;}
+</style>
+
+<p class="ag-warn">
+  Aggregator credentials are encrypted at rest. Going Live triggers an
+  automatic connection test against the partner; the platform will not
+  activate if the partner rejects the keys. Webhooks are HTTPS-only,
+  signature-verified, and protected against replay (5-minute window).
+</p>
+
+<div class="ag-grid">
+  {# ---------- Configured platforms ---------- #}
+  {% for cred in credentials %}
+  <div class="ag-card">
+    <h3>
+      {{ cred.platform_label }}
+      {% if cred.mode == 'live' %}
+        <span class="ag-badge ag-badge-live">Live</span>
+      {% else %}
+        <span class="ag-badge ag-badge-test">Test</span>
+      {% endif %}
+      {% if not cred.is_active %}<span class="ag-badge ag-badge-off">Disabled</span>{% endif %}
+      {% if cred.is_verified %}
+        <span class="ag-badge ag-badge-verified">Verified</span>
+      {% else %}
+        <span class="ag-badge ag-badge-unverified">Not verified</span>
+      {% endif %}
+      {% if cred.auto_accept %}<span class="ag-badge ag-badge-live">Auto-accept</span>{% endif %}
+    </h3>
+    {% if cred.guide.summary %}<p class="summary">{{ cred.guide.summary }}</p>{% endif %}
+
+    <div class="ag-webhook">
+      <span style="opacity:.7;flex-shrink:0;">Webhook URL:</span>
+      <span id="wh-{{ cred.id }}">{{ cred.webhook_url }}</span>
+      <button type="button" onclick="copyText('wh-{{ cred.id }}', this)">Copy</button>
+    </div>
+    {% if cred.guide.events %}
+    <p style="font-size:.78rem;color:var(--muted);margin-top:.4rem;">
+      Subscribe these events:
+      {% for ev in cred.guide.events %}<code class="ag-events">{{ ev }}</code>{% endfor %}
+    </p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('owner_aggregators_save') }}"
+          autocomplete="off" style="margin-top:14px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="platform" value="{{ cred.platform }}">
+
+      <div class="ag-row">
+        <label>Display name</label>
+        <div><input type="text" name="display_name" value="{{ cred.display_name }}" maxlength="80"></div>
+      </div>
+      <div class="ag-row">
+        <label>{{ cred.guide.merchant_id_label or 'Merchant ID' }}</label>
+        <div>
+          <input type="text" name="merchant_id" value="{{ cred.merchant_id }}" maxlength="120" required>
+          <div class="hint">Echoed back to the partner on every API call. Not secret.</div>
+        </div>
+      </div>
+      <div class="ag-row">
+        <label>{{ cred.guide.credential_label or 'API key' }}</label>
+        <div>
+          <input type="text" name="api_key" value=""
+                 placeholder="{{ cred.api_key_masked or 'Paste new key to replace' }}" maxlength="200">
+          <div class="hint">Leave blank to keep the existing key.</div>
+        </div>
+      </div>
+      <div class="ag-row">
+        <label>{{ cred.guide.secret_label or 'Secret' }}</label>
+        <div>
+          <input type="password" name="secret" value="" autocomplete="new-password"
+                 placeholder="{% if cred.has_secret %}•••••••• (saved){% else %}Paste secret{% endif %}">
+          <div class="hint">Encrypted with Fernet. Leave blank to keep existing.</div>
+        </div>
+      </div>
+      <div class="ag-row">
+        <label>Webhook signing secret</label>
+        <div>
+          <input type="password" name="webhook_secret" value="" autocomplete="new-password"
+                 placeholder="{% if cred.has_webhook %}•••••••• (saved){% else %}Optional — defaults to secret{% endif %}">
+        </div>
+      </div>
+      <div class="ag-row">
+        <label>Mode</label>
+        <div>
+          <select name="mode">
+            <option value="test" {% if cred.mode == 'test' %}selected{% endif %}>Sandbox / Staging</option>
+            <option value="live" {% if cred.mode == 'live' %}selected{% endif %}>Live / Production</option>
+          </select>
+        </div>
+      </div>
+      <div class="ag-row">
+        <label>Behaviour</label>
+        <div>
+          <label style="font-weight:400;">
+            <input type="checkbox" name="is_active" {% if cred.is_active %}checked{% endif %}>
+            Active (receive new orders)
+          </label>
+          &nbsp;&nbsp;
+          <label style="font-weight:400;">
+            <input type="checkbox" name="auto_accept" {% if cred.auto_accept %}checked{% endif %}>
+            Auto-accept incoming orders
+          </label>
+        </div>
+      </div>
+
+      {% if cred.last_test_status %}
+      <div class="ag-test-result {{ 'ag-test-ok' if cred.last_test_status == 'ok' else 'ag-test-err' }}">
+        Last test ({{ cred.last_tested_at.strftime('%Y-%m-%d %H:%M UTC') if cred.last_tested_at else '—' }}):
+        <strong>{{ cred.last_test_status|upper }}</strong> — {{ cred.last_test_message }}
+      </div>
+      {% endif %}
+
+      <div class="ag-actions">
+        <button type="submit" class="ag-btn ag-btn-primary">Save changes</button>
+      </div>
+    </form>
+
+    <div class="ag-actions" style="margin-top:8px;">
+      <form method="post" action="{{ url_for('owner_aggregators_test', cred_id=cred.id) }}"
+            class="ag-inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="ag-btn ag-btn-secondary">Verify connection</button>
+      </form>
+      <form method="post" action="{{ url_for('owner_aggregators_delete', cred_id=cred.id) }}"
+            class="ag-inline-form"
+            onsubmit="return promptConfirm(this, '{{ cred.platform }}');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="confirm_platform" value="">
+        <button type="submit" class="ag-btn ag-btn-danger">Disconnect</button>
+      </form>
+    </div>
+
+    {% if cred.guide.steps %}
+    <details class="ag-details">
+      <summary>Setup checklist</summary>
+      <div class="ag-guide">
+        <ol>{% for step in cred.guide.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+        {% if cred.guide.dashboard_url %}
+          <div style="margin-top:6px;">
+            <a href="{{ cred.guide.dashboard_url }}" target="_blank" rel="noopener">Open partner dashboard ↗</a>
+          </div>
+        {% endif %}
+      </div>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {# ---------- Available (not yet configured) platforms ---------- #}
+  {% for av in available_platforms %}
+  <div class="ag-card">
+    <h3>{{ av.label }} <span class="ag-badge ag-badge-off">Not connected</span></h3>
+    {% if av.guide.summary %}<p class="summary">{{ av.guide.summary }}</p>{% endif %}
+
+    <form method="post" action="{{ url_for('owner_aggregators_save') }}" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="platform" value="{{ av.slug }}">
+      <div class="ag-row"><label>Display name</label>
+        <div><input type="text" name="display_name" value="{{ av.label }}"></div></div>
+      <div class="ag-row"><label>{{ av.guide.merchant_id_label or 'Merchant ID' }}</label>
+        <div><input type="text" name="merchant_id" required></div></div>
+      <div class="ag-row"><label>{{ av.guide.credential_label or 'API key' }}</label>
+        <div><input type="text" name="api_key" required></div></div>
+      <div class="ag-row"><label>{{ av.guide.secret_label or 'Secret' }}</label>
+        <div><input type="password" name="secret" required autocomplete="new-password"></div></div>
+      <div class="ag-row"><label>Webhook secret</label>
+        <div><input type="password" name="webhook_secret" autocomplete="new-password"
+                    placeholder="Optional — defaults to secret"></div></div>
+      <div class="ag-row"><label>Mode</label>
+        <div><select name="mode">
+          <option value="test" selected>Sandbox / Staging</option>
+          <option value="live">Live / Production</option>
+        </select></div></div>
+      <div class="ag-row"><label>&nbsp;</label>
+        <div>
+          <label style="font-weight:400;"><input type="checkbox" name="is_active" checked> Active</label>
+          &nbsp;&nbsp;
+          <label style="font-weight:400;"><input type="checkbox" name="auto_accept"> Auto-accept</label>
+        </div></div>
+      <div class="ag-actions">
+        <button type="submit" class="ag-btn ag-btn-primary">Verify &amp; Save</button>
+      </div>
+    </form>
+
+    {% if av.guide.steps %}
+    <details class="ag-details" open>
+      <summary>How to connect {{ av.label }}</summary>
+      <div class="ag-guide">
+        <ol>{% for step in av.guide.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+        {% if av.guide.dashboard_url %}
+          <div style="margin-top:6px;">
+            <a href="{{ av.guide.dashboard_url }}" target="_blank" rel="noopener">Open partner dashboard ↗</a>
+          </div>
+        {% endif %}
+      </div>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if not credentials and not available_platforms %}
+  <div class="ag-card">All supported aggregator platforms are configured.</div>
+  {% endif %}
+</div>
+
+<div class="ag-orders">
+  <h2>Recent aggregator orders</h2>
+  {% if recent_orders %}
+  <table>
+    <thead>
+      <tr>
+        <th>When</th><th>Platform</th><th>External #</th><th>Customer</th>
+        <th>Items</th><th>Total</th><th>Status</th><th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in recent_orders %}
+      <tr>
+        <td>{{ o.created_at.strftime('%H:%M %d %b') if o.created_at else '—' }}</td>
+        <td>{{ platform_labels.get(o.platform, o.platform) }}</td>
+        <td>#{{ o.external_order_id }}</td>
+        <td>{{ o.customer_name }}<br><small>{{ o.customer_phone }}</small></td>
+        <td>{% for it in (o.items_snapshot or []) %}
+              {{ it.qty }}× {{ it.name }}{% if not loop.last %}, {% endif %}
+            {% endfor %}</td>
+        <td>{{ o.currency }} {{ '%.2f'|format(o.total or 0) }}</td>
+        <td><span class="ag-pill ag-pill-{{ o.aggregator_status }}">{{ o.aggregator_status }}</span></td>
+        <td>
+          {% if o.aggregator_status in ('placed',) %}
+          <form method="post" class="ag-inline-form"
+                action="{{ url_for('owner_aggregator_order_action', agg_id=o.id, action='accept') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="ag-btn ag-btn-success" style="padding:4px 10px;font-size:12px;">Accept</button>
+          </form>
+          <form method="post" class="ag-inline-form"
+                action="{{ url_for('owner_aggregator_order_action', agg_id=o.id, action='reject') }}"
+                onsubmit="this.reason.value = prompt('Reason for rejection?') || ''; return this.reason.value !== '';">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="reason" value="">
+            <button class="ag-btn ag-btn-danger" style="padding:4px 10px;font-size:12px;">Reject</button>
+          </form>
+          {% elif o.aggregator_status == 'accepted' %}
+          <form method="post" class="ag-inline-form"
+                action="{{ url_for('owner_aggregator_order_action', agg_id=o.id, action='ready') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="ag-btn ag-btn-secondary" style="padding:4px 10px;font-size:12px;">Mark ready</button>
+          </form>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="font-size:.88rem;">No aggregator orders yet — they will appear here as soon as Swiggy / Zomato / Uber Eats start pushing to your webhook URL.</p>
+  {% endif %}
+</div>
+
+<script>
+  function copyText(spanId, btn) {
+    const text = document.getElementById(spanId).textContent.trim();
+    const done = () => { const old = btn.textContent; btn.textContent = "Copied!";
+                         setTimeout(() => { btn.textContent = old; }, 1400); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done).catch(() => fb(text, done));
+    } else { fb(text, done); }
+  }
+  function fb(text, done) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); done(); } catch(_) {}
+    document.body.removeChild(ta);
+  }
+  function promptConfirm(form, expected) {
+    const v = (prompt("Type '" + expected + "' to confirm disconnect:") || "").trim().toLowerCase();
+    if (v !== expected) { alert("Disconnect cancelled."); return false; }
+    form.confirm_platform.value = v;
+    return true;
+  }
+</script>
+{% endblock %}

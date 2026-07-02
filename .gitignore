@@ -1,49 +1,76 @@
-# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
-
-# compiled output
-dist
-tmp
-out-tsc
+# ── Compiled output ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
 *.tsbuildinfo
-.expo
-.expo-shared
+tmp/
+out-tsc/
 
-# dependencies
-node_modules
+# ── Virtual environments ────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.Python
 
-# IDEs and editors
-/.idea
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
+# ── Dependencies ────────────────────────────────────────────────────────────
+node_modules/
 
-# IDE - VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+# ── Secrets & environment ──────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
 
-# misc
-/.sass-cache
-/connect.lock
-/coverage
-/libpeerconnection.log
-npm-debug.log
+# ── Data files (runtime-generated) ────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+.flask_sessions/
+flask_session/
+
+# ── Logs ──────────────────────────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
 yarn-error.log
-testem.log
-/typings
 
-# System Files
+# ── OS files ──────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-.cursor/rules/nx-rules.mdc
-.github/instructions/nx.instructions.md
+# ── IDEs ──────────────────────────────────────────────────────────────────
+.idea/
+.vscode/*
+!.vscode/settings.json
+*.sublime-workspace
+.project
+.classpath
 
-# Replit
+# ── Replit (NEVER commit these) ────────────────────────────────────────────
+.replit
+.replitignore
+replit.md
 .cache/
 .local/
+.npmrc
+attached_assets/
+
+# ── Coverage & testing ─────────────────────────────────────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# ── Expo / React Native ────────────────────────────────────────────────────
+.expo
+.expo-shared

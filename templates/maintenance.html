@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Down for maintenance · Cafe 11:11</title>
+  <meta http-equiv="refresh" content="60" />
+  <style>
+    :root { color-scheme: light dark; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: linear-gradient(160deg, #fdf6ec 0%, #f4ece1 100%);
+      color: #2a1d10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 1.5rem;
+      box-sizing: border-box;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: linear-gradient(160deg, #1d160f 0%, #0f0a06 100%); color: #f3e8d6; }
+      .card { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08); }
+      .meta { color: #b9a890; }
+    }
+    .card {
+      max-width: 520px;
+      width: 100%;
+      background: rgba(255,255,255,0.6);
+      border: 1px solid rgba(0,0,0,0.06);
+      border-radius: 18px;
+      padding: 2.25rem 2rem;
+      box-shadow: 0 18px 48px -24px rgba(0,0,0,0.25);
+      backdrop-filter: blur(8px);
+      text-align: center;
+    }
+    h1 { margin: 0 0 0.5rem 0; font-size: 1.6rem; letter-spacing: -0.01em; }
+    p  { margin: 0.4rem 0; line-height: 1.55; }
+    .meta { font-size: 0.85rem; color: #6b5a44; margin-top: 1.25rem; }
+    .dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: #e0a96d; margin-right: 0.45rem;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1><span class="dot"></span>We&rsquo;ll be right back</h1>
+    <p>Cafe 11:11 is undergoing a brief maintenance window.</p>
+    <p>Your data is safe. This page will refresh automatically.</p>
+    <p class="meta">If this persists for more than a few minutes, please contact your café administrator.</p>
+  </div>
+</body>
+</html>

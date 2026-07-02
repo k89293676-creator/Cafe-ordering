@@ -1,0 +1,92 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      DATABASE_URL: postgresql://cafe:cafe@db:5432/cafe_ordering
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: change-me-in-production
+      ADMIN_SECRET_KEY: change-me-in-production
+      IS_PRODUCTION: "true"
+      TRUSTED_PROXIES: "1"
+      # Mail (SendGrid / SMTP)
+      MAIL_SERVER: smtp.sendgrid.net
+      MAIL_PORT: "587"
+      MAIL_USE_TLS: "true"
+      MAIL_USERNAME: apikey
+      MAIL_PASSWORD: ""
+      MAIL_DEFAULT_SENDER: orders@example.com
+      # Stripe
+      STRIPE_SECRET_KEY: ""
+      STRIPE_WEBHOOK_SECRET: ""
+      STRIPE_PUBLISHABLE_KEY: ""
+      # Connection pool tuning
+      DB_POOL_SIZE: "10"
+      DB_MAX_OVERFLOW: "10"
+      DB_POOL_TIMEOUT: "30"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: cafe_ordering
+      POSTGRES_USER: cafe
+      # DEV-ONLY default — override in production via .env or Docker secrets.
+      # Never commit a real password here. Set POSTGRES_PASSWORD in your
+      # deployment environment and reference it as: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cafe}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cafe -d cafe_ordering"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save 60 1
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
+  rqworker:
+    build: .
+    command: python rqworker.py
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://cafe:cafe@db:5432/cafe_ordering
+      SECRET_KEY: change-me-in-production
+      IS_PRODUCTION: "true"
+      RQ_QUEUES: "default"
+      LOG_LEVEL: INFO
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

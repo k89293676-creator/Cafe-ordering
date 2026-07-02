@@ -1,0 +1,363 @@
+{% extends "owner_billing/_base.html" %}
+{% block title %}Payment Methods{% endblock %}
+{% block content %}
+<h1>Payment Methods</h1>
+<style>
+  .pm-grid{display:grid;gap:1rem;}
+  .pm-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+           padding:1.25rem 1.5rem;}
+  .pm-card h3{margin:0 0 .25rem;font-size:1.1rem;display:flex;align-items:center;gap:.5rem;
+              flex-wrap:wrap;color:var(--text);}
+  .pm-card .summary{color:var(--muted);font-size:.88rem;margin:0 0 .9rem;}
+  .pm-row{display:grid;grid-template-columns:200px 1fr;gap:.7rem;align-items:center;
+          padding:.45rem 0;border-top:1px solid var(--line);}
+  .pm-row:first-of-type{border-top:0;}
+  .pm-row label{font-size:.85rem;color:var(--muted);font-weight:600;}
+  .pm-row input[type=text],.pm-row input[type=password],.pm-row select{
+    width:100%;padding:.55rem .75rem;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:7px;font-size:.9rem;color:var(--text);
+    font-family:inherit;}
+  .pm-row input:focus,.pm-row select:focus{outline:none;border-color:var(--primary);}
+  .pm-row .hint{font-size:.78rem;color:var(--muted);margin-top:.25rem;}
+  .pm-actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.95rem;}
+  .pm-btn{padding:.55rem 1rem;border-radius:8px;font-size:.88rem;font-weight:600;
+          border:1px solid transparent;cursor:pointer;text-decoration:none;display:inline-block;
+          font-family:inherit;}
+  .pm-btn-primary{background:var(--primary);color:#0a0a0a;}
+  .pm-btn-secondary{background:transparent;color:var(--text);border-color:var(--line);}
+  .pm-btn-ghost{background:transparent;color:var(--primary);}
+  .pm-badge{display:inline-flex;align-items:center;gap:.35rem;padding:.15rem .55rem;
+            border-radius:999px;font-size:.7rem;font-weight:700;text-transform:uppercase;
+            letter-spacing:.04em;}
+  .pm-badge-test{background:rgba(245,158,11,.18);color:#fcd34d;}
+  .pm-badge-live{background:rgba(34,197,94,.18);color:#86efac;}
+  .pm-badge-off{background:rgba(154,154,154,.2);color:var(--muted);}
+  .pm-badge-default{background:rgba(79,70,229,.2);color:#c7d2fe;}
+  .pm-badge-verified{background:rgba(34,197,94,.18);color:#86efac;}
+  .pm-badge-unverified{background:rgba(239,68,68,.18);color:#fca5a5;}
+  .pm-webhook{background:#000;color:#e2e8f0;padding:.65rem .75rem;border-radius:8px;
+              font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.8rem;
+              display:flex;align-items:center;gap:.6rem;word-break:break-all;
+              border:1px solid var(--line);}
+  .pm-webhook button{background:var(--panel);color:var(--text);
+                     border:1px solid var(--line);border-radius:6px;
+                     padding:.25rem .65rem;font-size:.75rem;cursor:pointer;flex-shrink:0;
+                     font-family:inherit;}
+  .pm-webhook button:hover{border-color:var(--primary);}
+  .pm-guide{background:var(--panel-2);border:1px dashed var(--line);border-radius:8px;
+            padding:.75rem .9rem;margin-top:.75rem;font-size:.88rem;color:var(--text);}
+  .pm-guide ol{margin:.4rem 0 0 1.1rem;padding:0;}
+  .pm-guide li{margin:.25rem 0;color:var(--text);}
+  .pm-guide a{color:var(--primary);text-decoration:none;}
+  .pm-guide a:hover{text-decoration:underline;}
+  .pm-events{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem;
+             background:rgba(79,70,229,.18);color:#c7d2fe;padding:.05rem .4rem;
+             border-radius:4px;margin:0 .15rem;}
+  details.pm-details{margin-top:.5rem;}
+  details.pm-details summary{cursor:pointer;color:var(--primary);font-weight:600;
+                              font-size:.88rem;list-style:none;}
+  details.pm-details summary::-webkit-details-marker{display:none;}
+  details.pm-details summary::before{content:"▸ ";}
+  details.pm-details[open] summary::before{content:"▾ ";}
+  .pm-test-result{margin-top:.7rem;padding:.55rem .8rem;border-radius:8px;font-size:.83rem;}
+  .pm-test-ok{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#86efac;}
+  .pm-test-err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5;}
+  .pm-warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);
+           color:#fcd34d;padding:.7rem .9rem;border-radius:8px;font-size:.85rem;
+           margin-bottom:1rem;}
+</style>
+
+<p class="pm-warn">
+  Keys are encrypted at rest and never returned to the browser after saving.
+  Live mode is only allowed once a successful Verify against the gateway has been recorded.
+</p>
+
+<div class="pm-grid">
+  {# ---------- Configured providers ---------- #}
+  {% for cred in credentials %}
+  <div class="pm-card">
+    <h3>
+      {{ cred.provider_label }}
+      {% if cred.is_default %}<span class="pm-badge pm-badge-default">Default</span>{% endif %}
+      {% if cred.mode == 'live' %}
+        <span class="pm-badge pm-badge-live">Live</span>
+      {% else %}
+        <span class="pm-badge pm-badge-test">Test</span>
+      {% endif %}
+      {% if not cred.is_active %}<span class="pm-badge pm-badge-off">Disabled</span>{% endif %}
+      {% if cred.is_verified %}
+        <span class="pm-badge pm-badge-verified">Verified</span>
+      {% else %}
+        <span class="pm-badge pm-badge-unverified">Not verified</span>
+      {% endif %}
+    </h3>
+    {% if cred.guide.summary %}<p class="summary">{{ cred.guide.summary }}</p>{% endif %}
+
+    <div class="pm-webhook">
+      <span style="opacity:.7;flex-shrink:0;">Webhook URL:</span>
+      <span id="wh-{{ cred.id }}">{{ cred.webhook_url }}</span>
+      <button type="button" onclick="copyWebhook('wh-{{ cred.id }}', this)">Copy</button>
+    </div>
+    {% if cred.guide.events %}
+    <p class="hint" style="margin-top:6px;">
+      Subscribe these events:
+      {% for ev in cred.guide.events %}<code class="pm-events">{{ ev }}</code>{% endfor %}
+    </p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('owner_billing_payment_methods_save') }}"
+          autocomplete="off" style="margin-top:14px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="provider" value="{{ cred.provider }}">
+
+      <div class="pm-row">
+        <label>Display name</label>
+        <div>
+          <input type="text" name="display_name" value="{{ cred.display_name }}"
+                 maxlength="80" placeholder="Shown to staff">
+        </div>
+      </div>
+
+      <div class="pm-row">
+        <label>{{ cred.guide.key_id_label or 'Key ID' }}</label>
+        <div>
+          {# Show the masked value as a placeholder, NOT as the input value.
+             Submitting an empty value preserves the stored key — preventing
+             the masked-write-back bug from v1. #}
+          <input type="text" name="public_key" value=""
+                 placeholder="{{ cred.public_key_masked or 'Paste new key id to replace' }}"
+                 maxlength="200">
+          <div class="hint">Leave blank to keep the existing key. Paste a new value to rotate.</div>
+        </div>
+      </div>
+
+      <div class="pm-row">
+        <label>{{ cred.guide.secret_label or 'Secret' }}</label>
+        <div>
+          <input type="password" name="secret_key" value="" autocomplete="new-password"
+                 placeholder="{% if cred.has_secret %}•••••••• (saved){% else %}Paste secret{% endif %}">
+          <div class="hint">Stored encrypted with Fernet. Leave blank to keep the existing secret.</div>
+        </div>
+      </div>
+
+      <div class="pm-row">
+        <label>Webhook signing secret</label>
+        <div>
+          <input type="password" name="webhook_secret" value="" autocomplete="new-password"
+                 placeholder="{% if cred.has_webhook %}•••••••• (saved){% else %}From provider's webhook page{% endif %}">
+        </div>
+      </div>
+
+      <div class="pm-row">
+        <label>Mode</label>
+        <div>
+          <select name="mode">
+            <option value="test" {% if cred.mode == 'test' %}selected{% endif %}>Test / Sandbox</option>
+            <option value="live" {% if cred.mode == 'live' %}selected{% endif %}>Live / Production</option>
+          </select>
+          <div class="hint">Going Live requires a successful Verify first — we'll auto-test on save.</div>
+        </div>
+      </div>
+
+      <div class="pm-row">
+        <label>Status</label>
+        <div>
+          <label style="font-weight:400;">
+            <input type="checkbox" name="is_active" {% if cred.is_active %}checked{% endif %}>
+            Active (accept new payments)
+          </label>
+          &nbsp;&nbsp;
+          <label style="font-weight:400;">
+            <input type="checkbox" name="is_default" {% if cred.is_default %}checked{% endif %}>
+            Default for new orders
+          </label>
+        </div>
+      </div>
+
+      {% if cred.last_test_status %}
+      <div class="pm-test-result {{ 'pm-test-ok' if cred.last_test_status == 'ok' else 'pm-test-err' }}">
+        Last test ({{ cred.last_tested_at.strftime('%Y-%m-%d %H:%M UTC') if cred.last_tested_at else '—' }}):
+        <strong>{{ cred.last_test_status|upper }}</strong> — {{ cred.last_test_message }}
+      </div>
+      {% endif %}
+
+      <div class="pm-actions">
+        <button type="submit" class="pm-btn pm-btn-primary">Save changes</button>
+      </div>
+    </form>
+
+    <div class="pm-actions" style="margin-top:8px;">
+      <form method="post"
+            action="{{ url_for('owner_billing_payment_methods_test', cred_id=cred.id) }}"
+            style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="pm-btn pm-btn-secondary">Verify connection now</button>
+      </form>
+      <form method="post"
+            action="{{ url_for('owner_billing_payment_methods_delete', cred_id=cred.id) }}"
+            style="display:inline;"
+            onsubmit="return pmConfirm(this, '{{ cred.provider }}');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="confirm_provider" value="">
+        <button type="submit" class="pm-btn" style="background:var(--danger);color:#fff;">Disconnect</button>
+      </form>
+    </div>
+
+    {# Focused webhook-only rotation. Hidden behind <details> so the card
+       stays compact for the 99% of owners who never need to rotate. #}
+    <details class="pm-details" style="margin-top:10px;">
+      <summary>Rotate webhook secret</summary>
+      <form method="post"
+            action="{{ url_for('owner_billing_payment_methods_rotate_webhook', cred_id=cred.id) }}"
+            autocomplete="off" style="margin-top:10px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <p class="hint" style="margin:0 0 8px;">
+          Use this if the webhook secret leaked or you regenerated it in
+          your provider's dashboard. Only the webhook signing secret
+          changes — your API key, mode, and active flag stay the same.
+        </p>
+        <div class="pm-row">
+          <label>New webhook secret</label>
+          <div>
+            <input type="password" name="webhook_secret" value=""
+                   autocomplete="new-password"
+                   placeholder="Paste the new secret from your provider dashboard"
+                   required>
+            <div class="hint">Stored encrypted with Fernet. The previous secret is overwritten on save and cannot be recovered.</div>
+          </div>
+        </div>
+        <div class="pm-actions">
+          <button type="submit" class="pm-btn pm-btn-primary">Rotate webhook secret</button>
+        </div>
+      </form>
+    </details>
+
+    {% if cred.guide.steps %}
+    <details class="pm-details">
+      <summary>Setup checklist</summary>
+      <div class="pm-guide">
+        <ol>
+          {% for step in cred.guide.steps %}<li>{{ step }}</li>{% endfor %}
+        </ol>
+        {% if cred.guide.dashboard_url %}
+          <div style="margin-top:6px;">
+            <a href="{{ cred.guide.dashboard_url }}" target="_blank" rel="noopener">Open API keys dashboard ↗</a>
+            &nbsp;·&nbsp;
+            <a href="{{ cred.guide.webhook_url }}" target="_blank" rel="noopener">Open webhooks dashboard ↗</a>
+          </div>
+        {% endif %}
+      </div>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {# ---------- Available (not yet configured) providers ---------- #}
+  {% for av in available_providers %}
+  <div class="pm-card">
+    <h3>
+      {{ av.label }}
+      <span class="pm-badge pm-badge-off">Not connected</span>
+    </h3>
+    {% if av.guide.summary %}<p class="summary">{{ av.guide.summary }}</p>{% endif %}
+
+    <form method="post" action="{{ url_for('owner_billing_payment_methods_save') }}"
+          autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="provider" value="{{ av.slug }}">
+
+      <div class="pm-row">
+        <label>Display name</label>
+        <div>
+          <input type="text" name="display_name" value="{{ av.label }}" maxlength="80">
+        </div>
+      </div>
+      <div class="pm-row">
+        <label>{{ av.guide.key_id_label or 'Key ID' }}</label>
+        <div><input type="text" name="public_key" required maxlength="200"
+                    placeholder="Paste from your provider dashboard"></div>
+      </div>
+      <div class="pm-row">
+        <label>{{ av.guide.secret_label or 'Secret' }}</label>
+        <div><input type="password" name="secret_key" required autocomplete="new-password"></div>
+      </div>
+      <div class="pm-row">
+        <label>Webhook secret</label>
+        <div><input type="password" name="webhook_secret" autocomplete="new-password"
+                    placeholder="Add later after configuring the webhook"></div>
+      </div>
+      <div class="pm-row">
+        <label>Mode</label>
+        <div>
+          <select name="mode">
+            <option value="test" selected>Test / Sandbox</option>
+            <option value="live">Live / Production</option>
+          </select>
+        </div>
+      </div>
+      <div class="pm-row">
+        <label>&nbsp;</label>
+        <div>
+          <label style="font-weight:400;">
+            <input type="checkbox" name="is_active" checked> Active
+          </label>
+        </div>
+      </div>
+
+      <div class="pm-actions">
+        <button type="submit" class="pm-btn pm-btn-primary">Verify &amp; Save</button>
+      </div>
+    </form>
+
+    {% if av.guide.steps %}
+    <details class="pm-details" open>
+      <summary>How to connect {{ av.label }}</summary>
+      <div class="pm-guide">
+        <ol>
+          {% for step in av.guide.steps %}<li>{{ step }}</li>{% endfor %}
+        </ol>
+        {% if av.guide.dashboard_url %}
+          <div style="margin-top:6px;">
+            <a href="{{ av.guide.dashboard_url }}" target="_blank" rel="noopener">Open API keys dashboard ↗</a>
+            &nbsp;·&nbsp;
+            <a href="{{ av.guide.webhook_url }}" target="_blank" rel="noopener">Open webhooks dashboard ↗</a>
+          </div>
+        {% endif %}
+      </div>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if not credentials and not available_providers %}
+  <div class="pm-card">All supported providers are configured.</div>
+  {% endif %}
+</div>
+
+<script>
+  function copyWebhook(spanId, btn) {
+    const text = document.getElementById(spanId).textContent.trim();
+    const done = () => {
+      const old = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(() => { btn.textContent = old; }, 1400);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done).catch(() => fallback(text, done));
+    } else { fallback(text, done); }
+  }
+  function pmConfirm(form, expected) {
+    const v = (prompt("Type '" + expected + "' to confirm disconnect:") || "").trim().toLowerCase();
+    if (v !== expected) { alert("Disconnect cancelled."); return false; }
+    form.confirm_provider.value = v;
+    return true;
+  }
+  function fallback(text, done) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); done(); } catch(_) {}
+    document.body.removeChild(ta);
+  }
+</script>
+{% endblock %}

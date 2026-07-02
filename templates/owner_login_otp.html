@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login with OTP — Cafe Portal</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/enhancements.css" />
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-logo">
+    <div class="auth-logo-icon">☕</div>
+    <h1>Cafe Portal</h1>
+    <p>Owner Management System</p>
+  </div>
+
+  <div class="auth-card">
+    <h2>Login with OTP</h2>
+    <p class="subtitle">Enter your registered email address to receive a one-time password</p>
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for message in messages %}
+      <div class="alert alert-error">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <form method="post" autocomplete="on">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="form-group">
+        <label for="email">Registered Email Address</label>
+        <input
+          id="email"
+          name="email"
+          type="email"
+          inputmode="email"
+          placeholder="you@example.com"
+          autocomplete="email"
+          required
+        />
+      </div>
+      <button class="btn btn-primary btn-full" type="submit" style="margin-top:0.75rem;">Send OTP →</button>
+    </form>
+
+    <div style="margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border);text-align:center;">
+      <p class="auth-footer" style="margin:0;">
+        Prefer password? <a href="{{ url_for('owner_login') }}">Sign in with password</a>
+      </p>
+    </div>
+  </div>
+</div>
+</body>
+</html>

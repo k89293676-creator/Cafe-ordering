@@ -1,0 +1,118 @@
+name: PR Checks
+
+# Runs only on pull requests — keeps noisy PR-specific checks out of the
+# main CI run so main-branch dashboards stay clean.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 1. PR size guard ──────────────────────────────────────────────────────
+  pr-size:
+    name: PR size check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          ADDITIONS=$(git diff --stat "$BASE" "$HEAD" | tail -1 | grep -o '[0-9]* insertion' | grep -o '[0-9]*' || echo 0)
+          DELETIONS=$(git diff --stat "$BASE" "$HEAD" | tail -1 | grep -o '[0-9]* deletion' | grep -o '[0-9]*' || echo 0)
+          TOTAL=$((ADDITIONS + DELETIONS))
+
+          echo "Lines changed: +${ADDITIONS} -${DELETIONS} (total: ${TOTAL})"
+
+          if [ "$TOTAL" -gt 2000 ]; then
+            echo "::warning ::This PR changes ${TOTAL} lines. Consider splitting it into smaller PRs for easier review."
+          else
+            echo "PR size OK (${TOTAL} lines changed)."
+          fi
+
+  # ── 2. Conventional commit check ─────────────────────────────────────────
+  conventional-commits:
+    name: Conventional commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate PR title (conventional commit format)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          python3 - <<'EOF'
+          import os, re, sys
+
+          title = os.environ.get("PR_TITLE", "")
+          # Conventional commits: type(scope)!: description
+          pattern = r'^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?(!)?: .{1,100}$'
+          if re.match(pattern, title):
+              print(f"PR title OK: {title!r}")
+              sys.exit(0)
+
+          print(f"::warning ::PR title does not follow Conventional Commits format.")
+          print(f"  Title: {title!r}")
+          print("  Expected: feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert: description")
+          print("  Examples: 'feat(menu): add dietary tags', 'fix: correct order total rounding'")
+          # Non-blocking — warn only, don't fail
+          sys.exit(0)
+          EOF
+
+  # ── 3. Secret leak detection ─────────────────────────────────────────────
+  secret-scan:
+    name: Secret leak scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks on changed files
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  # ── 4. Dependency diff ────────────────────────────────────────────────────
+  dep-diff:
+    name: Dependency diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: contains(github.event.pull_request.changed_files, 'requirements') || true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Diff requirements.txt against base
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          git show "${BASE}:requirements.txt" > /tmp/base-requirements.txt 2>/dev/null || touch /tmp/base-requirements.txt
+          diff /tmp/base-requirements.txt requirements.txt || true
+          echo "::notice ::Dependency diff above — review any additions for known CVEs."

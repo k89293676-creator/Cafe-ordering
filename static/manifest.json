@@ -1,0 +1,47 @@
+{
+  "name": "Cafe 11:11",
+  "short_name": "Cafe 11:11",
+  "description": "Order food and drinks at your table. Real-time kitchen updates, table service, and loyalty rewards.",
+  "start_url": "/?utm_source=pwa",
+  "id": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "browser"],
+  "background_color": "#faf8f4",
+  "theme_color": "#1c1c1e",
+  "orientation": "portrait-primary",
+  "lang": "en",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable any"
+    }
+  ],
+  "categories": ["food", "shopping"],
+  "shortcuts": [
+    {
+      "name": "Track my order",
+      "short_name": "Track order",
+      "description": "Check your current order status",
+      "url": "/?tab=orders&utm_source=pwa_shortcut",
+      "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Owner Dashboard",
+      "short_name": "Dashboard",
+      "description": "Manage orders and menu",
+      "url": "/owner/dashboard?utm_source=pwa_shortcut",
+      "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "prefer_related_applications": false,
+  "screenshots": []
+}

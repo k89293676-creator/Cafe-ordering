@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Owners — Superadmin</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+  <style>
+    :root{--accent:#6366f1;--sidebar-bg:#1a1d21;--sidebar-text:#9ba3af;--sidebar-active:#fff;}
+    body{background:#f3f4f6;font-family:'Inter',system-ui,sans-serif;}
+    .sa-layout{display:flex;min-height:100vh;}
+    .sa-sidebar{width:240px;background:var(--sidebar-bg);color:var(--sidebar-text);display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto;}
+    .sidebar-brand{padding:1.5rem 1.25rem;border-bottom:1px solid rgba(255,255,255,.07);}
+    .sidebar-brand h6{color:#fff;font-weight:700;margin:0;letter-spacing:.5px;}
+    .sidebar-brand small{color:var(--sidebar-text);font-size:.72rem;}
+    .sidebar-nav{padding:.75rem 0;flex:1;}
+    .sidebar-label{padding:.35rem 1.25rem;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:#4b5563;font-weight:600;}
+    .sidebar-link{display:flex;align-items:center;gap:.6rem;padding:.6rem 1.25rem;color:var(--sidebar-text);text-decoration:none;font-size:.88rem;border-left:3px solid transparent;transition:color .15s,background .15s;}
+    .sidebar-link:hover{color:var(--sidebar-active);background:rgba(255,255,255,.04);}
+    .sidebar-link.active{color:var(--sidebar-active);background:rgba(99,102,241,.15);border-left-color:var(--accent);}
+    .sidebar-link i{font-size:1rem;width:1.2rem;}
+    .sa-content{flex:1;overflow-x:auto;}
+    .sa-topbar{background:#fff;border-bottom:1px solid #e5e7eb;padding:.75rem 1.5rem;display:flex;align-items:center;justify-content:space-between;}
+    .sa-topbar h5{margin:0;font-weight:600;font-size:1rem;}
+    .sa-main{padding:1.5rem;}
+    .table th{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;font-weight:600;}
+    .badge-active{background:#d1fae5;color:#065f46;border-radius:99px;padding:.2rem .65rem;font-size:.75rem;font-weight:600;}
+    .badge-inactive{background:#fee2e2;color:#991b1b;border-radius:99px;padding:.2rem .65rem;font-size:.75rem;font-weight:600;}
+    @media(max-width:768px){.sa-sidebar{display:none;}.sa-layout{display:block;}}
+  </style>
+</head>
+<body>
+<div class="sa-layout">
+  <aside class="sa-sidebar">
+    <div class="sidebar-brand">
+      <h6><i class="bi bi-shield-lock-fill me-2" style="color:var(--accent)"></i>Superadmin</h6>
+      <small>CafePortal Console</small>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="sidebar-label">Overview</div>
+      <a class="sidebar-link" href="{{ url_for('superadmin_dashboard') }}"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a>
+      <a class="sidebar-link" href="{{ url_for('superadmin_analytics') }}"><i class="bi bi-bar-chart-line-fill"></i> Analytics</a>
+      <div class="sidebar-label mt-2">Management</div>
+      <a class="sidebar-link active" href="{{ url_for('web_superadmin.superadmin_owners') }}"><i class="bi bi-people-fill"></i> Owners</a>
+      <a class="sidebar-link" href="{{ url_for('web_superadmin.superadmin_system_flags') }}"><i class="bi bi-toggles"></i> System Flags</a>
+      <a class="sidebar-link" href="{{ url_for('web_superadmin.superadmin_security_log') }}"><i class="bi bi-shield-exclamation"></i> Security Log</a>
+      <a class="sidebar-link" href="{{ url_for('superadmin_leads') }}"><i class="bi bi-inbox-fill"></i> Access Requests</a>
+      <div class="sidebar-label mt-2">Switch to</div>
+      <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}"><i class="bi bi-arrow-left-circle"></i> Owner Dashboard</a>
+      <div style="padding:1rem 1.25rem;border-top:1px solid rgba(255,255,255,.07);margin-top:auto;">
+        <a href="{{ url_for('owner_logout') }}" class="sidebar-link" style="padding:0;color:#ef4444;"><i class="bi bi-box-arrow-right"></i> Sign out</a>
+      </div>
+    </nav>
+  </aside>
+
+  <div class="sa-content">
+    <div class="sa-topbar">
+      <h5><i class="bi bi-people-fill me-2 text-primary"></i>Owner Management</h5>
+      <a href="{{ url_for('superadmin_dashboard') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Dashboard
+      </a>
+    </div>
+
+    <div class="sa-main">
+      {% with messages = get_flashed_messages(with_categories=True) %}
+        {% for cat, msg in messages %}
+          <div class="alert alert-{{ 'success' if cat == 'success' else 'danger' if cat == 'danger' else 'warning' }} alert-dismissible fade show" role="alert">
+            {{ msg|safe }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+        {% endfor %}
+      {% endwith %}
+
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+          <strong><i class="bi bi-people-fill text-primary me-2"></i>All Owners <span class="badge bg-primary rounded-pill ms-1">{{ owners|length }}</span></strong>
+          <input type="text" id="ownerSearch" class="form-control form-control-sm" placeholder="Search owners..." style="max-width:220px;">
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0" id="ownersTable">
+              <thead class="table-light">
+                <tr>
+                  <th class="ps-3">ID</th>
+                  <th>Username</th>
+                  <th>Email</th>
+                  <th>Cafe</th>
+                  <th>Status</th>
+                  <th>Superadmin</th>
+                  <th>Joined</th>
+                  <th class="text-end pe-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for owner in owners %}
+                <tr data-search="{{ (owner.username ~ ' ' ~ (owner.email or '') ~ ' ' ~ (owner.cafe_name or ''))|lower }}">
+                  <td class="ps-3 text-muted small">#{{ owner.id }}</td>
+                  <td class="fw-600">{{ owner.username }}</td>
+                  <td class="text-muted small">{{ owner.email or '—' }}</td>
+                  <td class="small">{{ owner.cafe_name or '—' }}</td>
+                  <td>
+                    {% if owner.is_active %}
+                      <span class="badge-active">Active</span>
+                    {% else %}
+                      <span class="badge-inactive">Inactive</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if owner.is_superadmin %}
+                      <span class="badge bg-danger rounded-pill">SA</span>
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                  <td class="text-muted small">{{ (owner.created_at or '')[:10] or '—' }}</td>
+                  <td class="text-end pe-3">
+                    {% if not owner.is_superadmin %}
+                    <div class="d-flex gap-1 justify-content-end">
+                      <form method="post" action="{{ url_for('web_superadmin.superadmin_toggle_owner', owner_id=owner.id) }}" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <button class="btn btn-xs btn-outline-{{ 'danger' if owner.is_active else 'success' }}" style="font-size:.75rem;padding:.2rem .5rem;">
+                          {{ 'Deactivate' if owner.is_active else 'Activate' }}
+                        </button>
+                      </form>
+                      {% if owner.approval_status != 'active' %}
+                      <form method="post" action="{{ url_for('web_superadmin.superadmin_approve_owner', owner_id=owner.id) }}" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <button class="btn btn-xs btn-outline-primary" style="font-size:.75rem;padding:.2rem .5rem;">Approve</button>
+                      </form>
+                      {% endif %}
+                      <form method="post" action="{{ url_for('web_superadmin.superadmin_generate_admin_key', owner_id=owner.id) }}" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <button class="btn btn-xs btn-outline-secondary" style="font-size:.75rem;padding:.2rem .5rem;" title="Generate admin key">
+                          <i class="bi bi-key"></i>
+                        </button>
+                      </form>
+                      <form method="post" action="{{ url_for('web_superadmin.superadmin_delete_owner', owner_id=owner.id) }}"
+                            style="display:inline;"
+                            onsubmit="return confirm('Permanently delete owner {{ owner.username }}? This cannot be undone.');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <button class="btn btn-xs btn-outline-danger" style="font-size:.75rem;padding:.2rem .5rem;" title="Delete owner">
+                          <i class="bi bi-trash"></i>
+                        </button>
+                      </form>
+                    </div>
+                    {% else %}
+                      <span class="text-muted small">Protected</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-4">No owners found.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+document.getElementById('ownerSearch')?.addEventListener('input', function() {
+  const q = this.value.toLowerCase();
+  document.querySelectorAll('#ownersTable tbody tr[data-search]').forEach(row => {
+    row.style.display = row.dataset.search.includes(q) ? '' : 'none';
+  });
+});
+</script>
+</body>
+</html>

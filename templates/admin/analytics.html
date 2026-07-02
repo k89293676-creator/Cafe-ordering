@@ -1,0 +1,101 @@
+{% extends "admin/base.html" %}
+{% block title %}Analytics{% endblock %}
+{% block page_title %}Global Analytics{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-xl-4">
+    <div class="stat-card">
+      <div class="stat-label">Total Orders (all cafes)</div>
+      <div class="stat-value">{{ stats.total_orders }}</div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-4">
+    <div class="stat-card">
+      <div class="stat-label">Total Revenue</div>
+      <div class="stat-value">₹{{ "%.2f"|format(stats.total_revenue) }}</div>
+      <small class="text-muted">non-cancelled orders</small>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-4">
+    <div class="stat-card">
+      <div class="stat-label">Avg Order Value</div>
+      <div class="stat-value">
+        ₹{{ "%.0f"|format(stats.total_revenue / stats.total_orders) if stats.total_orders else '—' }}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white border-bottom py-3 fw-600">Revenue — Last 14 Days</div>
+      <div class="card-body">
+        <canvas id="revenueChart" height="80"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-white border-bottom py-3 fw-600">Top 10 Items (by quantity)</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead class="bg-light">
+            <tr>
+              <th class="ps-3">#</th>
+              <th>Item</th>
+              <th class="text-end pe-3">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in top_items %}
+            <tr>
+              <td class="ps-3 text-muted">{{ loop.index }}</td>
+              <td style="font-size:.88rem;">{{ item.name }}</td>
+              <td class="text-end pe-3 fw-600">{{ item.quantity }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" class="text-center text-muted py-3">No order data yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const dailyData = {{ daily | tojson }};
+const labels = dailyData.map(d => d.date);
+const values = dailyData.map(d => d.revenue);
+
+new Chart(document.getElementById('revenueChart'), {
+  type: 'bar',
+  data: {
+    labels,
+    datasets: [{
+      label: 'Revenue (₹)',
+      data: values,
+      backgroundColor: 'rgba(99,102,241,0.75)',
+      borderRadius: 6,
+      borderSkipped: false,
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { display: false } },
+      y: { beginAtZero: true, grid: { color: '#f3f4f6' } }
+    }
+  }
+});
+</script>
+{% endblock %}

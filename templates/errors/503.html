@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Service Unavailable — Cafe 11:11</title>
+  <meta http-equiv="refresh" content="30" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600&display=swap" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/enhancements.css" />
+  <style>
+    .error-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f4c75 100%); position: relative; overflow: hidden; padding: 2rem; }
+    .error-page::before { content: ""; position: absolute; inset: 0; background-image: radial-gradient(circle at 20% 30%, rgba(59,130,246,.18), transparent 40%), radial-gradient(circle at 80% 70%, rgba(16,185,129,.12), transparent 40%); pointer-events: none; }
+    .error-card { background: rgba(255,255,255,.06); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,.12); border-radius: 20px; padding: 3rem 2.5rem; text-align: center; max-width: 480px; width: 100%; position: relative; }
+    .error-code { font-family: 'Playfair Display', Georgia, serif; font-size: 5.5rem; font-weight: 700; color: rgba(255,255,255,.1); position: absolute; top: 1rem; left: 50%; transform: translateX(-50%); user-select: none; letter-spacing: -.04em; white-space: nowrap; }
+    .error-icon { font-size: 3.5rem; margin-bottom: 1rem; display: block; }
+    .error-title { font-family: 'Playfair Display', Georgia, serif; font-size: 1.65rem; font-weight: 700; color: #fff; margin: 0 0 .75rem; }
+    .error-sub { color: rgba(255,255,255,.65); font-size: .95rem; line-height: 1.65; margin-bottom: 1.5rem; }
+    .error-meta { font-size: .8rem; color: rgba(255,255,255,.4); margin-bottom: 1.75rem; }
+    .error-meta strong { color: rgba(255,255,255,.6); }
+    .error-meta code { background: rgba(255,255,255,.08); padding: .1rem .4rem; border-radius: 4px; }
+    .countdown-bar { height: 3px; background: rgba(255,255,255,.12); border-radius: 999px; overflow: hidden; margin-bottom: 1.5rem; }
+    .countdown-bar__fill { height: 100%; background: #3b82f6; border-radius: 999px; width: 100%; transition: width 1s linear; }
+    .error-actions { display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap; }
+    .error-btn { display: inline-flex; align-items: center; gap: .4rem; padding: .65rem 1.4rem; border-radius: 10px; font-size: .9rem; font-weight: 600; text-decoration: none; transition: background .15s, transform .1s; }
+    .error-btn:active { transform: scale(.97); }
+    .error-btn--primary { background: #fff; color: #0f172a; }
+    .error-btn--primary:hover { background: #dbeafe; }
+    .error-btn--ghost { background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.18); }
+    .error-btn--ghost:hover { background: rgba(255,255,255,.18); }
+    .error-wordmark { margin-bottom: 2.5rem; font-family: 'Playfair Display', Georgia, serif; color: rgba(255,255,255,.4); font-size: .85rem; letter-spacing: .12em; text-transform: uppercase; }
+  </style>
+</head>
+<body>
+<div class="error-page">
+  <div style="width:100%;max-width:480px;">
+    <div class="error-wordmark">☕ Cafe 11:11</div>
+    <div class="error-card">
+      <div class="error-code">503</div>
+      <span class="error-icon">⏳</span>
+      <h1 class="error-title">Back in a moment</h1>
+      <p class="error-sub">We're temporarily down for maintenance or under heavy load. This page will refresh automatically in 30 seconds.</p>
+      {% if retry_after %}
+      <p class="error-meta">Estimated recovery: <strong>{{ retry_after }} seconds</strong></p>
+      {% endif %}
+      {% if request_id %}
+      <p class="error-meta">Reference: <code>{{ request_id }}</code></p>
+      {% endif %}
+      <div class="countdown-bar"><div class="countdown-bar__fill" id="countdown-fill"></div></div>
+      <div class="error-actions">
+        <a href="javascript:location.reload()" class="error-btn error-btn--primary">Try Now</a>
+        <a href="/" class="error-btn error-btn--ghost">← Home</a>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  (function () {
+    const fill = document.getElementById('countdown-fill');
+    if (!fill) return;
+    let remaining = 30;
+    const tick = setInterval(() => {
+      remaining = Math.max(0, remaining - 1);
+      fill.style.width = (remaining / 30 * 100) + '%';
+      if (remaining === 0) clearInterval(tick);
+    }, 1000);
+  })();
+</script>
+</body>
+</html>

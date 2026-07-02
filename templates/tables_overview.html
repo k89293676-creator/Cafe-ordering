@@ -1,0 +1,1690 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <title>Tables Overview · Cafe 11:11</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" />
+  <style>
+/* ═══════════════════════════════════════════════════════════
+   DESIGN TOKENS — light mode
+═══════════════════════════════════════════════════════════ */
+:root {
+  --bg:#f1f4f9; --bg-2:#e8ecf3;
+  --surface:#ffffff; --surface-2:#f8fafc;
+  --ink:#0f172a; --ink-2:#475569; --ink-3:#94a3b8; --ink-4:#cbd5e1;
+  --line:#e2e8f0; --line-s:#cbd5e1;
+  --primary:#4f46e5; --primary-d:#4338ca; --primary-l:#eef2ff;
+
+  --free-fg:#15803d;  --free-bg:#dcfce7;  --free-acc:#22c55e;
+  --occ-fg:#b45309;   --occ-bg:#fef3c7;   --occ-acc:#f59e0b;
+  --ready-fg:#1d4ed8; --ready-bg:#dbeafe; --ready-acc:#3b82f6;
+  --attn-fg:#b91c1c;  --attn-bg:#fee2e2;  --attn-acc:#ef4444;
+  --clean-fg:#6d28d9; --clean-bg:#ede9fe; --clean-acc:#8b5cf6;
+  --bill-fg:#0369a1;  --bill-bg:#e0f2fe;
+  --water-fg:#0284c7; --water-bg:#f0f9ff;
+  --help-fg:#7c3aed;  --help-bg:#f5f3ff;
+
+  --r-sm:8px; --r:12px; --r-lg:16px; --r-xl:20px;
+  --sh-xs:0 1px 2px rgba(15,23,42,.05);
+  --sh-sm:0 1px 3px rgba(15,23,42,.07),0 1px 2px rgba(15,23,42,.04);
+  --sh:0 4px 14px rgba(15,23,42,.08),0 1px 3px rgba(15,23,42,.04);
+  --sh-md:0 8px 28px rgba(15,23,42,.10),0 2px 6px rgba(15,23,42,.05);
+  --sh-lg:0 20px 50px rgba(15,23,42,.14),0 4px 10px rgba(15,23,42,.06);
+  --ring:0 0 0 3px rgba(79,70,229,.18);
+  --topbar-h:64px; --kpi-h:52px;
+}
+[data-theme="dark"] {
+  --bg:#0f172a; --bg-2:#1e293b;
+  --surface:#1e293b; --surface-2:#0f172a;
+  --ink:#f1f5f9; --ink-2:#94a3b8; --ink-3:#475569; --ink-4:#334155;
+  --line:#2d3f55; --line-s:#3a4f6b;
+  --primary-l:#1e1b4b;
+  --free-bg:#052e16; --free-fg:#4ade80;
+  --occ-bg:#451a03; --occ-fg:#fbbf24;
+  --ready-bg:#1e3a5f; --ready-fg:#60a5fa;
+  --attn-bg:#450a0a; --attn-fg:#f87171;
+  --clean-bg:#2e1065; --clean-fg:#c084fc;
+  --bill-bg:#0c2a3a; --bill-fg:#7dd3fc;
+  --water-bg:#082032; --water-fg:#38bdf8;
+  --help-bg:#1e1b4b; --help-fg:#c084fc;
+  --sh-xs:0 1px 2px rgba(0,0,0,.25);
+  --sh-sm:0 1px 3px rgba(0,0,0,.35),0 1px 2px rgba(0,0,0,.2);
+  --sh:0 4px 14px rgba(0,0,0,.35),0 1px 3px rgba(0,0,0,.2);
+  --sh-md:0 8px 28px rgba(0,0,0,.4),0 2px 6px rgba(0,0,0,.2);
+}
+
+/* ── Reset ─────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;height:100%;}
+a{color:inherit;text-decoration:none;}
+*::-webkit-scrollbar{width:5px;height:5px;}
+*::-webkit-scrollbar-track{background:transparent;}
+*::-webkit-scrollbar-thumb{background:rgba(15,23,42,.15);border-radius:99px;}
+[data-theme="dark"] *::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);}
+
+/* ═══════════════════════════════════════════════════════════
+   TOP BAR
+═══════════════════════════════════════════════════════════ */
+.topbar{
+  background:linear-gradient(135deg,#0d1426 0%,#10193a 60%,#0f172a 100%);
+  height:var(--topbar-h);padding:0 1.5rem;
+  display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  position:sticky;top:0;z-index:50;border-bottom:1px solid rgba(255,255,255,.06);
+}
+.topbar-left{display:flex;align-items:center;gap:.85rem;}
+.topbar-logo{
+  width:36px;height:36px;border-radius:10px;flex-shrink:0;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  display:flex;align-items:center;justify-content:center;
+  font-size:.85rem;font-weight:900;color:#fff;letter-spacing:-.02em;
+}
+.topbar-title{color:#fff;font-size:1rem;font-weight:700;letter-spacing:-.01em;}
+.topbar-sub{color:rgba(255,255,255,.35);font-size:.7rem;margin-top:.1rem;}
+.topbar-right{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;}
+.tbtn{
+  display:inline-flex;align-items:center;gap:.3rem;
+  padding:.4rem .85rem;border-radius:var(--r-sm);
+  font-size:.78rem;font-weight:600;cursor:pointer;white-space:nowrap;
+  border:1px solid rgba(255,255,255,.13);color:rgba(255,255,255,.75);
+  background:rgba(255,255,255,.07);transition:background .15s,border-color .15s,color .15s;
+}
+.tbtn:hover{background:rgba(255,255,255,.14);color:#fff;border-color:rgba(255,255,255,.22);}
+.tbtn-icon{width:28px;height:28px;padding:0;border-radius:50%;justify-content:center;}
+.tbtn-active{background:rgba(99,102,241,.35);border-color:rgba(99,102,241,.6);color:#fff;}
+.live-pill{
+  display:inline-flex;align-items:center;gap:.4rem;font-size:.68rem;color:rgba(255,255,255,.45);
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);
+  border-radius:999px;padding:.28rem .7rem;white-space:nowrap;
+}
+#live-pip{width:6px;height:6px;border-radius:50%;background:#6b7280;flex-shrink:0;transition:background .3s;}
+#live-pip.connected{background:#22c55e;animation:pip 2.2s ease-in-out infinite;}
+#live-pip.error{background:#ef4444;}
+@keyframes pip{0%,100%{opacity:1;}50%{opacity:.4;}}
+/* Auto-refresh toggle */
+.auto-toggle{display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:rgba(255,255,255,.5);cursor:pointer;}
+.auto-toggle input[type=checkbox]{accent-color:#6366f1;width:13px;height:13px;}
+
+/* ═══════════════════════════════════════════════════════════
+   KPI RIBBON
+═══════════════════════════════════════════════════════════ */
+.kpi-ribbon{
+  background:var(--surface);border-bottom:1px solid var(--line);
+  height:var(--kpi-h);padding:0 1.75rem;
+  display:flex;align-items:center;gap:0;
+  position:sticky;top:var(--topbar-h);z-index:45;overflow-x:auto;
+}
+.kpi-item{display:flex;align-items:center;gap:.6rem;padding:0 1.25rem;border-right:1px solid var(--line);height:100%;white-space:nowrap;flex-shrink:0;}
+.kpi-item:first-child{padding-left:0;}
+.kpi-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0;}
+.kpi-icon.rev{background:#eef2ff;} .kpi-icon.occ{background:#f0fdf4;}
+.kpi-icon.turn{background:#fefce8;} .kpi-icon.attn{background:#fee2e2;}
+[data-theme="dark"] .kpi-icon.rev{background:#1e1b4b;} [data-theme="dark"] .kpi-icon.occ{background:#052e16;}
+[data-theme="dark"] .kpi-icon.turn{background:#451a03;} [data-theme="dark"] .kpi-icon.attn{background:#450a0a;}
+.kpi-label{font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);}
+.kpi-val{font-size:.98rem;font-weight:800;color:var(--ink);letter-spacing:-.02em;line-height:1;}
+.kpi-attn-val{color:var(--attn-fg);}
+.kpi-attn-val.has-attn{animation:kpi-pulse 1.2s ease-in-out infinite;}
+@keyframes kpi-pulse{0%,100%{opacity:1;}50%{opacity:.5;}}
+.kpi-spacer{flex:1;}
+.view-switcher{display:flex;gap:.35rem;align-items:center;}
+.view-btn{
+  display:inline-flex;align-items:center;gap:.3rem;padding:.32rem .7rem;border-radius:var(--r-sm);
+  font-size:.72rem;font-weight:600;cursor:pointer;border:1px solid var(--line);
+  background:transparent;color:var(--ink-2);transition:all .15s ease;
+}
+.view-btn:hover{background:var(--surface-2);color:var(--ink);}
+.view-btn.active{background:var(--primary);border-color:var(--primary);color:#fff;}
+.ribbon-extras{display:flex;align-items:center;gap:.45rem;padding-left:1rem;}
+.icon-btn{
+  width:30px;height:30px;border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--line);background:transparent;cursor:pointer;color:var(--ink-2);transition:all .12s ease;font-size:.85rem;
+}
+.icon-btn:hover{background:var(--surface-2);color:var(--ink);}
+.icon-btn.active{background:var(--primary-l);border-color:var(--primary);color:var(--primary);}
+
+/* ═══════════════════════════════════════════════════════════
+   PAGE SHELL
+═══════════════════════════════════════════════════════════ */
+.page{max-width:1500px;margin:0 auto;padding:1.5rem 1.75rem 4rem;}
+@media(max-width:640px){.page{padding:1rem .85rem 3rem;}}
+
+/* ═══════════════════════════════════════════════════════════
+   SUMMARY CARDS
+═══════════════════════════════════════════════════════════ */
+.summary{display:grid;grid-template-columns:repeat(6,1fr);gap:.75rem;margin-bottom:1.25rem;}
+@media(max-width:1100px){.summary{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:580px){.summary{grid-template-columns:repeat(2,1fr);}}
+.sum-card{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  padding:1rem 1.15rem;box-shadow:var(--sh-sm);position:relative;overflow:hidden;
+  transition:transform .15s,box-shadow .15s;cursor:pointer;
+}
+.sum-card:hover{transform:translateY(-1px);box-shadow:var(--sh);}
+.sum-card.active-filter{outline:2px solid var(--primary);outline-offset:2px;}
+.sum-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;border-radius:var(--r) var(--r) 0 0;}
+.sc-total::before{background:linear-gradient(90deg,#6366f1,#8b5cf6);}
+.sc-free::before{background:linear-gradient(90deg,#22c55e,#16a34a);}
+.sc-occ::before{background:linear-gradient(90deg,#f59e0b,#d97706);}
+.sc-ready::before{background:linear-gradient(90deg,#3b82f6,#1d4ed8);}
+.sc-attn::before{background:linear-gradient(90deg,#ef4444,#b91c1c);}
+.sc-clean::before{background:linear-gradient(90deg,#8b5cf6,#6d28d9);}
+.sum-label{font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--ink-3);margin-bottom:.3rem;}
+.sum-value{font-size:1.9rem;font-weight:900;letter-spacing:-.04em;line-height:1;}
+.sc-total .sum-value{color:var(--primary);} .sc-free  .sum-value{color:var(--free-fg);}
+.sc-occ   .sum-value{color:var(--occ-fg);} .sc-ready .sum-value{color:var(--ready-fg);}
+.sc-attn  .sum-value{color:var(--attn-fg);} .sc-clean .sum-value{color:var(--clean-fg);}
+.sum-trend{font-size:.68rem;color:var(--ink-3);margin-top:.25rem;}
+.sum-icon{position:absolute;right:.85rem;top:50%;transform:translateY(-50%);font-size:1.6rem;opacity:.1;}
+
+/* ═══════════════════════════════════════════════════════════
+   TOOLBAR
+═══════════════════════════════════════════════════════════ */
+.toolbar{display:flex;align-items:center;gap:.5rem;margin-bottom:1.25rem;flex-wrap:wrap;}
+.filter-pill{
+  display:inline-flex;align-items:center;gap:.4rem;padding:.4rem .8rem;border-radius:999px;
+  border:1px solid var(--line);background:var(--surface);font-size:.78rem;font-weight:600;cursor:pointer;color:var(--ink-2);transition:all .15s;
+}
+.filter-pill:hover{border-color:var(--line-s);color:var(--ink);}
+.filter-pill.active{background:var(--ink);color:#fff;border-color:var(--ink);}
+.filter-pill[data-filter="needs_attention"].active{background:var(--attn-fg);border-color:var(--attn-fg);}
+.filter-pill[data-filter="ready_to_serve"].active{background:var(--ready-fg);border-color:var(--ready-fg);}
+.filter-pill[data-filter="free"].active{background:var(--free-fg);border-color:var(--free-fg);}
+.filter-pill[data-filter="cleaning"].active{background:var(--clean-fg);border-color:var(--clean-fg);}
+.filter-pill[data-filter="occupied"].active{background:var(--occ-fg);border-color:var(--occ-fg);}
+.pill-count{background:rgba(15,23,42,.08);color:var(--ink-2);font-weight:700;font-size:.65rem;padding:.1rem .48rem;border-radius:999px;min-width:18px;text-align:center;}
+.filter-pill.active .pill-count{background:rgba(255,255,255,.2);color:#fff;}
+.search-wrap{flex:1;min-width:180px;position:relative;}
+.search-wrap svg{position:absolute;left:.72rem;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--ink-3);}
+.search{width:100%;padding:.5rem .85rem .5rem 2.1rem;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--surface);font-family:inherit;font-size:.875rem;color:var(--ink);transition:border-color .15s,box-shadow .15s;}
+.search:focus{outline:none;border-color:var(--primary);box-shadow:var(--ring);}
+.sort-select{padding:.5rem .7rem;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--surface);font-family:inherit;font-size:.8rem;color:var(--ink);cursor:pointer;}
+.kbd-hint{font-size:.68rem;color:var(--ink-3);display:flex;align-items:center;gap:.25rem;}
+kbd{background:var(--surface);border:1px solid var(--line-s);border-radius:4px;padding:1px 5px;font-family:ui-monospace,monospace;font-size:.62rem;color:var(--ink-2);}
+
+/* ═══════════════════════════════════════════════════════════
+   SKELETON LOADING
+═══════════════════════════════════════════════════════════ */
+@keyframes shimmer{0%{background-position:-600px 0;}100%{background-position:600px 0;}}
+.skel{background:linear-gradient(90deg,var(--line) 25%,var(--bg-2) 50%,var(--line) 75%);background-size:1200px 100%;animation:shimmer 1.4s infinite linear;border-radius:6px;}
+.skel-card{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:var(--r);padding:1rem;display:flex;flex-direction:column;gap:.75rem;}
+.skel-h1{height:18px;width:55%;} .skel-h2{height:12px;width:35%;}
+.skel-block{height:60px;width:100%;} .skel-btn-row{display:flex;gap:.4rem;}
+.skel-btn{height:28px;border-radius:var(--r-sm);}
+
+/* ═══════════════════════════════════════════════════════════
+   GRID VIEW
+═══════════════════════════════════════════════════════════ */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:1rem;}
+@media(max-width:540px){.grid{grid-template-columns:1fr 1fr;gap:.65rem;}}
+@media(max-width:360px){.grid{grid-template-columns:1fr;}}
+body.density-compact .grid{gap:.55rem;}
+body.density-compact .tcard .card-body{gap:.35rem;padding:0 .75rem .65rem;}
+body.density-compact .tcard .card-head{padding:.65rem .75rem .5rem;}
+body.density-compact .tcard .card-actions{padding:.55rem .75rem;}
+body.density-compact .tcard .card-name{font-size:.9rem;}
+body.density-comfortable .grid{gap:1.35rem;}
+body.density-comfortable .tcard .card-body{gap:.7rem;padding:0 1.2rem 1.1rem;}
+body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
+
+/* ═══════════════════════════════════════════════════════════
+   TABLE CARD
+═══════════════════════════════════════════════════════════ */
+.tcard{
+  background:var(--surface);border:1px solid var(--line);border-left-width:4px;
+  border-radius:var(--r);box-shadow:var(--sh-sm);
+  display:flex;flex-direction:column;
+  transition:transform .15s,box-shadow .15s,opacity .15s;overflow:hidden;position:relative;
+}
+.tcard:hover{transform:translateY(-2px);box-shadow:var(--sh-md);}
+.tcard.selected{outline:2px solid var(--primary);outline-offset:2px;}
+.s-free{border-left-color:var(--free-acc);}
+.s-occupied{border-left-color:var(--occ-acc);}
+.s-ready_to_serve{border-left-color:var(--ready-acc);}
+.s-needs_attention{border-left-color:var(--attn-acc);animation:card-pulse 2.5s ease-in-out infinite;}
+.s-cleaning{border-left-color:var(--clean-acc);}
+@keyframes card-pulse{0%,100%{box-shadow:var(--sh-sm);}50%{box-shadow:0 0 0 3px rgba(239,68,68,.16),var(--sh);}}
+
+/* Select checkbox */
+.card-select-box{display:none;position:absolute;top:.7rem;right:.7rem;width:18px;height:18px;border-radius:4px;border:2px solid var(--line-s);background:var(--surface);cursor:pointer;z-index:2;align-items:center;justify-content:center;transition:all .12s;}
+.tcard.selected .card-select-box{border-color:var(--primary);background:var(--primary);}
+.tcard.selected .card-select-box::after{content:"✓";font-size:.6rem;color:#fff;font-weight:800;}
+.select-active .card-select-box{display:flex;}
+
+.card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.6rem;padding:.9rem 1rem .7rem;}
+.card-name{font-size:1rem;font-weight:700;color:var(--ink);line-height:1.2;}
+.card-id{font-size:.62rem;color:var(--ink-3);margin-top:.15rem;font-family:ui-monospace,monospace;}
+.status-badge{display:inline-flex;align-items:center;gap:.26rem;font-size:.63rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:.26rem .62rem;border-radius:999px;white-space:nowrap;flex-shrink:0;}
+.status-badge::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;}
+.sb-free{background:var(--free-bg);color:var(--free-fg);}
+.sb-occupied{background:var(--occ-bg);color:var(--occ-fg);}
+.sb-ready_to_serve{background:var(--ready-bg);color:var(--ready-fg);animation:badgeglow 1.6s ease-in-out infinite;}
+.sb-needs_attention{background:var(--attn-bg);color:var(--attn-fg);animation:badgeglow 1s ease-in-out infinite;}
+.sb-cleaning{background:var(--clean-bg);color:var(--clean-fg);}
+@keyframes badgeglow{0%,100%{opacity:1;}50%{opacity:.5;}}
+
+.card-body{display:flex;flex-direction:column;gap:.55rem;padding:0 1rem .85rem;}
+
+/* Order block */
+.order-block{border-radius:var(--r-sm);padding:.65rem .75rem;display:flex;flex-direction:column;gap:.4rem;}
+.ob-normal{background:var(--surface-2);border:1px solid var(--line);}
+.ob-stuck{background:#fff1f2;border:1px dashed #fca5a5;}
+[data-theme="dark"] .ob-stuck{background:#450a0a;border-color:#7f1d1d;}
+.order-block-top{display:flex;align-items:center;justify-content:space-between;gap:.5rem;}
+.order-id-txt{font-size:.76rem;font-weight:700;color:var(--ink);}
+.order-id-link{font-size:.76rem;font-weight:700;color:var(--primary);text-decoration:underline;text-underline-offset:2px;}
+.order-id-link:hover{color:var(--primary-d);}
+.o-pill{font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:.18rem .5rem;border-radius:999px;}
+.op-pending{background:#fff7ed;color:#9a3412;} .op-confirmed{background:#eff6ff;color:#1e40af;}
+.op-preparing{background:#fefce8;color:#713f12;} .op-ready{background:#f0fdf4;color:#166534;}
+[data-theme="dark"] .op-pending{background:#431407;color:#fb923c;}
+[data-theme="dark"] .op-confirmed{background:#1e3a5f;color:#93c5fd;}
+[data-theme="dark"] .op-preparing{background:#422006;color:#fcd34d;}
+[data-theme="dark"] .op-ready{background:#052e16;color:#4ade80;}
+.stuck-badge{display:inline-flex;align-items:center;gap:.2rem;background:var(--attn-acc);color:#fff;font-size:.6rem;font-weight:800;padding:.18rem .5rem;border-radius:4px;letter-spacing:.04em;}
+.escalate-pill{display:inline-flex;align-items:center;gap:.2rem;background:rgba(245,158,11,.12);color:#b45309;border:1px dashed #fbbf24;font-size:.6rem;font-weight:700;padding:.16rem .5rem;border-radius:4px;}
+[data-theme="dark"] .escalate-pill{background:rgba(251,191,36,.08);color:#fbbf24;border-color:#92400e;}
+.order-meta{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:.75rem;color:var(--ink-2);}
+.order-meta .sep{color:var(--ink-4);}
+.order-total-big{font-size:.92rem;font-weight:800;color:var(--ink);}
+.order-customer{display:flex;align-items:center;gap:.3rem;font-size:.72rem;color:var(--ink-2);}
+.order-bill-link{
+  display:inline-flex;align-items:center;gap:.3rem;margin-top:.2rem;
+  font-size:.72rem;font-weight:600;color:var(--primary);
+  background:var(--primary-l);border:1px solid rgba(79,70,229,.18);
+  border-radius:var(--r-sm);padding:.22rem .55rem;text-decoration:none;
+  transition:background .12s;width:fit-content;
+}
+.order-bill-link:hover{background:rgba(79,70,229,.15);}
+[data-theme="dark"] .order-bill-link{color:#a5b4fc;}
+
+/* ─── Calls block (inline call panel on card) ─── */
+.calls-block{
+  background:var(--attn-bg);border:1px solid rgba(239,68,68,.25);
+  border-radius:var(--r-sm);padding:.55rem .75rem;display:flex;flex-direction:column;gap:.4rem;
+}
+.calls-header{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;}
+.calls-title{font-size:.76rem;font-weight:700;color:var(--attn-fg);display:flex;align-items:center;gap:.35rem;}
+.call-type-chips{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;flex:1;}
+.call-chip{
+  display:inline-flex;align-items:center;gap:.22rem;
+  font-size:.64rem;font-weight:700;padding:.15rem .45rem;border-radius:999px;white-space:nowrap;
+}
+.call-chip.bill  {background:var(--bill-bg);color:var(--bill-fg);}
+.call-chip.water {background:var(--water-bg);color:var(--water-fg);}
+.call-chip.service,.call-chip.help{background:var(--attn-bg);color:var(--attn-fg);}
+.calls-age{font-size:.68rem;color:var(--attn-fg);opacity:.75;}
+.calls-ack{font-size:.66rem;background:rgba(185,28,28,.12);color:var(--attn-fg);padding:.1rem .42rem;border-radius:999px;display:inline-block;font-weight:600;}
+.calls-manage-row{display:flex;align-items:center;gap:.4rem;margin-top:.05rem;}
+.calls-manage-btn{
+  font-size:.68rem;font-weight:600;padding:.22rem .55rem;border-radius:var(--r-sm);
+  border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.08);color:var(--attn-fg);cursor:pointer;transition:background .12s;
+}
+.calls-manage-btn:hover{background:rgba(239,68,68,.16);}
+
+/* Stats chips */
+.stats-row{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;}
+.stat-chip{display:inline-flex;align-items:center;gap:.25rem;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:.26rem .55rem;font-size:.72rem;color:var(--ink-2);}
+.stat-chip strong{color:var(--ink);font-weight:700;}
+
+/* Timer bar */
+.timer-bar-wrap{display:flex;align-items:center;gap:.55rem;}
+.timer-bar-label{font-size:.7rem;color:var(--ink-3);min-width:58px;}
+.timer-bar-track{flex:1;height:5px;background:var(--line);border-radius:999px;overflow:hidden;}
+.timer-bar-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#f59e0b,#ef4444);transition:width .4s;}
+.timer-bar-val{font-size:.7rem;font-weight:600;color:var(--ink-2);white-space:nowrap;}
+
+/* Sticky note */
+.card-note{display:flex;align-items:flex-start;gap:.4rem;font-size:.74rem;color:var(--ink-2);font-style:italic;padding-top:.5rem;border-top:1px dashed var(--line);}
+
+/* Action row */
+.card-actions{padding:.7rem 1rem;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:.35rem;}
+.act-btn{display:inline-flex;align-items:center;gap:.28rem;padding:.35rem .68rem;border-radius:var(--r-sm);font-size:.73rem;font-weight:600;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink-2);text-decoration:none;transition:all .14s;white-space:nowrap;}
+.act-btn:hover{border-color:var(--line-s);color:var(--ink);background:var(--surface-2);}
+.ab-primary{background:var(--primary);border-color:var(--primary);color:#fff;}
+.ab-primary:hover{background:var(--primary-d);}
+.ab-success{background:#f0fdf4;border-color:#bbf7d0;color:var(--free-fg);}
+.ab-success:hover{background:#dcfce7;}
+.ab-danger{background:var(--attn-bg);border-color:var(--attn-acc);color:var(--attn-fg);}
+.ab-danger:hover{background:#fee2e2;}
+.ab-bill{background:var(--bill-bg);border-color:rgba(3,105,161,.25);color:var(--bill-fg);}
+.ab-bill:hover{filter:brightness(.96);}
+
+/* ═══════════════════════════════════════════════════════════
+   KANBAN VIEW
+═══════════════════════════════════════════════════════════ */
+.kanban-wrap{display:flex;gap:1rem;align-items:flex-start;overflow-x:auto;padding-bottom:1rem;}
+.kanban-col{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:.75rem;min-width:240px;max-width:300px;flex:1;display:flex;flex-direction:column;gap:.55rem;}
+.kanban-col-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:.65rem;border-bottom:1px solid var(--line);margin-bottom:.1rem;}
+.kanban-col-title{display:flex;align-items:center;gap:.5rem;font-size:.78rem;font-weight:700;color:var(--ink);}
+.kanban-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.kanban-count{font-size:.72rem;font-weight:700;background:var(--line);color:var(--ink-2);padding:.1rem .52rem;border-radius:999px;}
+.kanban-empty{text-align:center;font-size:.78rem;color:var(--ink-3);padding:1.5rem .5rem;font-style:italic;}
+.kcard{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:var(--r-sm);padding:.7rem .8rem;display:flex;flex-direction:column;gap:.45rem;cursor:pointer;transition:box-shadow .12s,transform .12s;}
+.kcard:hover{box-shadow:var(--sh);transform:translateY(-1px);}
+.kcard.s-needs_attention{border-left-color:var(--attn-acc);}
+.kcard.s-ready_to_serve{border-left-color:var(--ready-acc);}
+.kcard.s-occupied{border-left-color:var(--occ-acc);}
+.kcard.s-cleaning{border-left-color:var(--clean-acc);}
+.kcard.s-free{border-left-color:var(--free-acc);}
+.kcard-name{font-size:.85rem;font-weight:700;color:var(--ink);}
+.kcard-meta{display:flex;align-items:center;flex-wrap:wrap;gap:.3rem;font-size:.72rem;color:var(--ink-2);}
+.kcard-order{display:flex;align-items:center;justify-content:space-between;font-size:.72rem;color:var(--ink-2);}
+.kcard-actions{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;margin-top:.15rem;}
+.kcard-btn{display:inline-flex;align-items:center;gap:.2rem;padding:.26rem .55rem;border-radius:var(--r-sm);font-size:.68rem;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink-2);cursor:pointer;transition:all .12s;text-decoration:none;white-space:nowrap;}
+.kcard-btn:hover{background:var(--surface-2);}
+.kcard-btn.p{background:var(--primary);border-color:var(--primary);color:#fff;}
+.kcard-btn.p:hover{background:var(--primary-d);}
+.kcard-btn.g{background:#f0fdf4;border-color:#bbf7d0;color:var(--free-fg);}
+.kcard-btn.r{background:var(--attn-bg);border-color:var(--attn-acc);color:var(--attn-fg);}
+.kcard-btn.b{background:var(--bill-bg);border-color:rgba(3,105,161,.25);color:var(--bill-fg);}
+
+/* ═══════════════════════════════════════════════════════════
+   FLOOR VIEW
+═══════════════════════════════════════════════════════════ */
+.floor-wrap{padding:.5rem 0;}
+.floor-legend{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;padding:.5rem .75rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);}
+.floor-legend-item{display:flex;align-items:center;gap:.35rem;font-size:.72rem;color:var(--ink-2);}
+.floor-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.floor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:.85rem;}
+.floor-table{
+  border-radius:var(--r);border:2px solid var(--line);background:var(--surface);
+  padding:.75rem .6rem .65rem;display:flex;flex-direction:column;align-items:center;gap:.28rem;
+  cursor:pointer;transition:transform .14s,box-shadow .14s;position:relative;
+}
+.floor-table:hover{transform:scale(1.04);box-shadow:var(--sh-md);}
+.floor-table-badge{position:absolute;top:.4rem;right:.4rem;width:8px;height:8px;border-radius:50%;}
+.floor-table-icon{font-size:1.5rem;}
+.floor-table-name{font-size:.72rem;font-weight:700;color:var(--ink);text-align:center;word-break:break-word;}
+.floor-table-sub{font-size:.62rem;color:var(--ink-3);text-align:center;}
+.floor-table-calls{font-size:.6rem;color:var(--attn-fg);font-weight:700;}
+.ft-free{border-color:var(--free-acc);} .ft-free .floor-table-badge{background:var(--free-acc);}
+.ft-occupied{border-color:var(--occ-acc);} .ft-occupied .floor-table-badge{background:var(--occ-acc);}
+.ft-ready_to_serve{border-color:var(--ready-acc);} .ft-ready_to_serve .floor-table-badge{background:var(--ready-acc);}
+.ft-needs_attention{border-color:var(--attn-acc);animation:card-pulse 2s ease-in-out infinite;} .ft-needs_attention .floor-table-badge{background:var(--attn-acc);}
+.ft-cleaning{border-color:var(--clean-acc);} .ft-cleaning .floor-table-badge{background:var(--clean-acc);}
+
+/* ═══════════════════════════════════════════════════════════
+   EMPTY STATE
+═══════════════════════════════════════════════════════════ */
+.empty{display:none;text-align:center;padding:4rem 2rem;color:var(--ink-3);}
+.empty-icon{font-size:3rem;margin-bottom:.85rem;}
+.empty h3{font-size:1.15rem;font-weight:700;color:var(--ink-2);margin-bottom:.35rem;}
+.empty p{font-size:.85rem;}
+
+/* ═══════════════════════════════════════════════════════════
+   BULK ACTION BAR
+═══════════════════════════════════════════════════════════ */
+.bulk-bar{
+  position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%) translateY(80px);
+  background:#1e293b;color:#f1f5f9;border-radius:var(--r-lg);
+  padding:.7rem 1.25rem;display:flex;align-items:center;gap:.6rem;
+  box-shadow:0 8px 32px rgba(0,0,0,.3);z-index:100;white-space:nowrap;
+  opacity:0;pointer-events:none;transition:transform .25s cubic-bezier(.34,1.56,.64,1),opacity .22s;
+}
+.bulk-bar.show{transform:translateX(-50%) translateY(0);opacity:1;pointer-events:auto;}
+.bulk-count-text{font-size:.82rem;font-weight:700;color:#94a3b8;}
+.bulk-sep{width:1px;height:18px;background:rgba(255,255,255,.1);}
+.bulk-action{padding:.4rem .8rem;border-radius:var(--r-sm);font-size:.78rem;font-weight:600;cursor:pointer;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.1);color:#f1f5f9;transition:background .12s;}
+.bulk-action:hover{background:rgba(255,255,255,.18);}
+.bulk-action.danger{background:rgba(239,68,68,.25);border-color:rgba(239,68,68,.4);color:#fca5a5;}
+.bulk-action.danger:hover{background:rgba(239,68,68,.35);}
+.bulk-cancel{padding:.4rem .8rem;border-radius:var(--r-sm);font-size:.78rem;font-weight:600;cursor:pointer;border:none;background:transparent;color:#64748b;}
+
+/* ═══════════════════════════════════════════════════════════
+   MODALS
+═══════════════════════════════════════════════════════════ */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(3px);z-index:200;align-items:center;justify-content:center;padding:1rem;}
+.modal-bg.show{display:flex;}
+.modal{background:var(--surface);border-radius:var(--r-xl);box-shadow:var(--sh-lg);width:100%;max-width:540px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;}
+.modal-hdr{display:flex;align-items:center;justify-content:space-between;padding:1.25rem 1.5rem 1rem;border-bottom:1px solid var(--line);flex-shrink:0;}
+.modal-hdr h2{font-size:1.05rem;font-weight:800;color:var(--ink);}
+.modal-x{background:none;border:none;font-size:1.1rem;cursor:pointer;color:var(--ink-3);padding:.2rem .4rem;border-radius:4px;transition:color .12s;}
+.modal-x:hover{color:var(--ink);}
+.modal-body{padding:1.25rem 1.5rem 1.5rem;overflow-y:auto;display:flex;flex-direction:column;gap:1rem;}
+.modal-sub{font-size:.83rem;color:var(--ink-2);}
+.modal-sec{display:flex;flex-direction:column;gap:.55rem;}
+.modal-sec-title{font-size:.65rem;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:var(--ink-3);}
+.stats4{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;}
+.s4-item{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:.55rem .65rem;}
+.s4-label{font-size:.62rem;font-weight:600;color:var(--ink-3);margin-bottom:.2rem;text-transform:uppercase;letter-spacing:.05em;}
+.s4-val{font-size:.95rem;font-weight:800;color:var(--ink);}
+.field{display:flex;flex-direction:column;gap:.35rem;}
+.field label{font-size:.75rem;font-weight:600;color:var(--ink-2);}
+.field input,.field textarea,.field select{
+  padding:.55rem .75rem;border-radius:var(--r-sm);border:1px solid var(--line);
+  background:var(--surface);font-family:inherit;font-size:.875rem;color:var(--ink);resize:vertical;
+  transition:border-color .14s,box-shadow .14s;
+}
+.field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--primary);box-shadow:var(--ring);}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:.65rem;}
+.modal-actions{display:flex;align-items:center;justify-content:flex-end;gap:.55rem;padding-top:.25rem;border-top:1px solid var(--line);margin-top:.25rem;}
+.mbtn{padding:.55rem 1rem;border-radius:var(--r-sm);font-size:.83rem;font-weight:600;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink-2);transition:all .14s;}
+.mbtn:hover{background:var(--surface-2);}
+.mbtn.primary{background:var(--primary);border-color:var(--primary);color:#fff;}
+.mbtn.primary:hover{background:var(--primary-d);}
+.mbtn.danger{background:var(--attn-bg);border-color:var(--attn-acc);color:var(--attn-fg);}
+.mbtn.danger:hover{background:#fee2e2;}
+.mbtn.bill{background:var(--bill-bg);border-color:rgba(3,105,161,.25);color:var(--bill-fg);}
+.mbtn:disabled{opacity:.5;cursor:not-allowed;}
+.err-text{font-size:.8rem;color:var(--attn-fg);background:var(--attn-bg);border:1px solid rgba(239,68,68,.25);border-radius:var(--r-sm);padding:.5rem .75rem;display:none;}
+.detail-list{display:flex;flex-direction:column;gap:.4rem;}
+.d-item{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;padding:.55rem .65rem;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);}
+.d-item-l{display:flex;flex-direction:column;gap:.15rem;flex:1;}
+.d-item-title{font-size:.8rem;font-weight:600;color:var(--ink);}
+.d-item-sub{font-size:.72rem;color:var(--ink-3);}
+.d-item-r{font-size:.82rem;font-weight:700;color:var(--ink);white-space:nowrap;}
+
+/* Active calls section inside detail modal */
+.active-calls-list{display:flex;flex-direction:column;gap:.4rem;}
+.active-call-row{
+  display:flex;align-items:center;gap:.65rem;padding:.55rem .7rem;
+  background:var(--attn-bg);border:1px solid rgba(239,68,68,.22);border-radius:var(--r-sm);
+}
+.active-call-icon{font-size:1.05rem;flex-shrink:0;}
+.active-call-body{flex:1;display:flex;flex-direction:column;gap:.1rem;}
+.active-call-reason{font-size:.8rem;font-weight:700;color:var(--attn-fg);}
+.active-call-meta{font-size:.68rem;color:var(--attn-fg);opacity:.7;}
+.active-call-status{font-size:.62rem;font-weight:700;padding:.12rem .42rem;border-radius:999px;background:rgba(239,68,68,.15);color:var(--attn-fg);}
+
+/* ═══════════════════════════════════════════════════════════
+   TOAST STACK
+═══════════════════════════════════════════════════════════ */
+.toast-stack{position:fixed;bottom:5.5rem;right:1.25rem;display:flex;flex-direction:column;gap:.5rem;z-index:300;pointer-events:none;}
+.toast{
+  display:flex;align-items:center;gap:.55rem;
+  padding:.65rem 1rem;border-radius:var(--r);font-size:.82rem;font-weight:600;
+  background:var(--ink);color:#f1f5f9;box-shadow:var(--sh-md);
+  opacity:0;transform:translateX(20px);transition:opacity .22s,transform .22s;max-width:300px;
+}
+.toast.show{opacity:1;transform:translateX(0);}
+.toast.ok{background:#15803d;} .toast.warn{background:#b45309;}
+.toast.error{background:#b91c1c;}
+
+/* ═══════════════════════════════════════════════════════════
+   PRINT STYLES
+═══════════════════════════════════════════════════════════ */
+@media print{
+  .topbar,.kpi-ribbon,.toolbar,.bulk-bar,.toast-stack,.modal-bg,.card-actions,.kcard-actions{display:none!important;}
+  .page{padding:.5rem;max-width:none;}
+  .tcard{break-inside:avoid;box-shadow:none;border:1px solid #ccc;margin-bottom:.5rem;}
+  .grid{grid-template-columns:repeat(3,1fr);gap:.5rem;}
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════ TOP BAR ══════════ -->
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="topbar-logo">☕</div>
+    <div>
+      <div class="topbar-title">Tables Overview</div>
+      <div class="topbar-sub" id="topbar-sub">Loading…</div>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="live-pill">
+      <span id="live-pip"></span>
+      <span id="live-label">Connecting…</span>
+    </div>
+    <label class="auto-toggle" title="Auto-refresh every 10 seconds">
+      <input type="checkbox" id="auto-refresh" checked />
+      Auto
+    </label>
+    <button class="tbtn tbtn-icon" id="sound-btn" title="Sound alerts">🔔</button>
+    <button class="tbtn tbtn-icon" id="dark-btn" title="Toggle dark mode">🌙</button>
+    <button class="tbtn tbtn-icon" id="print-btn" title="Print floor report">🖨</button>
+    <button class="tbtn" id="select-btn">☑ Select</button>
+    <button class="tbtn" id="refresh-btn">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+      Refresh
+    </button>
+    <a class="tbtn" href="{{ url_for('owner_dashboard') }}">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      Dashboard
+    </a>
+  </div>
+</header>
+
+<!-- ══════════ KPI RIBBON ══════════ -->
+<div class="kpi-ribbon">
+  <div class="kpi-item">
+    <div class="kpi-icon rev">💰</div>
+    <div><div class="kpi-label">Today's Revenue</div><div class="kpi-val" id="kpi-rev">—</div></div>
+  </div>
+  <div class="kpi-item">
+    <div class="kpi-icon rev" style="background:#faf5ff;">📈</div>
+    <div><div class="kpi-label">Forecast EOD</div><div class="kpi-val" id="kpi-forecast">—</div></div>
+  </div>
+  <div class="kpi-item">
+    <div class="kpi-icon occ">🟢</div>
+    <div><div class="kpi-label">Occupancy</div><div class="kpi-val" id="kpi-occ">—</div></div>
+  </div>
+  <div class="kpi-item">
+    <div class="kpi-icon turn">⏱</div>
+    <div><div class="kpi-label">Avg seat time</div><div class="kpi-val" id="kpi-turn">—</div></div>
+  </div>
+  <div class="kpi-item">
+    <div class="kpi-icon attn">🔴</div>
+    <div><div class="kpi-label">Needs attention</div><div class="kpi-val kpi-attn-val" id="kpi-attn">0</div></div>
+  </div>
+  <div class="kpi-spacer"></div>
+  <div class="view-switcher">
+    <button class="view-btn active" data-view="grid">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      Grid
+    </button>
+    <button class="view-btn" data-view="kanban">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="5" height="18"/><rect x="10" y="3" width="5" height="12"/><rect x="17" y="3" width="5" height="15"/></svg>
+      Kanban
+    </button>
+    <button class="view-btn" data-view="floor">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Floor
+    </button>
+  </div>
+  <div class="ribbon-extras">
+    <button class="icon-btn active" id="density-default" title="Default density">▣</button>
+    <button class="icon-btn" id="density-compact" title="Compact">⊟</button>
+    <button class="icon-btn" id="density-comfortable" title="Comfortable">⊞</button>
+  </div>
+</div>
+
+<!-- ══════════ PAGE BODY ══════════ -->
+<main class="page">
+
+  <!-- Summary cards -->
+  <div class="summary" id="summary">
+    <div class="sum-card sc-total" data-sc="all">
+      <div class="sum-label">Total</div><div class="sum-value" id="sum-total">—</div>
+      <div class="sum-trend" id="sum-total-t"></div><div class="sum-icon">⊞</div>
+    </div>
+    <div class="sum-card sc-free" data-sc="free">
+      <div class="sum-label">Free</div><div class="sum-value" id="sum-free">—</div>
+      <div class="sum-trend" id="sum-free-t"></div><div class="sum-icon">✓</div>
+    </div>
+    <div class="sum-card sc-occ" data-sc="occupied">
+      <div class="sum-label">Occupied</div><div class="sum-value" id="sum-occupied">—</div>
+      <div class="sum-trend" id="sum-occ-t"></div><div class="sum-icon">👤</div>
+    </div>
+    <div class="sum-card sc-ready" data-sc="ready_to_serve">
+      <div class="sum-label">Ready to serve</div><div class="sum-value" id="sum-ready">—</div>
+      <div class="sum-trend" id="sum-ready-t"></div><div class="sum-icon">🍽</div>
+    </div>
+    <div class="sum-card sc-attn" data-sc="needs_attention">
+      <div class="sum-label">Needs attention</div><div class="sum-value" id="sum-attn">—</div>
+      <div class="sum-trend" id="sum-attn-t"></div><div class="sum-icon">🔔</div>
+    </div>
+    <div class="sum-card sc-clean" data-sc="cleaning">
+      <div class="sum-label">Cleaning</div><div class="sum-value" id="sum-clean">—</div>
+      <div class="sum-trend" id="sum-clean-t"></div><div class="sum-icon">🧹</div>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <button class="filter-pill active" data-filter="all">All <span class="pill-count" data-count="all">0</span></button>
+    <button class="filter-pill" data-filter="needs_attention">⚠ Attention <span class="pill-count" data-count="needs_attention">0</span></button>
+    <button class="filter-pill" data-filter="ready_to_serve">🍽 Ready <span class="pill-count" data-count="ready_to_serve">0</span></button>
+    <button class="filter-pill" data-filter="occupied">👤 Occupied <span class="pill-count" data-count="occupied">0</span></button>
+    <button class="filter-pill" data-filter="cleaning">🧹 Cleaning <span class="pill-count" data-count="cleaning">0</span></button>
+    <button class="filter-pill" data-filter="free">✓ Free <span class="pill-count" data-count="free">0</span></button>
+    <div class="search-wrap">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="search" class="search" id="search" placeholder="Search tables… (/)" />
+    </div>
+    <select id="sort-select" class="sort-select">
+      <option value="status">Sort: Priority</option>
+      <option value="oldest">Sort: Oldest first</option>
+      <option value="name">Sort: Name A–Z</option>
+      <option value="revenue">Sort: Revenue ↓</option>
+      <option value="occupied_time">Sort: Seat time ↓</option>
+    </select>
+    <span class="kbd-hint"><kbd>1</kbd>–<kbd>6</kbd> · <kbd>/</kbd> · <kbd>r</kbd> · <kbd>v</kbd> · <kbd>Esc</kbd></span>
+  </div>
+
+  <!-- GRID view -->
+  <div id="view-grid" style="display:block;">
+    <div id="grid" class="grid"></div>
+    <div id="empty-state" class="empty">
+      <div class="empty-icon">🔍</div>
+      <h3>No tables match</h3>
+      <p>Try a different filter or search term.</p>
+    </div>
+  </div>
+
+  <!-- KANBAN view -->
+  <div id="view-kanban" class="kanban-wrap" style="display:none;">
+    <div class="kanban-col" id="kb-needs_attention">
+      <div class="kanban-col-head">
+        <div class="kanban-col-title"><div class="kanban-dot" style="background:var(--attn-acc);"></div> Needs attention</div>
+        <span class="kanban-count" id="kb-count-needs_attention">0</span>
+      </div>
+    </div>
+    <div class="kanban-col" id="kb-ready_to_serve">
+      <div class="kanban-col-head">
+        <div class="kanban-col-title"><div class="kanban-dot" style="background:var(--ready-acc);"></div> Ready to serve</div>
+        <span class="kanban-count" id="kb-count-ready_to_serve">0</span>
+      </div>
+    </div>
+    <div class="kanban-col" id="kb-occupied">
+      <div class="kanban-col-head">
+        <div class="kanban-col-title"><div class="kanban-dot" style="background:var(--occ-acc);"></div> Occupied</div>
+        <span class="kanban-count" id="kb-count-occupied">0</span>
+      </div>
+    </div>
+    <div class="kanban-col" id="kb-cleaning">
+      <div class="kanban-col-head">
+        <div class="kanban-col-title"><div class="kanban-dot" style="background:var(--clean-acc);"></div> Cleaning</div>
+        <span class="kanban-count" id="kb-count-cleaning">0</span>
+      </div>
+    </div>
+    <div class="kanban-col" id="kb-free">
+      <div class="kanban-col-head">
+        <div class="kanban-col-title"><div class="kanban-dot" style="background:var(--free-acc);"></div> Free</div>
+        <span class="kanban-count" id="kb-count-free">0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- FLOOR view -->
+  <div id="view-floor" style="display:none;">
+    <div class="floor-wrap">
+      <div class="floor-legend">
+        <div class="floor-legend-item"><div class="floor-dot" style="background:var(--free-acc);"></div> Free</div>
+        <div class="floor-legend-item"><div class="floor-dot" style="background:var(--occ-acc);"></div> Occupied</div>
+        <div class="floor-legend-item"><div class="floor-dot" style="background:var(--ready-acc);"></div> Ready to serve</div>
+        <div class="floor-legend-item"><div class="floor-dot" style="background:var(--attn-acc);"></div> Needs attention</div>
+        <div class="floor-legend-item"><div class="floor-dot" style="background:var(--clean-acc);"></div> Cleaning</div>
+      </div>
+      <div class="floor-grid" id="floor-grid"></div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ══════════ BULK ACTION BAR ══════════ -->
+<div class="bulk-bar" id="bulk-bar">
+  <span class="bulk-count-text" id="bulk-count-text">0 selected</span>
+  <div class="bulk-sep"></div>
+  <button class="bulk-action" id="bulk-clear">🔕 Clear calls</button>
+  <button class="bulk-action" id="bulk-cleaning">🧹 Mark cleaning</button>
+  <button class="bulk-action danger" id="bulk-close">✓ Close tables</button>
+  <div class="bulk-sep"></div>
+  <button class="bulk-cancel" id="bulk-deselect">Deselect all</button>
+</div>
+
+<!-- ══════════ DETAIL MODAL ══════════ -->
+<div class="modal-bg" id="modal-detail">
+  <div class="modal">
+    <div class="modal-hdr">
+      <h2 id="detail-title">Table details</h2>
+      <button class="modal-x" id="detail-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-sub" id="detail-sub"></p>
+      <!-- Active calls section (shown only when there are open calls) -->
+      <div class="modal-sec" id="detail-calls-sec" style="display:none;">
+        <div class="modal-sec-title" style="color:var(--attn-fg);">🔔 Open Service Calls</div>
+        <div class="active-calls-list" id="detail-active-calls"></div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.15rem;">
+          <button class="mbtn danger" id="detail-clear-calls" style="font-size:.78rem;padding:.4rem .85rem;">✓ Resolve all calls</button>
+          <a class="mbtn bill" id="detail-bill-link" href="#" style="font-size:.78rem;padding:.4rem .85rem;display:none;">💳 Open bill</a>
+        </div>
+      </div>
+      <!-- 7-day stats -->
+      <div class="modal-sec">
+        <div class="modal-sec-title">Last 7 days</div>
+        <div class="stats4">
+          <div class="s4-item"><div class="s4-label">Orders</div><div class="s4-val" id="d7-orders">—</div></div>
+          <div class="s4-item"><div class="s4-label">Revenue</div><div class="s4-val" id="d7-rev">—</div></div>
+          <div class="s4-item"><div class="s4-label">Avg ticket</div><div class="s4-val" id="d7-avg">—</div></div>
+          <div class="s4-item"><div class="s4-label">Avg dwell</div><div class="s4-val" id="d7-dwell">—</div></div>
+        </div>
+      </div>
+      <!-- Sticky note -->
+      <div class="modal-sec">
+        <div class="modal-sec-title">Sticky note <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink-3);">(30 min TTL)</span></div>
+        <div class="field" style="margin-bottom:.45rem;">
+          <textarea id="note-input" rows="2" maxlength="200" placeholder="Birthday party, dietary needs, VIP guest…"></textarea>
+        </div>
+        <button class="mbtn primary" id="note-save" style="font-size:.8rem;padding:.4rem .8rem;align-self:flex-start;">Save note</button>
+      </div>
+      <!-- Recent orders -->
+      <div class="modal-sec">
+        <div class="modal-sec-title">Recent orders</div>
+        <div class="detail-list" id="recent-orders"><div style="color:var(--ink-3);font-size:.82rem;">Loading…</div></div>
+      </div>
+      <!-- Recent calls history -->
+      <div class="modal-sec">
+        <div class="modal-sec-title">Service call history</div>
+        <div class="detail-list" id="recent-calls"><div style="color:var(--ink-3);font-size:.82rem;">Loading…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ WALK-IN MODAL ══════════ -->
+<div class="modal-bg" id="modal-walkin">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-hdr">
+      <h2>New walk-in order</h2>
+      <button class="modal-x" id="walkin-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-sub">Seating <strong id="walkin-table-name"></strong>. Name &amp; phone are optional.</p>
+      <div class="field"><label>Customer name (optional)</label><input id="walkin-name" type="text" maxlength="80" placeholder="e.g. Aisha" autocomplete="off" /></div>
+      <div class="two-col">
+        <div class="field"><label>Phone (optional)</label><input id="walkin-phone" type="tel" maxlength="32" placeholder="+91…" inputmode="tel" /></div>
+        <div class="field"><label>Party size</label><input id="walkin-party" type="number" min="1" max="50" placeholder="2" inputmode="numeric" /></div>
+      </div>
+      <div class="err-text" id="walkin-error"></div>
+      <div class="modal-actions">
+        <button class="mbtn" id="walkin-cancel">Cancel</button>
+        <button class="mbtn primary" id="walkin-confirm">Open tab →</button>
+      </div>
+      <!-- Shown after successful creation -->
+      <div id="walkin-success" style="display:none;text-align:center;padding:.75rem 0;">
+        <div style="font-size:1.5rem;margin-bottom:.4rem;">✅</div>
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:.6rem;">Order created!</div>
+        <a id="walkin-order-link" class="mbtn primary" href="#" style="display:inline-flex;gap:.3rem;">💳 Add items &amp; take payment →</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ TRANSFER MODAL ══════════ -->
+<div class="modal-bg" id="modal-transfer">
+  <div class="modal" style="max-width:380px;">
+    <div class="modal-hdr">
+      <h2>Transfer order</h2>
+      <button class="modal-x" id="transfer-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-sub">Move open order from <strong id="transfer-from-name"></strong> to another table.</p>
+      <div class="field"><label>Target table</label><select id="transfer-target"></select></div>
+      <div class="err-text" id="transfer-error"></div>
+      <div class="modal-actions">
+        <button class="mbtn" id="transfer-cancel">Cancel</button>
+        <button class="mbtn primary" id="transfer-confirm">Transfer order</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+<!-- ══════════════════════════════════════════════
+     JAVASCRIPT
+══════════════════════════════════════════════ -->
+<script>
+(function(){
+'use strict';
+
+/* ── Constants ────────────────────────────────── */
+const STUCK_THRESHOLDS = { pending:300, confirmed:300, preparing:1200, ready:600 };
+const STATUS_RANK  = { needs_attention:0, ready_to_serve:1, occupied:2, cleaning:3, free:4 };
+const STATUS_LABEL = { free:'Free', occupied:'Occupied', ready_to_serve:'Ready to serve', needs_attention:'Needs attention', cleaning:'Cleaning' };
+const FLOOR_ICONS  = { free:'🪑', occupied:'🍽', ready_to_serve:'✅', needs_attention:'🔔', cleaning:'🧹' };
+const PILL_CLS     = { pending:'op-pending', confirmed:'op-confirmed', preparing:'op-preparing', ready:'op-ready' };
+/* Call-type display config */
+const CALL_TYPE = {
+  bill:    { icon:'💳', label:'Bill',    chipClass:'bill'    },
+  water:   { icon:'💧', label:'Water',   chipClass:'water'   },
+  service: { icon:'🔔', label:'Service', chipClass:'service' },
+  help:    { icon:'❓', label:'Help',    chipClass:'help'    },
+};
+function callTypeConfig(reason){
+  return CALL_TYPE[reason] || { icon:'🔔', label: reasonLabel(reason), chipClass:'service' };
+}
+
+/* ── DOM refs ─────────────────────────────────── */
+const csrf       = document.querySelector('meta[name="csrf-token"]').content;
+const gridEl     = document.getElementById('grid');
+const emptyEl    = document.getElementById('empty-state');
+const toastStack = document.getElementById('toast-stack');
+const searchEl   = document.getElementById('search');
+const autoEl     = document.getElementById('auto-refresh');
+const floorGrid  = document.getElementById('floor-grid');
+const bulkBar    = document.getElementById('bulk-bar');
+
+/* ── State ────────────────────────────────────── */
+let lastData      = null;
+let prevSummary   = null;
+let activeFilter  = 'all';
+let activeSort    = 'status';
+let activeView    = localStorage.getItem('tov-view') || 'grid';
+let isDark        = localStorage.getItem('tov-dark') === '1' ||
+                    (!localStorage.getItem('tov-dark') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+let soundEnabled  = localStorage.getItem('tov-sound') === '1';
+let selectMode    = false;
+let selected      = new Set();
+let timer         = null;
+let tickInterval  = null;
+let prevAttnCount = -1;   /* FIX: -1 so first load never fires sound alert */
+let currentTableId = null;
+let walkinTableId  = null;
+let transferFromId = null;
+let sseSource      = null;
+let sseRetryDelay  = 2000;
+
+/* ── Utilities ────────────────────────────────── */
+function esc(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function money(n){ return '₹'+Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtAge(s){
+  s=Math.max(0,Math.floor(Number(s)||0));
+  if(s<60) return s+'s';
+  const m=Math.floor(s/60);
+  if(m<60) return m+'m '+(s%60?s%60+'s':'');
+  return Math.floor(m/60)+'h '+(m%60?m%60+'m':'');
+}
+function reasonLabel(r){ return ({service:'Call server',bill:'Request bill',water:'Water',help:'Needs help'}[r]||r||'Service call'); }
+
+/* ── Dark mode ────────────────────────────────── */
+function applyTheme(){
+  document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+  document.getElementById('dark-btn').textContent = isDark ? '☀️' : '🌙';
+}
+applyTheme();
+document.getElementById('dark-btn').addEventListener('click',()=>{
+  isDark=!isDark; localStorage.setItem('tov-dark',isDark?'1':'0'); applyTheme();
+});
+
+/* ── Sound alert ──────────────────────────────── */
+function updateSoundBtn(){
+  const btn=document.getElementById('sound-btn');
+  btn.textContent = soundEnabled ? '🔔' : '🔕';
+  btn.title = soundEnabled ? 'Sound ON — click to mute' : 'Sound OFF — click to enable';
+}
+updateSoundBtn();
+document.getElementById('sound-btn').addEventListener('click',()=>{
+  soundEnabled=!soundEnabled; localStorage.setItem('tov-sound',soundEnabled?'1':'0'); updateSoundBtn();
+  toast(soundEnabled ? 'Sound alerts enabled' : 'Sound alerts muted', soundEnabled ? 'ok' : '');
+});
+function playAlert(){
+  if(!soundEnabled) return;
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    [[880,0,0.08],[660,0.1,0.08],[880,0.22,0.1]].forEach(([freq,start,dur])=>{
+      const o=ctx.createOscillator(), g=ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value=freq; o.type='sine';
+      g.gain.setValueAtTime(0.28,ctx.currentTime+start);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+start+dur);
+      o.start(ctx.currentTime+start); o.stop(ctx.currentTime+start+dur+0.05);
+    });
+  }catch(e){}
+}
+
+/* ── View mode ────────────────────────────────── */
+function applyView(v){
+  activeView=v; localStorage.setItem('tov-view',v);
+  document.querySelectorAll('.view-btn[data-view]').forEach(btn=>{
+    btn.classList.toggle('active',btn.dataset.view===v);
+  });
+  /* Explicitly set display — single source of truth (no CSS [data-view] conflict) */
+  document.getElementById('view-grid').style.display   = v==='grid'   ? 'block' : 'none';
+  document.getElementById('view-kanban').style.display = v==='kanban' ? 'flex'  : 'none';
+  document.getElementById('view-floor').style.display  = v==='floor'  ? 'block' : 'none';
+  if(lastData) render();
+}
+document.querySelectorAll('.view-btn[data-view]').forEach(btn=>{
+  btn.addEventListener('click',()=>applyView(btn.dataset.view));
+});
+applyView(activeView);
+
+/* ── Density control ──────────────────────────── */
+let density = localStorage.getItem('tov-density') || 'default';
+function applyDensity(d){
+  density=d; localStorage.setItem('tov-density',d);
+  document.body.classList.remove('density-compact','density-comfortable');
+  if(d!=='default') document.body.classList.add('density-'+d);
+  ['default','compact','comfortable'].forEach(x=>{
+    document.getElementById('density-'+x).classList.toggle('active',x===d);
+  });
+}
+['default','compact','comfortable'].forEach(d=>{
+  document.getElementById('density-'+d).addEventListener('click',()=>applyDensity(d));
+});
+applyDensity(density);
+
+/* ── Print ────────────────────────────────────── */
+document.getElementById('print-btn').addEventListener('click',()=>window.print());
+
+/* ── Toast ────────────────────────────────────── */
+function toast(msg,variant='',ms=3600){
+  const el=document.createElement('div');
+  el.className='toast'+(variant?' '+variant:'');
+  el.setAttribute('role',variant==='error'?'alert':'status');
+  const icons={ok:'✓',warn:'⚠',error:'✕',''  :'ℹ'};
+  el.innerHTML=`<span style="font-size:1rem;flex-shrink:0;">${icons[variant]||'ℹ'}</span>${esc(msg)}`;
+  toastStack.appendChild(el);
+  requestAnimationFrame(()=>el.classList.add('show'));
+  setTimeout(()=>{el.classList.remove('show');setTimeout(()=>el.remove(),260);},ms);
+}
+
+/* ── Live pip ─────────────────────────────────── */
+const pip=document.getElementById('live-pip'), lbl=document.getElementById('live-label');
+function setLive(state){
+  pip.className=state;
+  lbl.textContent={connected:'Live',error:'Offline',''  :'Connecting…'}[state]||'Connecting…';
+}
+
+/* ── Summary cards click to filter ───────────── */
+document.querySelectorAll('.sum-card[data-sc]').forEach(card=>{
+  card.addEventListener('click',()=>setFilter(card.dataset.sc));
+});
+function setFilter(f){
+  activeFilter=f;
+  document.querySelectorAll('.filter-pill').forEach(b=>b.classList.toggle('active',b.dataset.filter===f));
+  document.querySelectorAll('.sum-card[data-sc]').forEach(c=>c.classList.toggle('active-filter',c.dataset.sc===f));
+  render();
+}
+document.querySelectorAll('.filter-pill').forEach(btn=>{
+  btn.addEventListener('click',()=>setFilter(btn.dataset.filter));
+});
+
+/* ── Sort / Search ────────────────────────────── */
+document.getElementById('sort-select').addEventListener('change',e=>{activeSort=e.target.value;render();});
+searchEl.addEventListener('input',render);
+
+/* ── Refresh ──────────────────────────────────── */
+document.getElementById('refresh-btn').addEventListener('click',()=>{load();scheduleRefresh();});
+if(autoEl) autoEl.addEventListener('change',scheduleRefresh);
+
+/* ── Keyboard shortcuts ───────────────────────── */
+document.addEventListener('keydown',e=>{
+  if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+  const fkeys={'1':'all','2':'needs_attention','3':'ready_to_serve','4':'occupied','5':'cleaning','6':'free'};
+  if(fkeys[e.key]){ setFilter(fkeys[e.key]); return; }
+  if(e.key==='/'){ e.preventDefault(); searchEl.focus(); searchEl.select(); return; }
+  if(e.key==='r'||e.key==='R'){ load(); scheduleRefresh(); return; }
+  if(e.key==='Escape'){ closeAllModals(); exitSelectMode(); return; }
+  if(e.key==='v'||e.key==='V'){
+    const vs=['grid','kanban','floor'];
+    applyView(vs[(vs.indexOf(activeView)+1)%3]);
+  }
+});
+
+/* ═══════════════════════════════════════════════
+   KPI RIBBON
+═══════════════════════════════════════════════ */
+function updateKPI(tables, summary){
+  const nowHr = new Date().getHours() + new Date().getMinutes()/60;
+  const totalRev = tables.reduce((s,t)=>s+(t.today.revenue||0),0);
+  document.getElementById('kpi-rev').textContent = money(totalRev);
+  const hoursOpen = Math.max(0.5, nowHr - 8);
+  const forecast  = hoursOpen > 0 ? (totalRev / hoursOpen) * 12 : 0;
+  document.getElementById('kpi-forecast').textContent = forecast > 0 ? money(forecast) : '—';
+  const active = (summary.occupied||0)+(summary.ready_to_serve||0)+(summary.needs_attention||0);
+  const occ = summary.total ? Math.round(active/summary.total*100) : 0;
+  document.getElementById('kpi-occ').textContent = occ+'%';
+  const occupiedTables = tables.filter(t=>t.occupiedSinceSeconds>0);
+  const avgSeat = occupiedTables.length
+    ? Math.round(occupiedTables.reduce((s,t)=>s+t.occupiedSinceSeconds,0)/occupiedTables.length) : 0;
+  document.getElementById('kpi-turn').textContent = avgSeat > 0 ? fmtAge(avgSeat) : '—';
+  const attnCount = summary.needs_attention||0;
+  const attnEl = document.getElementById('kpi-attn');
+  attnEl.textContent = attnCount;
+  attnEl.classList.toggle('has-attn', attnCount>0);
+  /* FIX: prevAttnCount starts at -1; only alert when count genuinely grows after first load */
+  if(prevAttnCount >= 0 && attnCount > prevAttnCount){ playAlert(); }
+  prevAttnCount = attnCount;
+}
+
+/* ═══════════════════════════════════════════════
+   SUMMARY STRIP
+═══════════════════════════════════════════════ */
+function updateSummary(s, prev){
+  document.getElementById('sum-total').textContent    = s.total    ||0;
+  document.getElementById('sum-free').textContent     = s.free     ||0;
+  document.getElementById('sum-occupied').textContent = s.occupied ||0;
+  document.getElementById('sum-ready').textContent    = s.ready_to_serve||0;
+  document.getElementById('sum-attn').textContent     = s.needs_attention||0;
+  document.getElementById('sum-clean').textContent    = s.cleaning  ||0;
+  function trend(id, cur, prv){
+    if(prv==null) return;
+    const d=cur-prv;
+    document.getElementById(id).textContent=d===0?'':(d>0?'▲ +'+d:' ▼ '+d)+' since last';
+  }
+  if(prev){
+    trend('sum-free-t',   s.free||0,            prev.free||0);
+    trend('sum-occ-t',    s.occupied||0,         prev.occupied||0);
+    trend('sum-ready-t',  s.ready_to_serve||0,   prev.ready_to_serve||0);
+    trend('sum-attn-t',   s.needs_attention||0,  prev.needs_attention||0);
+  }
+  document.querySelectorAll('.filter-pill .pill-count').forEach(el=>{
+    const k=el.dataset.count, n=(k==='all')?(s.total||0):(s[k]||0);
+    el.textContent=n;
+  });
+}
+
+/* ═══════════════════════════════════════════════
+   SORT HELPER
+═══════════════════════════════════════════════ */
+function sortedFiltered(tables){
+  const q=(searchEl.value||'').toLowerCase().trim();
+  let rows=tables.filter(t=>{
+    if(activeFilter!=='all'&&t.status!==activeFilter) return false;
+    if(q&&!(t.name||'').toLowerCase().includes(q)&&!(t.id||'').toLowerCase().includes(q)) return false;
+    return true;
+  });
+  rows.sort((a,b)=>{
+    if(activeSort==='name') return (a.name||'').localeCompare(b.name||'',undefined,{numeric:true});
+    if(activeSort==='oldest'){
+      const ax=a.lastActivityAt?Date.parse(a.lastActivityAt):Infinity;
+      const bx=b.lastActivityAt?Date.parse(b.lastActivityAt):Infinity;
+      return ax!==bx?ax-bx:(a.name||'').localeCompare(b.name||'',undefined,{numeric:true});
+    }
+    if(activeSort==='revenue') return (b.today.revenue||0)-(a.today.revenue||0);
+    if(activeSort==='occupied_time') return (b.occupiedSinceSeconds||0)-(a.occupiedSinceSeconds||0);
+    const ra=STATUS_RANK[a.status]??99, rb=STATUS_RANK[b.status]??99;
+    return ra!==rb?ra-rb:(a.name||'').localeCompare(b.name||'',undefined,{numeric:true});
+  });
+  return rows;
+}
+
+/* ═══════════════════════════════════════════════
+   CALL TYPE CHIPS builder
+═══════════════════════════════════════════════ */
+function buildCallChips(c){
+  /* Overview API only gives us latestReason, count, anyAcknowledged.
+     Show the latest reason as a prominent chip + count if > 1. */
+  if(!c||!c.count) return '';
+  const cfg = callTypeConfig(c.latestReason);
+  let chips = `<span class="call-chip ${cfg.chipClass}">${cfg.icon} ${esc(cfg.label)}</span>`;
+  if(c.count>1) chips += `<span class="call-chip service">+${c.count-1} more</span>`;
+  return chips;
+}
+
+/* ═══════════════════════════════════════════════
+   BUILD GRID CARD HTML
+═══════════════════════════════════════════════ */
+function buildCard(t){
+  const o=t.openOrder, c=t.openCalls;
+  const sc='s-'+t.status, badge='sb-'+t.status;
+  const selClass = selected.has(t.id) ? ' selected' : '';
+
+  /* ─ Order block ─ */
+  let orderHtml='';
+  if(o){
+    const pc=PILL_CLS[o.status]||'';
+    const threshold=STUCK_THRESHOLDS[o.status]||99999;
+    const remaining=threshold-o.ageSeconds;
+    let escalateHtml='';
+    if(!o.stuck&&remaining>0&&remaining<threshold){
+      escalateHtml=`<span class="escalate-pill">⏱ escalates in ${fmtAge(remaining)}</span>`;
+    }
+    const stuckHtml=o.stuck?`<span class="stuck-badge">⚠ STUCK ${fmtAge(o.ageSeconds)}</span>`:'';
+    orderHtml=`
+      <div class="order-block ${o.stuck?'ob-stuck':'ob-normal'}">
+        <div class="order-block-top">
+          <span class="order-id-txt">Order #${Number(o.id)||0}</span>
+          <span class="o-pill ${pc}">${esc(o.status)}</span>
+        </div>
+        ${stuckHtml}${escalateHtml}
+        <div class="order-meta">
+          <span class="order-total-big">${money(o.total)}</span>
+          <span class="sep">·</span>
+          <span>${Number(o.itemsCount)||0} item${o.itemsCount===1?'':'s'}</span>
+          <span class="sep">·</span>
+          <span data-age="${o.ageSeconds}" class="age-tick">${fmtAge(o.ageSeconds)}</span>
+        </div>
+        ${o.customerName?`<div class="order-customer">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          ${esc(o.customerName)}</div>`:''}
+        <a class="order-bill-link" href="/owner/billing/orders/${o.id}">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+          Open bill &amp; payment
+        </a>
+      </div>`;
+  }
+
+  /* ─ Calls block (inline, type-aware) ─ */
+  let callsHtml='';
+  if(c.count){
+    callsHtml=`<div class="calls-block">
+      <div class="calls-header">
+        <div class="calls-title">🔔 ${c.count} call${c.count===1?'':'s'}</div>
+        <div class="call-type-chips">${buildCallChips(c)}</div>
+        ${c.anyAcknowledged?'<span class="calls-ack">ack</span>':''}
+      </div>
+      <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
+        <span class="calls-age">latest <span data-age="${c.latestAgeSeconds}" class="age-tick">${fmtAge(c.latestAgeSeconds)}</span> ago</span>
+        <button class="calls-manage-btn" data-act="managecalls">Manage →</button>
+        <button class="calls-manage-btn" data-act="clear">Resolve all</button>
+      </div>
+    </div>`;
+  }
+
+  /* ─ Timer bar ─ */
+  let timerHtml='';
+  if(t.occupiedSinceSeconds>0){
+    const pct=Math.min(100,Math.round(t.occupiedSinceSeconds/7200*100));
+    timerHtml=`<div class="timer-bar-wrap">
+      <span class="timer-bar-label">Seat time</span>
+      <div class="timer-bar-track"><div class="timer-bar-fill" style="width:${pct}%"></div></div>
+      <span class="timer-bar-val" data-age="${t.occupiedSinceSeconds}" data-timer="1">${fmtAge(t.occupiedSinceSeconds)}</span>
+    </div>`;
+  }
+
+  /* ─ Stats row ─ */
+  const statsHtml=`<div class="stats-row">
+    <div class="stat-chip">📋 <strong>${t.today.orders}</strong> order${t.today.orders===1?'':'s'}</div>
+    ${t.today.revenue>0?`<div class="stat-chip">💵 <strong>${money(t.today.revenue)}</strong></div>`:''}
+  </div>`;
+
+  /* ─ Note ─ */
+  const noteHtml=t.note?`<div class="card-note">📝 <span>${esc(t.note)}</span></div>`:'';
+
+  /* ─ Actions ─ */
+  let acts=`<button class="act-btn" data-act="detail">Details</button>`;
+  if(o){
+    acts+=`<a class="act-btn ab-bill" href="/owner/billing/orders/${o.id}">💳 Bill</a>`;
+    acts+=`<button class="act-btn ab-success" data-act="close">✓ Close</button>`;
+    acts+=`<button class="act-btn" data-act="transfer">⇄ Transfer</button>`;
+  } else {
+    acts+=`<button class="act-btn ab-primary" data-act="walkin">+ Walk-in</button>`;
+  }
+  if(c.count) acts+=`<button class="act-btn" data-act="managecalls">🔔 Calls (${c.count})</button>`;
+  acts+=`<button class="act-btn" data-act="cleaning">${t.cleaning?'✅ Mark clean':'🧹 Cleaning'}</button>`;
+  acts+=`<a class="act-btn" href="/t/${t.id}" target="_blank">Menu ↗</a>`;
+
+  return `<div class="tcard ${sc}${selClass}" data-id="${esc(t.id)}" data-name="${esc(t.name)}">
+    <div class="card-select-box" data-sel="${esc(t.id)}"></div>
+    <div class="card-head">
+      <div><div class="card-name">${esc(t.name)}</div><div class="card-id">${esc(t.id)}</div></div>
+      <span class="status-badge ${badge}">${STATUS_LABEL[t.status]||t.status}</span>
+    </div>
+    <div class="card-body">${orderHtml}${callsHtml}${timerHtml}${statsHtml}${noteHtml}</div>
+    <div class="card-actions">${acts}</div>
+  </div>`;
+}
+
+/* ═══════════════════════════════════════════════
+   SKELETON LOADERS
+═══════════════════════════════════════════════ */
+function showSkeleton(){
+  gridEl.innerHTML=Array(6).fill(0).map(()=>`
+    <div class="skel-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.65rem;">
+        <div style="flex:1;"><div class="skel skel-h1" style="margin-bottom:.4rem;"></div><div class="skel skel-h2"></div></div>
+        <div class="skel" style="width:70px;height:22px;border-radius:999px;margin-left:.6rem;"></div>
+      </div>
+      <div class="skel skel-block"></div>
+      <div class="skel-btn-row" style="margin-top:.65rem;">
+        <div class="skel skel-btn" style="width:70px;"></div>
+        <div class="skel skel-btn" style="width:80px;"></div>
+        <div class="skel skel-btn" style="width:60px;"></div>
+      </div>
+    </div>`).join('');
+}
+
+/* ═══════════════════════════════════════════════
+   RENDER — grid
+═══════════════════════════════════════════════ */
+function renderGrid(rows){
+  if(!rows.length){ gridEl.innerHTML=''; emptyEl.style.display='block'; return; }
+  emptyEl.style.display='none';
+  gridEl.innerHTML=rows.map(t=>buildCard(t)).join('');
+  gridEl.classList.toggle('select-active',selectMode);
+}
+
+/* ═══════════════════════════════════════════════
+   RENDER — kanban   BUG-FIX: preserve headers
+═══════════════════════════════════════════════ */
+const KANBAN_COLS = ['needs_attention','ready_to_serve','occupied','cleaning','free'];
+function renderKanban(tables){
+  KANBAN_COLS.forEach(status=>{
+    const col=document.getElementById('kb-'+status);
+    /* FIX: save header outerHTML before destroying, then reconstruct */
+    const hdrHTML=col.querySelector('.kanban-col-head').outerHTML;
+    col.innerHTML=hdrHTML;   /* rebuilds column from just the saved header */
+
+    const group=tables.filter(t=>t.status===status);
+    /* Update count on the freshly rebuilt header */
+    col.querySelector('#kb-count-'+status).textContent=group.length;
+
+    if(!group.length){
+      const em=document.createElement('div');
+      em.className='kanban-empty'; em.textContent='None';
+      col.appendChild(em); return;
+    }
+    group.forEach(t=>{
+      const o=t.openOrder, c=t.openCalls;
+      const kc=document.createElement('div');
+      kc.className=`kcard s-${t.status}`;
+      kc.dataset.id=t.id; kc.dataset.name=t.name;
+      kc.innerHTML=`
+        <div class="kcard-name">${esc(t.name)}</div>
+        <div class="kcard-meta">
+          ${o?`<span>Order #${o.id}</span><span>·</span><span>${money(o.total)}</span><span>·</span><span data-age="${o.ageSeconds}" class="age-tick">${fmtAge(o.ageSeconds)}</span>`:'<span>No active order</span>'}
+          ${c.count?`<span>🔔 ${c.count}</span>`:''}
+        </div>
+        ${c.count?`<div class="kcard-meta" style="color:var(--attn-fg);">${buildCallChips(c)}</div>`:''}
+        <div class="kcard-actions">
+          <button class="kcard-btn" data-act="detail">Details</button>
+          ${o?`<a class="kcard-btn b" href="/owner/billing/orders/${o.id}">💳 Bill</a>`:''}
+          ${o?`<button class="kcard-btn g" data-act="close">✓ Close</button>`:`<button class="kcard-btn p" data-act="walkin">+ Walk-in</button>`}
+          ${c.count?`<button class="kcard-btn r" data-act="managecalls">🔔 Calls</button>`:''}
+        </div>`;
+      col.appendChild(kc);
+    });
+  });
+}
+
+/* ═══════════════════════════════════════════════
+   RENDER — floor
+═══════════════════════════════════════════════ */
+function renderFloor(tables){
+  floorGrid.innerHTML=tables.map(t=>{
+    const callDot=t.openCalls&&t.openCalls.count?`<div class="floor-table-calls">🔔 ${t.openCalls.count}</div>`:'';
+    const sub=t.openOrder?money(t.openOrder.total):(t.cleaning?'Cleaning':'Free');
+    return `<div class="floor-table ft-${t.status}" data-id="${esc(t.id)}" data-name="${esc(t.name)}">
+      <div class="floor-table-badge"></div>
+      <div class="floor-table-icon">${FLOOR_ICONS[t.status]||'🪑'}</div>
+      <div class="floor-table-name">${esc(t.name)}</div>
+      <div class="floor-table-sub">${sub}</div>
+      ${callDot}
+    </div>`;
+  }).join('');
+}
+
+/* ═══════════════════════════════════════════════
+   MASTER RENDER
+═══════════════════════════════════════════════ */
+function render(){
+  if(!lastData) return;
+  const s=lastData.summary, tables=lastData.tables;
+  updateSummary(s, prevSummary);
+  updateKPI(tables, s);
+  const rows=sortedFiltered(tables);
+  if(activeView==='grid')   renderGrid(rows);
+  if(activeView==='kanban') renderKanban(tables);
+  if(activeView==='floor')  renderFloor(tables);
+  document.getElementById('topbar-sub').textContent=
+    `${s.total} tables · ${new Date(lastData.fetchedAt).toLocaleTimeString()}`;
+}
+
+/* ═══════════════════════════════════════════════
+   LIVE AGE TICKING
+═══════════════════════════════════════════════ */
+function tickAges(){
+  document.querySelectorAll('.age-tick').forEach(el=>{
+    const age=parseInt(el.dataset.age||0)+1;
+    el.dataset.age=age; el.textContent=fmtAge(age);
+  });
+  document.querySelectorAll('[data-timer="1"]').forEach(el=>{
+    const age=parseInt(el.dataset.age||0)+1;
+    el.dataset.age=age; el.textContent=fmtAge(age);
+    const bar=el.closest('.timer-bar-wrap');
+    if(bar){ const fill=bar.querySelector('.timer-bar-fill'); if(fill) fill.style.width=Math.min(100,Math.round(age/7200*100))+'%'; }
+  });
+}
+
+/* ═══════════════════════════════════════════════
+   FETCH DATA
+═══════════════════════════════════════════════ */
+async function load(){
+  try{
+    const r=await fetch('/api/owner/tables/overview',{credentials:'same-origin',cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    prevSummary=lastData?.summary||null;
+    lastData=await r.json();
+    setLive('connected');
+    render();
+    clearInterval(tickInterval);
+    tickInterval=setInterval(tickAges,1000);
+  }catch(e){
+    setLive('error');
+    console.error('[tables-overview]',e);
+  }
+}
+function scheduleRefresh(){
+  clearTimeout(timer);
+  if(autoEl && autoEl.checked) timer=setTimeout(()=>{load();scheduleRefresh();},10000);
+}
+
+/* ═══════════════════════════════════════════════
+   API HELPERS
+═══════════════════════════════════════════════ */
+async function postJSON(url,body={}){
+  const r=await fetch(url,{method:'POST',credentials:'same-origin',
+    headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify(body)});
+  return{ok:r.ok,status:r.status,data:await r.json().catch(()=>({}))};
+}
+
+/* ═══════════════════════════════════════════════
+   CARD ACTION DELEGATION
+═══════════════════════════════════════════════ */
+function cardActionDelegate(root){
+  root.addEventListener('click',e=>{
+    /* Select mode checkbox */
+    const selBox=e.target.closest('[data-sel]');
+    if(selBox&&selectMode){ toggleSelect(selBox.dataset.sel); return; }
+    /* Select mode card click */
+    if(selectMode){
+      const card=e.target.closest('.tcard');
+      if(card&&!e.target.closest('.act-btn')&&!e.target.closest('a')){ toggleSelect(card.dataset.id); return; }
+    }
+    /* Floor plan tile */
+    const ft=e.target.closest('.floor-table');
+    if(ft){ openManageCalls(ft.dataset.id,ft.dataset.name); return; }
+    /* Kanban card background (not a button) */
+    const kcard=e.target.closest('.kcard');
+    if(kcard&&!e.target.closest('.kcard-btn')&&!e.target.closest('a')){ openDetail(kcard.dataset.id,kcard.dataset.name); return; }
+    /* Action buttons (grid + kanban) */
+    const btn=e.target.closest('[data-act]');
+    if(!btn) return;
+    const card=btn.closest('.tcard')||btn.closest('.kcard');
+    if(!card) return;
+    const id=card.dataset.id, name=card.dataset.name, act=btn.dataset.act;
+    if(act==='detail')      openDetail(id,name);
+    if(act==='clear')       doClear(id,name);
+    if(act==='close')       doClose(id,name);
+    if(act==='walkin')      openWalkin(id,name);
+    if(act==='transfer')    openTransfer(id,name);
+    if(act==='cleaning')    doToggleCleaning(id,name);
+    if(act==='managecalls') openManageCalls(id,name);
+  });
+}
+cardActionDelegate(document.getElementById('grid'));
+cardActionDelegate(document.getElementById('view-kanban'));
+cardActionDelegate(document.getElementById('floor-grid'));
+
+/* ═══════════════════════════════════════════════
+   ACTIONS
+═══════════════════════════════════════════════ */
+async function doClear(id,name){
+  const{ok,data}=await postJSON(`/api/owner/tables/${id}/clear`);
+  if(ok){ toast(`Cleared ${data.count||0} call(s) on ${name}`,'ok'); load(); }
+  else toast(data.error||'Failed to clear calls','error');
+}
+async function doClose(id,name){
+  const{ok,data}=await postJSON(`/api/owner/tables/${id}/close`);
+  if(ok){ toast(`${name} closed & queued for cleaning`,'ok'); load(); }
+  else toast(data.error||'Failed to close table','error');
+}
+/* FIX: read cleaning state from lastData, not from card CSS class */
+async function doToggleCleaning(id,name){
+  const tableData=lastData&&lastData.tables.find(t=>t.id===id);
+  const isCleaning=!!(tableData&&tableData.cleaning);
+  const{ok,data}=await postJSON(`/api/owner/tables/${id}/cleaning`,{on:!isCleaning});
+  if(ok){ toast(`${name}: ${data.cleaning?'marked for cleaning':'marked clean'}`,'ok'); load(); }
+  else toast(data.error||'Failed','error');
+}
+
+/* ═══════════════════════════════════════════════
+   MANAGE CALLS MODAL (opens detail → calls tab)
+═══════════════════════════════════════════════ */
+async function openManageCalls(id,name){
+  /* Opens the detail modal and fetches data, then scrolls to calls */
+  await openDetail(id,name);
+  /* Give the modal time to paint, then scroll to calls section */
+  setTimeout(()=>{
+    const sec=document.getElementById('detail-calls-sec');
+    if(sec&&sec.style.display!=='none') sec.scrollIntoView({behavior:'smooth',block:'nearest'});
+  },200);
+}
+
+/* ═══════════════════════════════════════════════
+   SELECT MODE + BULK ACTIONS
+═══════════════════════════════════════════════ */
+function toggleSelectMode(){
+  selectMode=!selectMode;
+  selected.clear();
+  const btn=document.getElementById('select-btn');
+  btn.classList.toggle('tbtn-active',selectMode);
+  btn.textContent=selectMode?'✕ Cancel select':'☑ Select';
+  gridEl.classList.toggle('select-active',selectMode);
+  updateBulkBar();
+  if(lastData) renderGrid(sortedFiltered(lastData.tables));
+}
+function exitSelectMode(){ if(selectMode) toggleSelectMode(); }
+function toggleSelect(id){
+  if(selected.has(id)) selected.delete(id); else selected.add(id);
+  const card=gridEl.querySelector(`[data-id="${id}"]`);
+  if(card) card.classList.toggle('selected',selected.has(id));
+  updateBulkBar();
+}
+function updateBulkBar(){
+  const n=selected.size;
+  bulkBar.classList.toggle('show',n>0&&selectMode);
+  document.getElementById('bulk-count-text').textContent=n+' table'+(n===1?'':'s')+' selected';
+}
+document.getElementById('select-btn').addEventListener('click',toggleSelectMode);
+document.getElementById('bulk-deselect').addEventListener('click',()=>{
+  selected.clear(); updateBulkBar();
+  if(lastData) renderGrid(sortedFiltered(lastData.tables));
+});
+async function bulkAction(fn,successMsg){
+  const ids=[...selected];
+  if(!ids.length) return;
+  let done=0;
+  for(const id of ids){ const{ok}=await fn(id); if(ok) done++; }
+  toast(`${successMsg}: ${done}/${ids.length}`,'ok');
+  selected.clear(); updateBulkBar(); load();
+}
+document.getElementById('bulk-clear').addEventListener('click',()=>bulkAction(id=>postJSON(`/api/owner/tables/${id}/clear`),'Calls cleared'));
+document.getElementById('bulk-cleaning').addEventListener('click',()=>bulkAction(id=>postJSON(`/api/owner/tables/${id}/cleaning`,{on:true}),'Marked cleaning'));
+document.getElementById('bulk-close').addEventListener('click',()=>bulkAction(id=>postJSON(`/api/owner/tables/${id}/close`),'Tables closed'));
+
+/* ═══════════════════════════════════════════════
+   DETAIL MODAL  — with active calls management
+═══════════════════════════════════════════════ */
+function callRowHTML(c){
+  const cfg=callTypeConfig(c.reason);
+  return `<div class="active-call-row">
+    <div class="active-call-icon">${cfg.icon}</div>
+    <div class="active-call-body">
+      <div class="active-call-reason">${esc(cfg.label)}</div>
+      <div class="active-call-meta">${fmtAge(c.ageSeconds)} ago · ${esc(c.status)}</div>
+    </div>
+    <span class="active-call-status">${esc(c.status)}</span>
+  </div>`;
+}
+
+async function openDetail(id,name){
+  currentTableId=id;
+  document.getElementById('detail-title').textContent=name;
+  document.getElementById('detail-sub').textContent='Table ID: '+id;
+  ['d7-orders','d7-rev','d7-avg','d7-dwell'].forEach(x=>document.getElementById(x).textContent='…');
+  document.getElementById('recent-orders').innerHTML='<div style="color:var(--ink-3);font-size:.82rem;">Loading…</div>';
+  document.getElementById('recent-calls').innerHTML='<div style="color:var(--ink-3);font-size:.82rem;">Loading…</div>';
+  document.getElementById('note-input').value='';
+  document.getElementById('detail-calls-sec').style.display='none';
+  document.getElementById('detail-active-calls').innerHTML='';
+  showModal('modal-detail');
+  try{
+    const r=await fetch(`/api/owner/tables/${id}/detail`,{credentials:'same-origin',cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    const s=d.stats7d||{};
+    document.getElementById('d7-orders').textContent = s.orders||0;
+    document.getElementById('d7-rev').textContent    = money(s.revenue||0);
+    document.getElementById('d7-avg').textContent    = money(s.avgTicket||0);
+    document.getElementById('d7-dwell').textContent  = s.avgDwellSeconds>0 ? fmtAge(s.avgDwellSeconds) : '—';
+    document.getElementById('note-input').value=d.note||'';
+
+    /* ─ Active calls section ─ */
+    const openCalls=(d.recentCalls||[]).filter(c=>c.status==='open'||c.status==='acknowledged');
+    const callsSec=document.getElementById('detail-calls-sec');
+    if(openCalls.length){
+      callsSec.style.display='';
+      document.getElementById('detail-active-calls').innerHTML=openCalls.map(c=>callRowHTML(c)).join('');
+    } else {
+      callsSec.style.display='none';
+    }
+    /* Wire billing link if table has an open order */
+    const tableRow=lastData&&lastData.tables.find(t=>t.id===id);
+    const billLink=document.getElementById('detail-bill-link');
+    if(tableRow&&tableRow.openOrder){
+      billLink.href=`/owner/billing/orders/${tableRow.openOrder.id}`;
+      billLink.style.display='';
+    } else {
+      billLink.style.display='none';
+    }
+
+    /* ─ Recent orders list ─ */
+    const ordEl=document.getElementById('recent-orders');
+    const recentOrders=d.recentOrders||[];
+    ordEl.innerHTML=recentOrders.length
+      ?recentOrders.map(o=>`<div class="d-item">
+          <div class="d-item-l">
+            <div class="d-item-title"><a href="/owner/billing/orders/${o.id}" style="color:var(--primary);font-weight:700;">Order #${o.id}</a> — ${esc(o.status)}</div>
+            <div class="d-item-sub">${o.customerName?esc(o.customerName)+' · ':''}${o.itemsCount} item${o.itemsCount===1?'':'s'} · ${fmtAge(o.ageSeconds)} ago</div>
+          </div>
+          <div class="d-item-r">${money(o.total)}</div>
+        </div>`).join('')
+      :'<div style="color:var(--ink-3);font-size:.82rem;">No recent orders</div>';
+
+    /* ─ Service call history ─ */
+    const calEl=document.getElementById('recent-calls');
+    const recentCalls=d.recentCalls||[];
+    calEl.innerHTML=recentCalls.length
+      ?recentCalls.map(c=>{
+          const cfg=callTypeConfig(c.reason);
+          return `<div class="d-item">
+            <div class="d-item-l">
+              <div class="d-item-title">${cfg.icon} ${esc(cfg.label)}</div>
+              <div class="d-item-sub">${esc(c.status)} · ${fmtAge(c.ageSeconds)} ago</div>
+            </div>
+            <div class="d-item-r" style="font-size:.72rem;color:${c.resolvedAt?'var(--free-fg)':'var(--attn-fg)'};">${c.resolvedAt?'✓ Resolved':'● Open'}</div>
+          </div>`;
+        }).join('')
+      :'<div style="color:var(--ink-3);font-size:.82rem;">No call history</div>';
+  }catch(e){ toast('Failed to load table detail','error'); }
+}
+document.getElementById('detail-clear-calls').addEventListener('click',async()=>{
+  if(!currentTableId) return;
+  const{ok,data}=await postJSON(`/api/owner/tables/${currentTableId}/clear`);
+  if(ok){
+    toast(`Resolved ${data.count||0} call(s)`,'ok');
+    document.getElementById('detail-calls-sec').style.display='none';
+    load();
+  } else toast(data.error||'Failed','error');
+});
+document.getElementById('note-save').addEventListener('click',async()=>{
+  if(!currentTableId) return;
+  const{ok,data}=await postJSON(`/api/owner/tables/${currentTableId}/note`,{note:document.getElementById('note-input').value});
+  if(ok){ toast('Note saved','ok'); load(); } else toast(data.error||'Failed','error');
+});
+
+/* ═══════════════════════════════════════════════
+   WALK-IN MODAL
+═══════════════════════════════════════════════ */
+function openWalkin(id,name){
+  walkinTableId=id;
+  document.getElementById('walkin-table-name').textContent=name;
+  ['walkin-name','walkin-phone','walkin-party'].forEach(x=>document.getElementById(x).value='');
+  document.getElementById('walkin-error').style.display='none';
+  document.getElementById('walkin-success').style.display='none';
+  document.getElementById('walkin-confirm').style.display='';
+  document.getElementById('walkin-cancel').style.display='';
+  showModal('modal-walkin');
+  setTimeout(()=>document.getElementById('walkin-name').focus(),80);
+}
+document.getElementById('walkin-confirm').addEventListener('click',async()=>{
+  if(!walkinTableId) return;
+  const errEl=document.getElementById('walkin-error');
+  errEl.style.display='none';
+  const{ok,data}=await postJSON(`/api/owner/tables/${walkinTableId}/walkin`,{
+    customerName:document.getElementById('walkin-name').value.trim(),
+    customerPhone:document.getElementById('walkin-phone').value.trim(),
+    partySize:document.getElementById('walkin-party').value||null,
+  });
+  if(ok){
+    /* Show success state with direct billing link */
+    document.getElementById('walkin-confirm').style.display='none';
+    document.getElementById('walkin-cancel').style.display='none';
+    const link=document.getElementById('walkin-order-link');
+    link.href=`/owner/billing/orders/${data.orderId}`;
+    document.getElementById('walkin-success').style.display='block';
+    toast(`Walk-in order #${data.orderId} opened`,'ok');
+    load();
+  } else {
+    errEl.textContent=data.error||'Failed to create walk-in';
+    errEl.style.display='block';
+    /* If table already has order, offer to open it */
+    if(data.orderId){
+      errEl.innerHTML+=` <a href="/owner/billing/orders/${data.orderId}" style="color:var(--primary);font-weight:700;text-decoration:underline;">Open existing order →</a>`;
+    }
+  }
+});
+
+/* ═══════════════════════════════════════════════
+   TRANSFER MODAL
+═══════════════════════════════════════════════ */
+function openTransfer(id,name){
+  transferFromId=id;
+  document.getElementById('transfer-from-name').textContent=name;
+  document.getElementById('transfer-error').style.display='none';
+  const sel=document.getElementById('transfer-target');
+  sel.innerHTML=(lastData?.tables||[]).filter(t=>t.id!==id&&!t.openOrder)
+    .map(t=>`<option value="${esc(t.id)}">${esc(t.name)} (${t.status.replace(/_/g,' ')})</option>`).join('');
+  if(!sel.options.length){
+    sel.innerHTML='<option disabled>No free tables available</option>';
+    document.getElementById('transfer-confirm').disabled=true;
+  } else {
+    document.getElementById('transfer-confirm').disabled=false;
+  }
+  showModal('modal-transfer');
+}
+document.getElementById('transfer-confirm').addEventListener('click',async()=>{
+  if(!transferFromId) return;
+  const errEl=document.getElementById('transfer-error'); errEl.style.display='none';
+  const{ok,data}=await postJSON(`/api/owner/tables/${transferFromId}/transfer`,{targetTableId:document.getElementById('transfer-target').value});
+  if(ok){ closeModal('modal-transfer'); toast('Order transferred','ok'); load(); }
+  else{ errEl.textContent=data.error||'Transfer failed'; errEl.style.display='block'; }
+});
+
+/* ═══════════════════════════════════════════════
+   MODAL HELPERS
+═══════════════════════════════════════════════ */
+function showModal(id){ document.getElementById(id).classList.add('show'); }
+function closeModal(id){ document.getElementById(id).classList.remove('show'); }
+function closeAllModals(){ document.querySelectorAll('.modal-bg').forEach(m=>m.classList.remove('show')); }
+[['detail-close','modal-detail'],['walkin-close','modal-walkin'],['walkin-cancel','modal-walkin'],
+ ['transfer-close','modal-transfer'],['transfer-cancel','modal-transfer']].forEach(([btnId,modalId])=>{
+  const el=document.getElementById(btnId);
+  if(el) el.addEventListener('click',()=>closeModal(modalId));
+});
+document.querySelectorAll('.modal-bg').forEach(bg=>{
+  bg.addEventListener('click',e=>{ if(e.target===bg) closeAllModals(); });
+});
+
+/* ═══════════════════════════════════════════════
+   SSE LIVE STREAM (auto-reconnect with backoff)
+═══════════════════════════════════════════════ */
+function initSSE(){
+  if(!window.EventSource) return;
+  try{
+    sseSource=new EventSource('/api/owner/stream');
+    const RELOAD={'order_created':1,'order_updated':1,'table_call_update':1};
+    sseSource.addEventListener('message',e=>{
+      try{ const m=JSON.parse(e.data); if(RELOAD[m.kind]){ load(); scheduleRefresh(); } }catch(e){}
+    });
+    sseSource.addEventListener('open',()=>{ setLive('connected'); sseRetryDelay=2000; });
+    sseSource.addEventListener('error',()=>{
+      setLive('error');
+      sseSource.close();
+      setTimeout(initSSE, sseRetryDelay);
+      sseRetryDelay=Math.min(sseRetryDelay*2, 30000);
+    });
+  }catch(e){}
+}
+
+/* ═══════════════════════════════════════════════
+   BOOT
+═══════════════════════════════════════════════ */
+showSkeleton();
+load().then(()=>{ scheduleRefresh(); initSSE(); });
+
+})();
+</script>
+</body>
+</html>

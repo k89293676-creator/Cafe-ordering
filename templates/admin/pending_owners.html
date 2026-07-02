@@ -1,0 +1,62 @@
+{% extends "admin/base.html" %}
+{% block title %}Pending Owners{% endblock %}
+{% block topbar_title %}Pending Owners{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div>
+    <h4 class="mb-0">Awaiting approval</h4>
+    <small class="text-muted">Sign-up mode: <span class="badge bg-secondary">{{ signup_mode }}</span></small>
+  </div>
+  <a href="{{ url_for('multi_tenant.invitations_list') }}" class="btn btn-outline-primary btn-sm">
+    <i class="bi bi-envelope-plus"></i> Invitations
+  </a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, m in messages %}
+    <div class="alert alert-{{ cat }}">{{ m }}</div>
+  {% endfor %}
+{% endwith %}
+
+{% if not pending %}
+  <div class="card"><div class="card-body text-center text-muted py-5">
+    <i class="bi bi-check2-circle" style="font-size:2rem;"></i><br>
+    No accounts are waiting for approval.
+  </div></div>
+{% else %}
+<div class="card"><div class="card-body p-0">
+<table class="table mb-0">
+  <thead><tr>
+    <th>Username</th><th>Email</th><th>Cafe</th><th>Requested</th><th class="text-end">Actions</th>
+  </tr></thead>
+  <tbody>
+  {% for o in pending %}
+    <tr>
+      <td><strong>@{{ o.username }}</strong></td>
+      <td>{{ o.email or '—' }}</td>
+      <td>{{ o.cafe_name or '—' }}</td>
+      <td><small class="text-muted">{{ o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at }}</small></td>
+      <td class="text-end">
+        <form method="post" action="{{ url_for('multi_tenant.approve_owner', owner_id=o.id) }}" class="d-inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          <select name="plan_tier" class="form-select form-select-sm d-inline-block" style="width:auto;">
+            <option value="free">free</option>
+            <option value="starter">starter</option>
+            <option value="pro">pro</option>
+            <option value="enterprise">enterprise</option>
+          </select>
+          <button class="btn btn-success btn-sm"><i class="bi bi-check-lg"></i> Approve</button>
+        </form>
+        <form method="post" action="{{ url_for('multi_tenant.reject_owner', owner_id=o.id) }}" class="d-inline"
+              onsubmit="return confirm('Reject @{{ o.username }}? They will not be able to sign in.');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+          <button class="btn btn-outline-danger btn-sm"><i class="bi bi-x-lg"></i> Reject</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div></div>
+{% endif %}
+{% endblock %}

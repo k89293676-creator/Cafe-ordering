@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gateway Timeout — Cafe Portal</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-logo">
+    <div class="auth-logo-icon">☕</div>
+    <h1>Cafe Portal</h1>
+  </div>
+  <div class="auth-card" style="text-align:center;">
+    <div style="font-size:4rem;margin-bottom:1rem;">⏱️</div>
+    <h2 style="margin:0 0 0.5rem;">504 — Gateway Timeout</h2>
+    <p class="subtitle">The request took too long to complete. Please try again — if the problem persists, the system is likely under unusual load.</p>
+    {% if request_id %}
+      <p style="font-size:0.8rem;color:#9ca3af;margin-top:1rem;">Reference: <code>{{ request_id }}</code></p>
+    {% endif %}
+    <a href="/" class="btn btn-primary" style="margin-top:1.5rem;display:inline-block;">← Back to Home</a>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Superadmin — CafePortal</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+  <link rel="stylesheet" href="/static/css/enhancements.css"/>
+  <style>
+    :root{--accent:#6366f1;--sidebar-bg:#1a1d21;--sidebar-text:#9ba3af;--sidebar-active:#fff;}
+    body{background:#f3f4f6;font-family:'Inter',system-ui,sans-serif;}
+    .sa-layout{display:flex;min-height:100vh;}
+    .sa-sidebar{width:240px;background:var(--sidebar-bg);color:var(--sidebar-text);display:flex;flex-direction:column;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto;}
+    .sidebar-brand{padding:1.5rem 1.25rem;border-bottom:1px solid rgba(255,255,255,.07);}
+    .sidebar-brand h6{color:#fff;font-weight:700;margin:0;letter-spacing:.5px;}
+    .sidebar-brand small{color:var(--sidebar-text);font-size:.72rem;}
+    .sidebar-nav{padding:.75rem 0;flex:1;}
+    .sidebar-label{padding:.35rem 1.25rem;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:#4b5563;font-weight:600;}
+    .sidebar-link{display:flex;align-items:center;gap:.6rem;padding:.6rem 1.25rem;color:var(--sidebar-text);text-decoration:none;font-size:.88rem;border-left:3px solid transparent;transition:color .15s,background .15s;}
+    .sidebar-link:hover{color:var(--sidebar-active);background:rgba(255,255,255,.04);}
+    .sidebar-link.active{color:var(--sidebar-active);background:rgba(99,102,241,.15);border-left-color:var(--accent);}
+    .sidebar-link i{font-size:1rem;width:1.2rem;}
+    .sa-content{flex:1;overflow-x:auto;}
+    .sa-topbar{background:#fff;border-bottom:1px solid #e5e7eb;padding:.75rem 1.5rem;display:flex;align-items:center;justify-content:space-between;}
+    .sa-topbar h5{margin:0;font-weight:600;font-size:1rem;}
+    .sa-main{padding:1.5rem;}
+    .stat-card{background:#fff;border-radius:.75rem;padding:1.25rem 1.5rem;border:1px solid #e5e7eb;height:100%;}
+    .stat-label{font-size:.78rem;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;font-weight:600;}
+    .stat-value{font-size:1.9rem;font-weight:700;line-height:1.1;margin:.2rem 0 .1rem;}
+    .stat-icon{font-size:1.4rem;opacity:.6;}
+    .badge-active{background:#d1fae5;color:#065f46;}
+    .badge-inactive{background:#fee2e2;color:#991b1b;}
+    .table th{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;font-weight:600;}
+    .nav-tabs .nav-link{font-size:.88rem;font-weight:500;color:#6b7280;}
+    .nav-tabs .nav-link.active{color:#111827;font-weight:600;}
+    #ownerSearch{max-width:260px;}
+    .assign-form select{font-size:.8rem;padding:.2rem .5rem;height:auto;}
+    .btn-xs{font-size:.75rem;padding:.2rem .5rem;}
+    @media(max-width:768px){.sa-sidebar{display:none;}.sa-layout{display:block;}}
+  </style>
+</head>
+<body>
+<div class="sa-layout">
+  <aside class="sa-sidebar">
+    <div class="sidebar-brand">
+      <h6><i class="bi bi-shield-lock-fill me-2" style="color:var(--accent)"></i>Superadmin</h6>
+      <small>CafePortal Console</small>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="sidebar-label">Overview</div>
+      <a class="sidebar-link active" href="{{ url_for('superadmin_dashboard') }}"><i class="bi bi-grid-1x2-fill"></i> Dashboard</a>
+      <a class="sidebar-link" href="{{ url_for('superadmin_analytics') }}"><i class="bi bi-bar-chart-line-fill"></i> Analytics</a>
+      <a class="sidebar-link" href="{{ url_for('superadmin_extras.insights_view') }}"><i class="bi bi-graph-up-arrow"></i> Insights</a>
+      <div class="sidebar-label mt-2">Security</div>
+      <a class="sidebar-link" href="{{ url_for('superadmin_admin_keys') }}"><i class="bi bi-key-fill"></i> Admin Access Keys</a>
+      <a class="sidebar-link" href="{{ url_for('superadmin_audit') }}"><i class="bi bi-clipboard-data"></i> Audit Log</a>
+      <a class="sidebar-link" href="{{ url_for('admin.devops') }}"><i class="bi bi-cpu-fill"></i> DevOps &amp; Health</a>
+      <div class="sidebar-label mt-2">Switch to</div>
+      <a class="sidebar-link" href="{{ url_for('owner_dashboard') }}"><i class="bi bi-arrow-left-circle"></i> Owner Dashboard</a>
+      <div style="padding:1rem 1.25rem;border-top:1px solid rgba(255,255,255,.07);margin-top:auto;">
+        <a href="{{ url_for('owner_logout') }}" class="sidebar-link" style="padding:0;color:#ef4444;"><i class="bi bi-box-arrow-right"></i> Sign out</a>
+      </div>
+    </nav>
+  </aside>
+
+  <div class="sa-content">
+    <div class="sa-topbar">
+      <h5><i class="bi bi-shield-lock-fill me-2 text-primary"></i>Superadmin Dashboard</h5>
+      <div class="d-flex align-items-center gap-3">
+        <span class="text-muted small"><i class="bi bi-person-fill me-1"></i>{{ owner_username }}</span>
+        {% if session.get('superadmin_key_verified') %}
+          <span class="badge bg-success rounded-pill" title="Admin elevated via SUPERADMIN_KEY">
+            <i class="bi bi-shield-check"></i> Key-verified
+          </span>
+        {% else %}
+          <span class="badge bg-danger rounded-pill" title="Real superadmin owner">SA</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="sa-main">
+      {% with messages = get_flashed_messages(with_categories=True) %}
+        {% for cat, msg in messages %}
+          <div class="alert alert-{% if cat == 'password_reset' %}warning{% elif cat == 'danger' %}danger{% elif cat == 'success' %}success{% else %}info{% endif %} alert-dismissible fade show" role="alert">
+            {{ msg|safe }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+        {% endfor %}
+      {% endwith %}
+
+      <!-- Stats Row -->
+      <div class="row g-3 mb-4">
+        <div class="col-6 col-xl-2">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Cafes</div>
+              <i class="bi bi-shop stat-icon text-primary"></i>
+            </div>
+            <div class="stat-value text-primary">{{ cafe_count }}</div>
+            <small class="text-muted">{{ active_cafe_count }} active</small>
+            <div class="mt-2">
+              <a href="{{ url_for('superadmin_leads') }}" class="btn btn-sm btn-outline-warning w-100">
+                <i class="bi bi-inbox"></i> Review owner access requests
+              </a>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-xl-2">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Owners</div>
+              <i class="bi bi-people-fill stat-icon text-success"></i>
+            </div>
+            <div class="stat-value text-success">{{ owner_count }}</div>
+            <small class="text-muted">{{ active_owner_count }} active</small>
+          </div>
+        </div>
+        <div class="col-6 col-xl-2">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Orders</div>
+              <i class="bi bi-receipt stat-icon text-warning"></i>
+            </div>
+            <div class="stat-value text-warning">{{ total_orders }}</div>
+            <small class="text-muted">all cafes</small>
+          </div>
+        </div>
+        <div class="col-6 col-xl-2">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Revenue</div>
+              <i class="bi bi-currency-rupee stat-icon text-danger"></i>
+            </div>
+            <div class="stat-value text-danger">₹{{ "%.0f"|format(total_revenue) }}</div>
+            <small class="text-muted">completed</small>
+          </div>
+        </div>
+        <div class="col-6 col-xl-2">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Avg Rating</div>
+              <i class="bi bi-star-fill stat-icon text-warning"></i>
+            </div>
+            <div class="stat-value">{{ avg_rating }}</div>
+            <small class="text-muted">{{ total_feedback }} reviews</small>
+          </div>
+        </div>
+        <div class="col-6 col-xl-2">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Open Calls</div>
+              <i class="bi bi-bell-fill stat-icon text-danger"></i>
+            </div>
+            <div class="stat-value {% if open_calls > 0 %}text-danger{% endif %}">{{ open_calls }}</div>
+            <small class="text-muted">table service</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── System Health Bar ───────────────────────────────────────── -->
+      {% if health %}
+      <div class="card border-0 shadow-sm mb-3" style="background:linear-gradient(135deg,#0f172a,#1e293b);color:#e2e8f0;">
+        <div class="card-body py-3">
+          <div class="row g-3 align-items-center">
+            <div class="col-md-3 d-flex align-items-center gap-2">
+              <span class="badge {% if health.db_latency_ms is not none %}bg-success{% else %}bg-danger{% endif %} rounded-pill">
+                <i class="bi bi-database-fill"></i>
+                {% if health.db_latency_ms is not none %}DB {{ health.db_latency_ms }}ms{% else %}DB DOWN{% endif %}
+              </span>
+              <span class="badge bg-secondary rounded-pill"><i class="bi bi-cloud-fill"></i> {{ health.env }}</span>
+            </div>
+            <div class="col-md-3 small">
+              <i class="bi bi-clock-history me-1 text-info"></i>
+              Uptime <strong>{{ health.uptime }}</strong>
+              <span class="text-secondary">· v{{ health.version }}</span>
+            </div>
+            <div class="col-md-3 small">
+              <i class="bi bi-shield-lock me-1 text-warning"></i>
+              <strong>{{ health.events_buffered }}</strong> security events buffered
+              {% if health.verified_until %}
+                <span class="ms-2 badge bg-success">Key-verified <span id="hdrTtl" data-until="{{ health.verified_until }}"></span></span>
+              {% endif %}
+            </div>
+            <div class="col-md-3 text-md-end">
+              <a href="{{ url_for('superadmin_audit') }}" class="btn btn-sm btn-outline-light"><i class="bi bi-clipboard-data me-1"></i>Audit log</a>
+              <a href="{{ url_for('admin.devops') }}" class="btn btn-sm btn-outline-light ms-1"><i class="bi bi-cpu-fill me-1"></i>DevOps</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- ── Today + 7d KPI Strip ────────────────────────────────────── -->
+      <div class="row g-3 mb-3">
+        <div class="col-6 col-xl-3">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Orders Today</div>
+              <i class="bi bi-cart-check stat-icon text-primary"></i>
+            </div>
+            <div class="stat-value text-primary">{{ orders_today }}</div>
+            {% set d = deltas.orders_today_vs_yesterday %}
+            <small class="{% if d is none %}text-muted{% elif d >= 0 %}text-success{% else %}text-danger{% endif %}">
+              {% if d is none %}vs yesterday — n/a
+              {% else %}<i class="bi bi-arrow-{% if d >= 0 %}up{% else %}down{% endif %}-short"></i>{{ d }}% vs yesterday{% endif %}
+            </small>
+          </div>
+        </div>
+        <div class="col-6 col-xl-3">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Revenue Today</div>
+              <i class="bi bi-cash-coin stat-icon text-success"></i>
+            </div>
+            <div class="stat-value text-success">₹{{ "%.0f"|format(revenue_today) }}</div>
+            <small class="text-muted">7d total ₹{{ "%.0f"|format(revenue_7d) }}</small>
+          </div>
+        </div>
+        <div class="col-6 col-xl-3">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Orders 7d</div>
+              <i class="bi bi-graph-up-arrow stat-icon text-warning"></i>
+            </div>
+            <div class="stat-value text-warning">{{ orders_7d }}</div>
+            {% set d = deltas.orders_7d_vs_prev %}
+            <small class="{% if d is none %}text-muted{% elif d >= 0 %}text-success{% else %}text-danger{% endif %}">
+              {% if d is none %}vs prev 7d — n/a
+              {% else %}<i class="bi bi-arrow-{% if d >= 0 %}up{% else %}down{% endif %}-short"></i>{{ d }}% vs prev 7d{% endif %}
+            </small>
+          </div>
+        </div>
+        <div class="col-6 col-xl-3">
+          <div class="stat-card">
+            <div class="d-flex align-items-start justify-content-between">
+              <div class="stat-label">Avg Ticket</div>
+              <i class="bi bi-receipt-cutoff stat-icon text-info"></i>
+            </div>
+            <div class="stat-value text-info">₹{{ "%.0f"|format(avg_ticket) }}</div>
+            <small class="text-muted">{{ new_owners_7d }} new owner(s) this week</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 14-day Sparkline ────────────────────────────────────────── -->
+      {% if daily_series %}
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong><i class="bi bi-bar-chart-line-fill me-2 text-primary"></i>Order volume — last 14 days</strong>
+            <a href="{{ url_for('superadmin_analytics') }}" class="small text-decoration-none">Full analytics →</a>
+          </div>
+          <svg id="trendSpark" viewBox="0 0 700 120" preserveAspectRatio="none" style="width:100%;height:120px;">
+            {% set maxv = (daily_series|map(attribute='count')|max) or 1 %}
+            {% set step = 700 / (daily_series|length - 1 if daily_series|length > 1 else 1) %}
+            {% set pts = [] %}
+            {% for d in daily_series %}
+              {% set x = loop.index0 * step %}
+              {% set y = 110 - (d.count / maxv * 95) %}
+              {% set _ = pts.append((x|round(1, 'common'))|string + ',' + (y|round(1, 'common'))|string) %}
+            {% endfor %}
+            <polyline fill="none" stroke="#6366f1" stroke-width="2.5" stroke-linejoin="round" points="{{ pts|join(' ') }}"/>
+            <polygon fill="#6366f1" fill-opacity=".10" points="0,110 {{ pts|join(' ') }} 700,110"/>
+            {% for d in daily_series %}
+              {% set x = loop.index0 * step %}
+              {% set y = 110 - (d.count / maxv * 95) %}
+              <circle cx="{{ x|round(1, 'common') }}" cy="{{ y|round(1, 'common') }}" r="3" fill="#6366f1">
+                <title>{{ d.date }}: {{ d.count }} orders</title>
+              </circle>
+            {% endfor %}
+          </svg>
+          <div class="d-flex justify-content-between text-muted" style="font-size:.7rem;">
+            {% for d in daily_series %}{% if loop.index0 % 2 == 0 %}<span>{{ d.date }}</span>{% endif %}{% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- ── Two-column: Top Cafes + Recent Security ─────────────────── -->
+      <div class="row g-3 mb-3">
+        <div class="col-lg-6">
+          <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+              <strong><i class="bi bi-trophy-fill text-warning me-2"></i>Top Cafes by Revenue</strong>
+              <span class="small text-muted">all-time completed</span>
+            </div>
+            <div class="card-body p-0">
+              {% if top_cafes %}
+              <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0 align-middle">
+                  <thead class="table-light"><tr>
+                    <th style="width:30px;">#</th><th>Cafe</th>
+                    <th class="text-end">Orders</th><th class="text-end">Revenue</th>
+                  </tr></thead>
+                  <tbody>
+                    {% for c in top_cafes %}
+                    <tr>
+                      <td class="text-muted small">{{ loop.index }}</td>
+                      <td>
+                        <strong>{{ c.name }}</strong>
+                        {% if not c.is_active %}<span class="badge bg-secondary ms-1">paused</span>{% endif %}
+                        <div class="small text-muted">{{ c.owners }} owner(s)</div>
+                      </td>
+                      <td class="text-end">{{ c.orders }}</td>
+                      <td class="text-end fw-semibold text-success">₹{{ "%.0f"|format(c.revenue) }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% else %}
+              <div class="text-center text-muted py-4 small">No cafes yet.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+              <strong><i class="bi bi-shield-shaded text-danger me-2"></i>Recent Security Events</strong>
+              <a href="{{ url_for('superadmin_audit') }}" class="small text-decoration-none">View all →</a>
+            </div>
+            <div class="card-body p-0">
+              {% if recent_security %}
+              <ul class="list-group list-group-flush">
+                {% for e in recent_security %}
+                  {% set evname = e.event or '' %}
+                  {% set color = 'secondary' %}
+                  {% if '_OK' in evname %}{% set color = 'success' %}
+                  {% elif '_FAIL' in evname or '_DENIED' in evname %}{% set color = 'danger' %}
+                  {% elif '_NO_KEY' in evname or '_REVOKED' in evname %}{% set color = 'warning' %}
+                  {% endif %}
+                  <li class="list-group-item py-2 d-flex align-items-start gap-2">
+                    <span class="badge bg-{{ color }} mt-1" style="font-size:.65rem;">{{ evname }}</span>
+                    <div class="flex-fill small">
+                      <div class="text-truncate" style="max-width:300px;color:#4b5563;font-family:ui-monospace,Menlo,monospace;font-size:.72rem;">{{ e.detail or '-' }}</div>
+                      <div class="text-muted" style="font-size:.7rem;">
+                        <span class="ts" data-ts="{{ e.ts }}"></span> · {{ e.ip }}
+                      </div>
+                    </div>
+                  </li>
+                {% endfor %}
+              </ul>
+              {% else %}
+              <div class="text-center text-muted py-4 small">No security events recorded yet.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Needs Attention ─────────────────────────────────────────── -->
+      {% if pending %}
+      <div class="card border-0 shadow-sm mb-3" style="border-left:4px solid #f59e0b !important;">
+        <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+          <strong><i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Needs Attention</strong>
+          <span class="badge bg-warning text-dark">{{ pending_total }}</span>
+        </div>
+        <ul class="list-group list-group-flush">
+          {% for p in pending %}
+          <li class="list-group-item py-2 d-flex align-items-center gap-2">
+            <i class="bi bi-{{ p.icon }} text-{{ p.color }}"></i>
+            <span class="small">{{ p.msg }}</span>
+          </li>
+          {% endfor %}
+          {% if pending_total > pending|length %}
+          <li class="list-group-item py-2 small text-muted">
+            … and {{ pending_total - pending|length }} more.
+          </li>
+          {% endif %}
+        </ul>
+      </div>
+      {% endif %}
+
+      <!-- ── Live Activity Feed ── -->
+      <div class="card border-0 shadow-sm mb-3 af-bs-panel" id="sa-activity-panel">
+        <div class="card-header bg-white border-bottom py-2 d-flex align-items-center gap-2">
+          <i class="bi bi-activity text-primary"></i>
+          <strong style="font-size:.9rem;">Live Order Activity</strong>
+          <span class="af-header__live ms-1">
+            <span class="af-header__dot"></span>Live
+          </span>
+          <span class="af-header__badge ms-1" id="sa-feed-badge"></span>
+          <span class="text-muted ms-auto" style="font-size:.75rem;">Platform-wide · refreshes every 12s</span>
+        </div>
+        <div class="af-list" id="sa-feed-list" style="max-height:220px;"></div>
+      </div>
+
+      <!-- Tabs -->
+      <ul class="nav nav-tabs mb-3" id="saTabs">
+        <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabCafes"><i class="bi bi-shop me-1"></i>Cafes <span class="badge bg-secondary ms-1">{{ cafe_count }}</span></a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabOwners"><i class="bi bi-people me-1"></i>Owners <span class="badge bg-secondary ms-1">{{ owner_count }}</span></a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabOrders"><i class="bi bi-receipt me-1"></i>Recent Orders</a></li>
+      </ul>
+
+      <div class="tab-content">
+        <!-- ── CAFES TAB ─────────────────────────────────────────── -->
+        <div class="tab-pane fade show active" id="tabCafes">
+          <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+              <strong>All Cafes</strong>
+              <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createCafeModal">
+                <i class="bi bi-plus"></i> New Cafe
+              </button>
+            </div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                  <thead class="table-light">
+                    <tr>
+                      <th class="ps-3">ID</th>
+                      <th>Name</th>
+                      <th>Owners</th>
+                      <th>Orders</th>
+                      <th>Revenue</th>
+                      <th>Status</th>
+                      <th class="pe-3 text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for cafe in cafes %}
+                    {% set stats = cafe_stats.get(cafe.id, {}) %}
+                    <tr>
+                      <td class="ps-3 text-muted small">#{{ cafe.id }}</td>
+                      <td>
+                        <div class="fw-500">{{ cafe.name }}</div>
+                        {% if cafe.slug %}<small class="text-muted font-monospace">{{ cafe.slug }}</small>{% endif %}
+                      </td>
+                      <td class="text-center">{{ stats.get('owner_count', 0) }}</td>
+                      <td class="text-center">{{ stats.get('order_count', 0) }}</td>
+                      <td>₹{{ "%.0f"|format(stats.get('revenue', 0)) }}</td>
+                      <td>
+                        {% if cafe.is_active %}
+                        <span class="badge badge-active rounded-pill px-2">Active</span>
+                        {% else %}
+                        <span class="badge badge-inactive rounded-pill px-2">Inactive</span>
+                        {% endif %}
+                      </td>
+                      <td class="pe-3 text-end">
+                        <div class="d-flex gap-1 justify-content-end">
+                          <button class="btn btn-xs btn-outline-secondary" title="Rename"
+                            data-bs-toggle="modal" data-bs-target="#renameCafeModal"
+                            data-cafeid="{{ cafe.id }}" data-cafename="{{ cafe.name }}">
+                            <i class="bi bi-pencil"></i>
+                          </button>
+                          <form method="post" action="{{ url_for('superadmin_toggle_cafe', cafe_id=cafe.id) }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button class="btn btn-xs btn-outline-{{ 'danger' if cafe.is_active else 'success' }}" title="{{ 'Deactivate' if cafe.is_active else 'Activate' }}">
+                              <i class="bi bi-{{ 'slash-circle' if cafe.is_active else 'check-circle' }}"></i>
+                            </button>
+                          </form>
+                          {% if stats.get('owner_count', 0) == 0 %}
+                          <form method="post" action="{{ url_for('superadmin_delete_cafe', cafe_id=cafe.id) }}" class="d-inline"
+                            onsubmit="return confirm('Delete cafe {{ cafe.name }}? This cannot be undone.')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button class="btn btn-xs btn-outline-danger" title="Delete"><i class="bi bi-trash"></i></button>
+                          </form>
+                          {% endif %}
+                        </div>
+                      </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7" class="text-center text-muted py-4">No cafes yet.</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── OWNERS TAB ────────────────────────────────────────── -->
+        <div class="tab-pane fade" id="tabOwners">
+          <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+              <strong>All Owners</strong>
+              <div class="d-flex gap-2 align-items-center">
+                <input id="ownerSearch" type="search" class="form-control form-control-sm" placeholder="Search username or cafe…"/>
+                <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#createOwnerModal">
+                  <i class="bi bi-plus"></i> New Owner
+                </button>
+              </div>
+            </div>
+            <div class="card-body p-0" style="max-height:520px;overflow-y:auto;">
+              <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" id="ownersTable">
+                  <thead class="table-light">
+                    <tr>
+                      <th class="ps-3">Username</th>
+                      <th>Assign Cafe</th>
+                      <th>Status</th>
+                      <th>2FA</th>
+                      <th>Joined</th>
+                      <th class="pe-3 text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for owner in owners %}
+                    <tr data-search="{{ owner.username|lower }} {{ (owner.cafe_name or '')|lower }}">
+                      <td class="ps-3">
+                        <div class="fw-500">{{ owner.username }}{% if owner.is_superadmin %} <span class="badge bg-danger ms-1" style="font-size:.65rem;">SA</span>{% endif %}</div>
+                        <small class="text-muted">{{ owner.email or '—' }}</small>
+                      </td>
+                      <td>
+                        {% if not owner.is_superadmin %}
+                        <form method="post" action="{{ url_for('superadmin_assign_cafe', owner_id=owner.id) }}" class="assign-form d-flex gap-1">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                          <select name="cafe_id" class="form-select form-select-sm" style="max-width:160px;">
+                            <option value="">— none —</option>
+                            {% for cafe in cafes %}
+                            <option value="{{ cafe.id }}" {% if owner.cafe_id == cafe.id %}selected{% endif %}>{{ cafe.name }}</option>
+                            {% endfor %}
+                          </select>
+                          <button type="submit" class="btn btn-xs btn-outline-primary">Save</button>
+                        </form>
+                        {% else %}
+                        <span class="text-muted small">n/a</span>
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if owner.is_active %}
+                        <span class="badge badge-active rounded-pill px-2">Active</span>
+                        {% else %}
+                        <span class="badge badge-inactive rounded-pill px-2">Suspended</span>
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if owner.totp_enabled %}
+                        <span class="badge bg-success rounded-pill px-2" title="2FA enabled"><i class="bi bi-shield-check"></i></span>
+                        {% else %}
+                        <span class="badge bg-light text-muted rounded-pill px-2">off</span>
+                        {% endif %}
+                      </td>
+                      <td class="text-muted small">{{ owner.created_at.strftime('%Y-%m-%d') if owner.created_at else '—' }}</td>
+                      <td class="pe-3">
+                        <div class="d-flex gap-1 justify-content-end">
+                          {% if not owner.is_superadmin %}
+                          <form method="post" action="{{ url_for('superadmin_reset_password', owner_id=owner.id) }}" class="d-inline"
+                            onsubmit="return confirm('Reset password for {{ owner.username }}? Temp password shown once.')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button class="btn btn-xs btn-outline-warning" title="Reset password"><i class="bi bi-key"></i></button>
+                          </form>
+                          <form method="post" action="{{ url_for('superadmin_toggle_owner', owner_id=owner.id) }}" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button class="btn btn-xs btn-outline-{{ 'danger' if owner.is_active else 'success' }}" title="{{ 'Suspend' if owner.is_active else 'Activate' }}">
+                              <i class="bi bi-{{ 'person-slash' if owner.is_active else 'person-check' }}"></i>
+                            </button>
+                          </form>
+                          <form method="post" action="{{ url_for('superadmin_delete_owner', owner_id=owner.id) }}" class="d-inline"
+                            onsubmit="return confirm('Delete {{ owner.username }}? Orders will block deletion.')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                            <button class="btn btn-xs btn-outline-danger" title="Delete owner"><i class="bi bi-trash"></i></button>
+                          </form>
+                          {% endif %}
+                        </div>
+                      </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="text-center text-muted py-4">No owners yet.</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── RECENT ORDERS TAB ─────────────────────────────────── -->
+        <div class="tab-pane fade" id="tabOrders">
+          <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+              <strong>Recent Orders — All Cafes</strong>
+              <select id="orderCafeFilter" class="form-select form-select-sm" style="max-width:200px;">
+                <option value="">All cafes</option>
+                {% for cafe in cafes %}<option value="{{ cafe.name|lower }}">{{ cafe.name }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="card-body p-0" style="max-height:520px;overflow-y:auto;">
+              <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" id="ordersTable">
+                  <thead class="table-light">
+                    <tr>
+                      <th class="ps-3">#</th>
+                      <th>Cafe</th>
+                      <th>Table</th>
+                      <th>Customer</th>
+                      <th>Total</th>
+                      <th>Status</th>
+                      <th>Pickup</th>
+                      <th>Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for order in recent_orders %}
+                    {% set cafe_name = '' %}
+                    {% for c in cafes %}{% if c.id == order.get('cafeId') %}{% set cafe_name = c.name %}{% endif %}{% endfor %}
+                    <tr data-cafe="{{ cafe_name|lower }}">
+                      <td class="ps-3 text-muted small">#{{ order.id }}</td>
+                      <td class="small">
+                        {% for c in cafes %}{% if c.id == order.get('cafeId') %}{{ c.name }}{% endif %}{% endfor %}
+                        {% if not order.get('cafeId') %}<span class="text-muted">—</span>{% endif %}
+                      </td>
+                      <td>{{ order.tableName or '—' }}</td>
+                      <td>{{ order.customerName or 'Guest' }}</td>
+                      <td>₹{{ "%.0f"|format(order.total) }}</td>
+                      <td>
+                        <span class="badge rounded-pill px-2
+                          {% if order.status == 'completed' %}bg-success
+                          {% elif order.status == 'cancelled' %}bg-danger
+                          {% elif order.status == 'preparing' %}bg-warning text-dark
+                          {% else %}bg-secondary{% endif %}">
+                          {{ order.status }}
+                        </span>
+                      </td>
+                      <td><code class="small">{{ order.pickupCode or '—' }}</code></td>
+                      <td class="text-muted small">{{ (order.createdAt or '')[:16] or '—' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="8" class="text-center text-muted py-4">No orders yet.</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Create Cafe Modal -->
+<div class="modal fade" id="createCafeModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('superadmin_create_cafe') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-shop me-2"></i>Create New Cafe</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-500">Cafe Name <span class="text-danger">*</span></label>
+            <input type="text" name="name" class="form-control" required maxlength="200" placeholder="e.g. The Corner Brew"/>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Cafe</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Rename Cafe Modal -->
+<div class="modal fade" id="renameCafeModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" id="renameCafeForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Rename Cafe</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-500">New Name <span class="text-danger">*</span></label>
+            <input type="text" name="name" id="renameCafeName" class="form-control" required maxlength="200"/>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Name</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Create Owner Modal -->
+<div class="modal fade" id="createOwnerModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('superadmin_create_owner') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-person-plus me-2"></i>Create Owner</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-sm-6">
+              <label class="form-label fw-500">Username <span class="text-danger">*</span></label>
+              <input type="text" name="username" class="form-control" required maxlength="64" placeholder="e.g. john_doe"/>
+              <small class="text-muted">Letters, numbers, _ - . only</small>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label fw-500">Email</label>
+              <input type="email" name="email" class="form-control" maxlength="254" placeholder="optional"/>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label fw-500">Password <span class="text-danger">*</span></label>
+              <input type="password" name="password" class="form-control" required/>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label fw-500">Cafe Name</label>
+              <input type="text" name="cafe_name" class="form-control" maxlength="200" placeholder="optional display name"/>
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-500">Assign to Cafe</label>
+              <select name="cafe_id" class="form-select">
+                <option value="">— No cafe —</option>
+                {% for cafe in cafes %}<option value="{{ cafe.id }}">{{ cafe.name }}</option>{% endfor %}
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Create Owner</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/static/js/activity-feed.js"></script>
+<script>
+// Owner search filter
+document.getElementById('ownerSearch')?.addEventListener('input', function() {
+  const q = this.value.toLowerCase();
+  document.querySelectorAll('#ownersTable tbody tr[data-search]').forEach(row => {
+    row.style.display = row.dataset.search.includes(q) ? '' : 'none';
+  });
+});
+
+// Order cafe filter
+document.getElementById('orderCafeFilter')?.addEventListener('change', function() {
+  const q = this.value;
+  document.querySelectorAll('#ordersTable tbody tr[data-cafe]').forEach(row => {
+    row.style.display = (!q || row.dataset.cafe === q) ? '' : 'none';
+  });
+});
+
+// Rename cafe modal — populate form action and current name
+document.getElementById('renameCafeModal')?.addEventListener('show.bs.modal', function(e) {
+  const btn = e.relatedTarget;
+  const cafeId = btn.dataset.cafeid;
+  const cafeName = btn.dataset.cafename;
+  document.getElementById('renameCafeForm').action = '/superadmin/cafes/' + cafeId + '/rename';
+  document.getElementById('renameCafeName').value = cafeName;
+});
+
+// Recent security event timestamps -> local time
+document.querySelectorAll('span.ts[data-ts]').forEach(function(el){
+  var t = parseFloat(el.dataset.ts) * 1000;
+  if (!isNaN(t)) el.textContent = new Date(t).toLocaleString();
+});
+
+// SUPERADMIN_KEY verification countdown in the health bar
+(function(){
+  var el = document.getElementById('hdrTtl');
+  if (!el) return;
+  var until = parseFloat(el.dataset.until) * 1000;
+  function tick(){
+    var s = Math.max(0, Math.round((until - Date.now()) / 1000));
+    var m = Math.floor(s/60), r = s%60;
+    el.textContent = '· ' + m + 'm ' + (r<10?'0':'') + r + 's';
+  }
+  tick(); setInterval(tick, 1000);
+})();
+
+// ── Superadmin Live Activity Feed ──────────────────────────
+(function () {
+  var listEl  = document.getElementById('sa-feed-list');
+  var badgeEl = document.getElementById('sa-feed-badge');
+  if (!listEl || typeof initKitchenFeed !== 'function') return;
+  var panel = document.getElementById('sa-activity-panel');
+  if (panel) panel.addEventListener('click', function () {
+    if (window._saFeed) window._saFeed.resetUnseen();
+  });
+  window._saFeed = initKitchenFeed(listEl, badgeEl);
+})();
+</script>
+</body>
+</html>

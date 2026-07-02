@@ -1,0 +1,149 @@
+{% extends "admin/base.html" %}
+{% block title %}Owners{% endblock %}
+{% block page_title %}Owner Management{% endblock %}
+
+{% block content %}
+
+{# ── Secure one-time temp-password panel ──────────────────────────────────── #}
+{% if tmp_pw %}
+<div class="alert alert-warning border border-warning-subtle shadow-sm d-flex gap-3 align-items-start mb-4" role="alert" id="tmp-pw-banner">
+  <i class="bi bi-shield-lock fs-4 text-warning mt-1 flex-shrink-0"></i>
+  <div class="flex-grow-1">
+    <div class="fw-600 mb-1">Temporary password for <em>{{ tmp_pw_owner }}</em> — copy now</div>
+    <p class="mb-2 text-muted" style="font-size:.88rem;">
+      This is shown <strong>once only</strong>. It will not appear again after you leave or refresh this page.
+      Share it with the owner via a secure channel, not email or chat.
+    </p>
+    <div class="input-group" style="max-width:420px;">
+      <input id="tmp-pw-field" type="text" class="form-control font-monospace fw-600"
+             value="{{ tmp_pw }}" readonly autocomplete="off">
+      <button class="btn btn-outline-secondary" type="button"
+              onclick="navigator.clipboard.writeText(document.getElementById('tmp-pw-field').value);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500);">
+        Copy
+      </button>
+    </div>
+  </div>
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss"></button>
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+    <span class="fw-600">All Registered Owners ({{ owners|length }})</span>
+    <span class="text-muted" style="font-size:.82rem;">Actions are immediate and irreversible.</span>
+  </div>
+  <div class="card-body p-0">
+    {% if owners %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="bg-light">
+          <tr>
+            <th class="ps-3" style="width:40px;">ID</th>
+            <th>Cafe / Owner</th>
+            <th>Email</th>
+            <th>Status</th>
+            <th>Plan</th>
+            <th>Joined</th>
+            <th class="text-end pe-3">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in owners %}
+          <tr {% if not o.get('isActive', True) %}class="table-danger"{% endif %}>
+            <td class="ps-3 text-muted" style="font-size:.82rem;">#{{ o.id }}</td>
+            <td>
+              <div class="fw-500">{{ o.cafeName or '—' }}</div>
+              <small class="text-muted">@{{ o.username }}</small>
+            </td>
+            <td class="text-muted" style="font-size:.88rem;">{{ o.email or '—' }}</td>
+            <td>
+              {% set status = o.get('approvalStatus', 'active') %}
+              {% if status == 'pending' %}
+                <span class="badge bg-warning text-dark rounded-pill px-2 py-1">Pending</span>
+              {% elif status == 'rejected' %}
+                <span class="badge bg-dark rounded-pill px-2 py-1">Rejected</span>
+              {% elif o.get('isActive', True) %}
+                <span class="badge badge-active rounded-pill px-2 py-1">Active</span>
+              {% else %}
+                <span class="badge badge-inactive rounded-pill px-2 py-1">Inactive</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge bg-secondary rounded-pill px-2 py-1">{{ o.get('planTier', 'free') }}</span>
+            </td>
+            <td class="text-muted" style="font-size:.82rem;">{{ (o.createdAt or '')[:10] or '—' }}</td>
+            <td class="text-end pe-3">
+              <div class="d-flex gap-2 justify-content-end flex-wrap">
+                <!-- Plan -->
+                <a href="{{ url_for('multi_tenant.edit_plan', owner_id=o.id) }}"
+                   class="btn btn-sm btn-outline-primary" title="Edit plan & quotas">
+                  <i class="bi bi-sliders"></i> Plan
+                </a>
+                <!-- Audit log -->
+                <a href="{{ url_for('multi_tenant.owner_audit', owner_id=o.id) }}"
+                   class="btn btn-sm btn-outline-secondary" title="View audit log">
+                  <i class="bi bi-clock-history"></i>
+                </a>
+                <!-- Export -->
+                <a href="{{ url_for('multi_tenant.export_owner', owner_id=o.id) }}"
+                   class="btn btn-sm btn-outline-secondary" title="Export tenant data">
+                  <i class="bi bi-download"></i>
+                </a>
+                {% if not o.get('isSuperadmin') %}
+                <!-- Impersonate -->
+                <form method="POST" action="{{ url_for('multi_tenant.impersonate', owner_id=o.id) }}"
+                      onsubmit="return confirm('View the app as @{{ o.username }}? All actions will be logged.')">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <button class="btn btn-sm btn-outline-info" title="Impersonate">
+                    <i class="bi bi-person-bounding-box"></i>
+                  </button>
+                </form>
+                <!-- Delete -->
+                <form method="POST" action="{{ url_for('multi_tenant.delete_owner', owner_id=o.id) }}"
+                      onsubmit="var name=prompt('To delete @{{ o.username }} and ALL associated data, type the username to confirm:'); if(!name)return false; this.confirm_username.value=name; return true;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <input type="hidden" name="confirm_username" value=""/>
+                  <button class="btn btn-sm btn-outline-danger" title="Delete owner">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                </form>
+                {% endif %}
+                <!-- Reset Password -->
+                <form method="POST" action="{{ url_for('admin.reset_password', owner_id=o.id) }}"
+                      onsubmit="return confirm('Reset password for @{{ o.username }}? The new temporary password will be shown once.')">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  <button type="submit" class="btn btn-sm btn-outline-warning">
+                    <i class="bi bi-key"></i> Reset PW
+                  </button>
+                </form>
+
+                <!-- Toggle Active -->
+                <form method="POST" action="{{ url_for('admin.toggle_owner', owner_id=o.id) }}"
+                      onsubmit="return confirm('{% if o.get('isActive', True) %}Deactivate{% else %}Activate{% endif %} @{{ o.username }}?')">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                  {% if o.get('isActive', True) %}
+                  <button type="submit" class="btn btn-sm btn-outline-danger">
+                    <i class="bi bi-person-slash"></i> Deactivate
+                  </button>
+                  {% else %}
+                  <button type="submit" class="btn btn-sm btn-outline-success">
+                    <i class="bi bi-person-check"></i> Activate
+                  </button>
+                  {% endif %}
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center text-muted py-5">
+      <i class="bi bi-people" style="font-size:2rem;"></i>
+      <p class="mt-2 mb-0">No owners registered yet.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

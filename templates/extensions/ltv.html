@@ -1,0 +1,64 @@
+{% extends "extensions/_base_owner.html" %}
+{% block title %}Customer LTV — Cafe 11:11{% endblock %}
+{% block heading %}Customer Lifetime Value{% endblock %}
+{% block body %}
+<form id="filter" class="ext-filter">
+  <div class="f"><label>Start</label><input type="date" id="start"/></div>
+  <div class="f"><label>End</label><input type="date" id="end"/></div>
+  <button type="submit">Apply</button>
+</form>
+
+<div class="ext-grid">
+  <div class="kpi"><div class="kpi-label">Customers</div><div class="kpi-value" id="k-cust">—</div></div>
+  <div class="kpi"><div class="kpi-label">Repeat rate</div><div class="kpi-value" id="k-repeat">—</div></div>
+  <div class="kpi"><div class="kpi-label">Avg LTV</div><div class="kpi-value" id="k-ltv">—</div></div>
+  <div class="kpi"><div class="kpi-label">At risk</div><div class="kpi-value" id="k-risk">—</div><div class="kpi-sub">No visit in 60+ days</div></div>
+</div>
+
+<div class="card">
+  <h3>Top customers</h3>
+  <table class="dt">
+    <thead><tr><th>Customer</th><th>Email</th><th>Orders</th><th>Revenue</th><th>Avg ticket</th><th>Days active</th><th>Projected LTV</th><th>Last visit</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>At-risk customers</h3>
+  <table class="dt">
+    <thead><tr><th>Customer</th><th>Orders</th><th>Revenue</th><th>Days since last visit</th></tr></thead>
+    <tbody id="risk-rows"></tbody>
+  </table>
+</div>
+
+<script>
+const fmt = n => '₹' + Number(n||0).toFixed(2);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const today = new Date(); const back = new Date(); back.setFullYear(today.getFullYear()-1);
+document.getElementById('start').value = back.toISOString().slice(0,10);
+document.getElementById('end').value = today.toISOString().slice(0,10);
+
+async function refresh() {
+  const start = document.getElementById('start').value;
+  const end = document.getElementById('end').value;
+  const r = await fetch(`/api/owner/reports/ltv?start=${start}&end=${end}`).then(x=>x.json());
+  document.getElementById('k-cust').textContent = r.summary.totalCustomers;
+  document.getElementById('k-repeat').textContent = r.summary.repeatRate + '%';
+  document.getElementById('k-ltv').textContent = fmt(r.summary.avgLtv);
+  document.getElementById('k-risk').textContent = r.summary.atRiskCount;
+  document.getElementById('rows').innerHTML = r.customers.length
+    ? r.customers.map(c => `<tr>
+        <td>${esc(c.name)}</td><td>${esc(c.email||'')}</td><td>${Number(c.orders)||0}</td>
+        <td>${fmt(c.revenue)}</td><td>${fmt(c.avgTicket)}</td>
+        <td>${Number(c.daysActive)||0}</td><td>${fmt(c.projectedLtv)}</td>
+        <td>${esc((c.lastSeen||'').slice(0,10))}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="8" class="empty">No data yet.</td></tr>';
+  document.getElementById('risk-rows').innerHTML = r.atRisk.length
+    ? r.atRisk.map(c => `<tr><td>${esc(c.name)}</td><td>${Number(c.orders)||0}</td><td>${fmt(c.revenue)}</td><td>${Number(c.daysSinceLastVisit)||0}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="empty">Nobody at risk &mdash; nice work.</td></tr>';
+}
+document.getElementById('filter').addEventListener('submit', e => { e.preventDefault(); refresh(); });
+refresh();
+</script>
+{% endblock %}
