@@ -11,7 +11,8 @@ from app.extensions import db, limiter
 from app.services.auth import logged_in_owner_id, logged_in_owner_obj
 from app.services.tables import load_owner_tables, load_settings
 from app.services.menu import load_owner_menu
-from app.services.orders import load_orders
+from app.services.orders import load_orders, _db_update_order_status
+from app.services.notifications import _notify_owner, _notify_order_status
 from app.utils.security import login_required, log_security, _client_ip
 from app.utils.serializers import _safe_text, _feedback_dict
 
@@ -32,7 +33,8 @@ def owner_dashboard():
     settings = load_settings(owner_id)
     recent_orders = load_orders(owner_id=owner_id, limit=50)
 
-    pending_orders = [o for o in recent_orders if o["status"] == "pending"]
+    _active_statuses = {"pending", "preparing", "ready"}
+    pending_orders = [o for o in recent_orders if o["status"] in _active_statuses]
     preparing_count = sum(1 for o in recent_orders if o["status"] == "preparing")
     revenue_today = sum(
         o["total"] for o in recent_orders
@@ -178,7 +180,7 @@ def owner_dashboard():
         settings=settings,
         recent_orders=recent_orders,
         pending_orders=pending_orders,
-        pending_count=len(pending_orders),
+        pending_count=sum(1 for o in pending_orders if o["status"] == "pending"),
         preparing_count=preparing_count,
         revenue_today=revenue_today,
         total_completed=total_completed,
@@ -319,6 +321,32 @@ def owner_rename_table(table_id: str):
         db.session.commit()
         flash("Table renamed.", "success")
     return redirect(url_for("web_owner.owner_tables"))
+
+
+@bp.route("/owner/orders/<int:order_id>/status", methods=["POST"])
+@login_required
+@limiter.limit("60 per minute")
+def update_order_status(order_id: int):
+    """Update an order's status from the owner dashboard (form POST)."""
+    from app.models import Order
+
+    owner_id = logged_in_owner_id()
+    new_status = (request.form.get("status") or "").strip().lower()
+
+    # Map legacy "confirmed" -> "preparing" for backward compatibility
+    if new_status == "confirmed":
+        new_status = "preparing"
+
+    order = db.session.get(Order, order_id)
+    if not order or order.owner_id != owner_id:
+        abort(404, description="Order not found.")
+
+    if _db_update_order_status(order_id, new_status):
+        _notify_owner(owner_id, "order_updated", {"id": order_id, "status": new_status})
+        _notify_order_status(order_id, new_status)
+        log_security("ORDER_STATUS_UPDATE", f"order_id={order_id} status={new_status!r}")
+
+    return redirect(request.referrer or url_for("web_owner.owner_dashboard"))
 
 
 @bp.route("/kitchen")

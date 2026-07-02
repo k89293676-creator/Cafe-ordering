@@ -473,6 +473,7 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         "owner_customers":                         "web_owner.owner_customers",
         "download_all_table_qr_posters":           "web_owner.download_all_table_qr_posters",
         "table_qr":                               "web_owner.table_qr",
+        "update_order_status":                     "web_owner.update_order_status",
         # ── Inventory extras ──────────────────────────────────────────────
         "import_inventory_csv":                    "web_inventory.import_inventory_csv",
         "export_inventory_csv":                    "web_inventory.export_inventory_csv",

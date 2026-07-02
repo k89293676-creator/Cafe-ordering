@@ -486,6 +486,16 @@ async function placeOrder(name) {
 
     if (res.ok && data.order) {
       currentOrderId = data.order.id;
+
+      /* Show pickup-success panel on the main page */
+      const pickupDiv = $("pickup-success");
+      const pickupCodeEl = $("pickup-code-display");
+      if (pickupDiv && pickupCodeEl) {
+        pickupCodeEl.textContent = data.order.pickupCode || "—";
+        pickupDiv.style.display = "block";
+        pickupDiv.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+
       cartClear();
       closeCart();
       showTracker(data.order);
@@ -635,6 +645,15 @@ function patchTrackerStatus(status) {
   if (emojiEl) emojiEl.textContent = si.emoji;
   if (lblEl)   lblEl.textContent   = si.label;
   if (descEl)  descEl.textContent  = si.desc;
+
+  /* Keep the main-page #order-status-tracker div in sync */
+  const mainTrackerEl = $("order-status-tracker");
+  if (mainTrackerEl) {
+    mainTrackerEl.innerHTML =
+      `<span style="display:inline-flex;align-items:center;gap:.4rem;font-size:1rem;font-weight:700;">`
+      + `${si.emoji} ${si.label}</span>`
+      + `<div style="font-size:.8rem;color:#6b7280;margin-top:.25rem;">${si.desc}</div>`;
+  }
 
   if ((status === "ready" || status === "completed") && !orderDone) {
     orderDone = true;
