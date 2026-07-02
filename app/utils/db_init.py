@@ -113,6 +113,8 @@ def _init_db() -> None:
         _add_column_if_missing(conn, "owners", "stripe_subscription_id", "TEXT")
         # Onboarding wizard
         _add_column_if_missing(conn, "owners", "onboarding_complete", "BOOLEAN DEFAULT FALSE")
+        # Per-owner currency code (ISO 4217 lower-case, e.g. 'gbp', 'usd')
+        _add_column_if_missing(conn, "owners", "currency", "TEXT DEFAULT 'gbp'")
         # settings evolution
         _add_column_if_missing(conn, "settings", "tax_rate_percent", "NUMERIC(5,2) DEFAULT 0")
         _add_column_if_missing(conn, "settings", "tax_label", "TEXT DEFAULT 'GST'")
