@@ -130,38 +130,30 @@ def _init_db() -> None:
         _add_column_if_missing(conn, "ingredients", "cafe_id", "INTEGER")
         conn.commit()
 
-        # ── One-time correction: restore owners broken by prior DEFAULT FALSE backfill ──
+        # ── Idempotent correction: restore owners broken by prior DEFAULT FALSE backfill ──
         # A prior deployment added onboarding_complete with DEFAULT FALSE, which PostgreSQL
-        # backfills to ALL existing rows. This UPDATE is idempotent and guarded by a
-        # system_flags marker so it runs exactly once. Any owner created more than 30 min
-        # ago is treated as pre-existing (not mid-onboarding) and gets corrected to TRUE.
+        # backfills ALL existing rows to FALSE. This UPDATE is naturally idempotent:
+        # it updates only rows that are still FALSE or NULL and were created more than
+        # 30 minutes ago (to leave genuinely in-progress onboarding signups untouched).
+        # Once all affected owners are corrected, subsequent startups update zero rows.
+        # Intentionally NOT gated on system_flags — that SELECT fails if the table
+        # does not yet exist (e.g. after db.create_all() errors at startup), which
+        # would abort the whole correction silently.
         try:
-            _CORR_FLAG = "_db_init_onboarding_backfill_corrected_v1"
-            already_done = conn.execute(
-                text("SELECT 1 FROM system_flags WHERE key = :k LIMIT 1"),
-                {"k": _CORR_FLAG},
-            ).fetchone()
-            if not already_done:
-                cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
-                result = conn.execute(
-                    text(
-                        "UPDATE owners SET onboarding_complete = TRUE "
-                        "WHERE (onboarding_complete = FALSE OR onboarding_complete IS NULL) "
-                        "AND (created_at IS NULL OR created_at < :cutoff)"
-                    ),
-                    {"cutoff": cutoff.isoformat()},
-                )
-                conn.execute(
-                    text(
-                        "INSERT INTO system_flags (key, value) VALUES (:k, :v) "
-                        "ON CONFLICT (key) DO NOTHING"
-                    ),
-                    {"k": _CORR_FLAG, "v": "1"},
-                )
-                conn.commit()
+            _corr_cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+            _corr_result = conn.execute(
+                text(
+                    "UPDATE owners SET onboarding_complete = TRUE "
+                    "WHERE (onboarding_complete = FALSE OR onboarding_complete IS NULL) "
+                    "AND (created_at IS NULL OR created_at < :cutoff)"
+                ),
+                {"cutoff": _corr_cutoff.isoformat()},
+            )
+            conn.commit()
+            if getattr(_corr_result, "rowcount", 0):
                 log.info(
-                    "One-time correction: set onboarding_complete=TRUE for %s pre-existing owner(s).",
-                    getattr(result, "rowcount", "?"),
+                    "Corrected onboarding_complete=TRUE for %s pre-existing owner(s).",
+                    _corr_result.rowcount,
                 )
         except Exception as _corr_exc:
             log.warning("Could not apply onboarding_complete correction: %s", _corr_exc)

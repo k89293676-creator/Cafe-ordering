@@ -543,7 +543,15 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
                     from app.utils.security import log_security
                     log_security("SESSION_FINGERPRINT_MISMATCH",
                                  f"owner_id={session.get('owner_id')!r}")
-                    session.clear()
+                    # Only clear owner-session keys. session.clear() would also wipe
+                    # admin_authenticated, admin_owner_id, and admin_via_superadmin,
+                    # logging out admins whenever a UA string fluctuates (proxy headers,
+                    # browser minor updates, etc.).
+                    for _k in (
+                        "owner_username", "owner_id", "ua_fp",
+                        "pending_totp_owner_id", "pending_totp_remember",
+                    ):
+                        session.pop(_k, None)
         except Exception:
             pass
 
