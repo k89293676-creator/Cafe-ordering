@@ -288,8 +288,14 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         return load_owner_user(user_id)
 
     # ── Create tables ─────────────────────────────────────────────────────────
-    with app.app_context():
-        db.create_all()
+    # Wrapped in try/except: migrations run via flask db upgrade in release.sh,
+    # so create_all() is only a safety net. A transient DB error here must not
+    # crash the entire app — requests will fail gracefully via _initialize_runtime_state.
+    try:
+        with app.app_context():
+            db.create_all()
+    except Exception as _create_exc:
+        log.warning("db.create_all() failed at startup (will retry on first request): %s", _create_exc)
 
     # ── Blueprints ────────────────────────────────────────────────────────────
     from app.api.v1.health import bp as health_bp
