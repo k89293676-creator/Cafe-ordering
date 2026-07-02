@@ -867,9 +867,20 @@ function stopPolling() { stopOrderSSE(); }
 async function cancelOrder(orderId) {
   const btn = $("cancel-btn");
   if (btn) { btn.disabled = true; btn.textContent = "Cancelling…"; }
+
+  // Include pickup code so the server can verify the caller actually
+  // placed this order (prevents cross-order cancellation by ID guessing).
+  let pickupCode = "";
+  try {
+    const saved = _ORDER_KEY ? JSON.parse(localStorage.getItem(_ORDER_KEY) || "null") : null;
+    if (saved && saved.id === orderId) pickupCode = saved.pickupCode || "";
+  } catch {}
+
   try {
     const res = await fetch(`/api/orders/${orderId}/cancel`, {
-      method: "POST", headers: csrfHeaders({ "Content-Type": "application/json" }), body: "{}"
+      method: "POST",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ pickupCode }),
     });
     const data = await res.json();
     if (res.ok) {

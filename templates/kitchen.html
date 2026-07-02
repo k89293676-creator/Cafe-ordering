@@ -251,6 +251,19 @@
     }
     #tc-mobile-btn { display: none; }
 
+    /* ── Urgency timer progress bar ─────────────────────────────────────── */
+    .k-timer-wrap {
+      height: 3px; background: rgba(255,255,255,.08); border-radius: 2px;
+      margin-bottom: .55rem; overflow: hidden;
+    }
+    .k-timer-bar {
+      height: 100%; width: 0; border-radius: 2px;
+      background: var(--k-green);
+      transition: background .5s;
+    }
+    .k-timer-bar.warn { background: var(--k-yellow); }
+    .k-timer-bar.late { background: var(--k-red); }
+
     /* ── Print: only the printing-card is shown, full width. ─────────────── */
     @media print {
       body * { visibility: hidden; }
@@ -395,8 +408,12 @@
   </div>
 </template>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js">
-      var currSym = "{{ currency_symbol if currency_symbol is defined else "₹" }}";</script>
+<script>
+  // currSym MUST live in its own <script> tag — browsers silently discard
+  // inline content when the <script> element also has a src attribute.
+  var currSym = "{{ currency_symbol if currency_symbol is defined else '₹' }}";
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
   const CSRF = '{{ csrf_token() }}';
 
@@ -699,10 +716,12 @@
   function sortedOrders(list) {
     const arr = list.slice();
     if (curSort === 'newest') {
-      arr.sort((a, b) => (b.ageSeconds || 0) - (a.ageSeconds || 0) === 0
-        ? (a.id - b.id)
-        : (a.ageSeconds || 0) - (b.ageSeconds || 0));
-      arr.reverse();
+      // Smallest ageSeconds = most-recently-placed order → show first.
+      // Sort ascending by age (no reverse needed).
+      arr.sort((a, b) => {
+        const diff = (a.ageSeconds || 0) - (b.ageSeconds || 0);
+        return diff !== 0 ? diff : (b.id - a.id);   // tie-break: higher id = newer
+      });
     } else if (curSort === 'table') {
       arr.sort((a, b) => String(a.tableName || '').localeCompare(String(b.tableName || ''), undefined, { numeric: true }));
     } else {

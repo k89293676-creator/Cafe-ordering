@@ -374,6 +374,17 @@ def customer_cancel_order(order_id: int):
     order = _db_get_order(order_id)
     if not order:
         abort(404, description="Order not found.")
+
+    # Security: verify the caller owns this order by requiring the pickup code.
+    # Without this, any party who knows (or guesses) a numeric order_id can
+    # cancel another customer's order.  The pickup code is shown only to the
+    # person who placed the order, so it acts as a lightweight bearer token.
+    payload_json = request.get_json(silent=True) or {}
+    provided_code = str(payload_json.get("pickupCode") or "").strip().upper()
+    expected_code = str(order.get("pickupCode") or "").strip().upper()
+    if not expected_code or provided_code != expected_code:
+        abort(403, description="Invalid or missing pickup code.")
+
     status = order.get("status", "pending")
     if status not in ("pending",):
         return {"description": f"Order cannot be cancelled (status: {status})."}, 409

@@ -80,7 +80,7 @@
                     <button type="submit"
                             class="btn btn-ghost"
                             style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.55rem .65rem;line-height:1.2;"
-                            title="Add 1× {{ it.name }} ({{ currency_symbol }}{{ '%.2f'|format(it.price) }})) to this tab">
+                            title="Add 1× {{ it.name }} ({{ currency_symbol }}{{ '%.2f'|format(it.price) }}) to this tab">
                       <span style="font-weight:600;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ it.name }}</span>
                       <span class="mono" style="font-size:.82rem;color:var(--muted);white-space:nowrap;">{{ currency_symbol }}{{ '%.2f'|format(it.price) }}</span>
                     </button>
@@ -277,7 +277,27 @@
 
 {% block extrabody %}
 <script>
-  var currSym = "{{ currency_symbol if currency_symbol is defined else "₹" }}";
+  var currSym = "{{ currency_symbol if currency_symbol is defined else '₹' }}";
+
+  // Simple toast/alert fallback for billing UI warnings.
+  // Keeps user-facing feedback visible even when a full toast system
+  // is not loaded on this page.
+  window.billToast = function(msg, type) {
+    // type: 'warn' | 'error' | 'info'
+    var el = document.createElement('div');
+    var bg = type === 'error' ? '#fee2e2' : type === 'warn' ? '#fef3c7' : '#dbeafe';
+    var color = type === 'error' ? '#991b1b' : type === 'warn' ? '#92400e' : '#1e40af';
+    el.style.cssText = [
+      'position:fixed', 'bottom:1rem', 'right:1rem', 'z-index:9999',
+      'padding:.65rem 1rem', 'border-radius:8px', 'font-size:.85rem',
+      'box-shadow:0 4px 12px rgba(0,0,0,.15)',
+      'background:' + bg, 'color:' + color,
+      'pointer-events:none',
+    ].join(';');
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(function(){ el.remove(); }, 3500);
+  };
   // Reveal the password field once the refund amount crosses the
   // step-up threshold (server still re-validates, this is just UX).
   (function () {
@@ -456,16 +476,24 @@
     });
 
     // Loading state while the settle POST is in flight — prevents
-    // double-clicks from racing to the server during a rush. The
+    // double-clicks AND Enter-key re-submissions during a rush. The
     // backend is idempotent (locks the row + checks paid status) but
     // killing the click is friendlier UX.
-    document.getElementById('settleForm').addEventListener('submit', () => {
+    let _settleInFlight = false;
+    document.getElementById('settleForm').addEventListener('submit', (e) => {
+      // Guard: block re-submission if already in flight (handles both
+      // button double-click and Enter key in a payment amount input).
+      if (_settleInFlight) { e.preventDefault(); return; }
+      // Also block if the submit button is explicitly disabled (underpaid).
+      if (btnSubmit.disabled) { e.preventDefault(); return; }
+      _settleInFlight = true;
       btnSubmit.disabled = true;
       const original = btnSubmit.textContent;
       btnSubmit.textContent = 'Settling…';
       // Re-enable after 8s in case the redirect is slow / cancelled.
       setTimeout(() => {
-        if (btnSubmit.textContent === 'Settling…') {
+        if (_settleInFlight) {
+          _settleInFlight = false;
           btnSubmit.disabled = false;
           btnSubmit.textContent = original;
         }
