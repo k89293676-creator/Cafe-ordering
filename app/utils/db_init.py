@@ -147,9 +147,40 @@ def _init_db() -> None:
         _add_column_if_missing(conn, "settings", "invoice_seq", "INTEGER DEFAULT 0")
         _add_column_if_missing(conn, "settings", "billing_address", "TEXT DEFAULT ''")
         _add_column_if_missing(conn, "settings", "billing_phone", "TEXT DEFAULT ''")
+        # orders additional evolution (columns added after initial schema)
+        _add_column_if_missing(conn, "orders", "table_name", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, "orders", "customer_email", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, "orders", "customer_phone", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, "orders", "modifiers", "JSON")
+        _add_column_if_missing(conn, "orders", "subtotal", "NUMERIC(10,2) DEFAULT 0")
+        _add_column_if_missing(conn, "orders", "tip", "NUMERIC(10,2) DEFAULT 0")
+        _add_column_if_missing(conn, "orders", "pickup_code", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, "orders", "origin", "TEXT DEFAULT 'table'")
+        _add_column_if_missing(conn, "orders", "notes", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, "orders", "updated_at", "TIMESTAMP WITH TIME ZONE")
+        # cafe_tables evolution
+        _add_column_if_missing(conn, "cafe_tables", "cafe_id", "INTEGER")
+        _add_column_if_missing(conn, "cafe_tables", "created_at", "TIMESTAMP WITH TIME ZONE")
+        # menus evolution
+        _add_column_if_missing(conn, "menus", "cafe_id", "INTEGER")
         # ingredients evolution
         _add_column_if_missing(conn, "ingredients", "cost_per_unit", "NUMERIC(10,4) DEFAULT 0")
         _add_column_if_missing(conn, "ingredients", "cafe_id", "INTEGER")
+        _add_column_if_missing(conn, "ingredients", "menu_item_id", "TEXT")
+        _add_column_if_missing(conn, "ingredients", "qty_per_order", "NUMERIC(10,3) DEFAULT 1")
+        _add_column_if_missing(conn, "ingredients", "created_at", "TIMESTAMP WITH TIME ZONE")
+        # feedback evolution
+        _add_column_if_missing(conn, "feedback", "cafe_id", "INTEGER")
+        _add_column_if_missing(conn, "feedback", "order_id", "INTEGER")
+        # settings evolution (additional)
+        _add_column_if_missing(conn, "settings", "updated_at", "TIMESTAMP WITH TIME ZONE")
+        # employees evolution
+        _add_column_if_missing(conn, "employees", "cafe_id", "INTEGER")
+        # table_calls evolution
+        _add_column_if_missing(conn, "table_calls", "cafe_id", "INTEGER")
+        _add_column_if_missing(conn, "table_calls", "acknowledged_at", "TIMESTAMP WITH TIME ZONE")
+        _add_column_if_missing(conn, "table_calls", "resolved_at", "TIMESTAMP WITH TIME ZONE")
+        _add_column_if_missing(conn, "table_calls", "resolved_by_employee_id", "INTEGER")
         conn.commit()
 
         # ── Idempotent correction: restore owners broken by prior DEFAULT FALSE backfill ──
