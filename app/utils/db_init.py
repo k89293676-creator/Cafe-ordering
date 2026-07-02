@@ -55,6 +55,15 @@ def _add_column_if_missing(conn, table: str, column: str, col_type: str) -> None
 
     All three parameters are validated against strict allowlists before
     being interpolated into the SQL string.
+
+    IMPORTANT — PostgreSQL transaction safety:
+    In PostgreSQL, any failed SQL statement aborts the *entire* transaction.
+    Without a SAVEPOINT, the SELECT existence-check that fails (column not
+    found) leaves the connection in "transaction aborted" state so that every
+    subsequent SQL — including the ALTER TABLE — also fails silently.  We
+    wrap the check in a SAVEPOINT/ROLLBACK TO SAVEPOINT so a failed SELECT
+    rolls back only to the savepoint, restoring a clean transaction state
+    before the ALTER TABLE runs.
     """
     from sqlalchemy import text
 
@@ -64,14 +73,27 @@ def _add_column_if_missing(conn, table: str, column: str, col_type: str) -> None
     if not _COLTYPE_RE.match(col_type):
         raise ValueError(f"Unsafe column type: {col_type!r}")
 
+    _sp = "_acm_check"  # savepoint name
     try:
-        conn.execute(text(f"SELECT {column} FROM {table} LIMIT 0"))
-    except Exception:
+        conn.execute(text(f"SAVEPOINT {_sp}"))
         try:
-            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
-            log.info("Added column %s.%s", table, column)
-        except Exception as exc:
-            log.warning("Could not add %s.%s: %s", table, column, exc)
+            conn.execute(text(f"SELECT {column} FROM {table} LIMIT 0"))
+            conn.execute(text(f"RELEASE SAVEPOINT {_sp}"))
+            return  # column already exists — nothing to do
+        except Exception:
+            # Column missing: roll back to savepoint so the outer transaction
+            # is clean and the ALTER TABLE below can run successfully.
+            conn.execute(text(f"ROLLBACK TO SAVEPOINT {_sp}"))
+    except Exception:
+        # SAVEPOINT not supported by this driver/DB; fall through to ALTER TABLE.
+        # If the column already exists ALTER TABLE will raise and we warn below.
+        pass
+
+    try:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+        log.info("Added column %s.%s", table, column)
+    except Exception as exc:
+        log.warning("Could not add %s.%s: %s", table, column, exc)
 
 
 def _init_db() -> None:
