@@ -69,11 +69,8 @@ from lib_billing_security import (
     stepup_void_threshold,
     verify_password_constant_time,
 )
-from lib_billing_security import drawer_variance as _drawer_variance_fn
-try:
-    from lib_billing import drawer_variance
-except ImportError:
-    drawer_variance = _drawer_variance_fn
+from lib_billing import drawer_variance
+_drawer_variance_fn = drawer_variance  # backward-compat alias
 
 from lib_payments import (
     PROVIDER_GUIDES,
@@ -111,6 +108,14 @@ def _fmt_amount(amount: float, symbol: str) -> str:
 
 
 bp = Blueprint("billing", __name__)
+
+
+@bp.context_processor
+def _billing_ctx():
+    """Inject cafe_name into every billing template automatically."""
+    owner = logged_in_owner_obj()
+    return {"cafe_name": (owner.cafe_name or owner.username or "") if owner else ""}
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
