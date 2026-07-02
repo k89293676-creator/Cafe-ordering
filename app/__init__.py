@@ -328,6 +328,7 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     from app.api.v1.payments import bp as payments_bp
     from app.api.v1.webhooks import bp as webhooks_bp
     from app.api.v1.stats import bp as stats_bp
+    from app.api.v1.billing_summary import bp as billing_summary_bp
     from app.web.public import bp as public_bp
     from app.web.auth import bp as auth_bp
     from app.web.owner import bp as owner_bp
@@ -341,7 +342,7 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
 
     for bp in (
         health_bp, menu_bp, orders_bp, kitchen_bp, feedback_bp,
-        payments_bp, webhooks_bp, stats_bp,
+        payments_bp, webhooks_bp, stats_bp, billing_summary_bp,
         public_bp, auth_bp, owner_bp, owner_menu_bp,
         analytics_bp, inventory_bp, superadmin_bp,
         billing_subscription_bp, onboarding_bp,
@@ -471,6 +472,7 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         "reorder_view":                            "web_owner.reorder_view",
         "owner_customers":                         "web_owner.owner_customers",
         "download_all_table_qr_posters":           "web_owner.download_all_table_qr_posters",
+        "table_qr":                               "web_owner.table_qr",
         # ── Inventory extras ──────────────────────────────────────────────
         "import_inventory_csv":                    "web_inventory.import_inventory_csv",
         "export_inventory_csv":                    "web_inventory.export_inventory_csv",

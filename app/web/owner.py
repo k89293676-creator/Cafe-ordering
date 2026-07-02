@@ -221,7 +221,7 @@ def owner_profile():
             revoke_all_tokens_for_owner(owner.id)
             log_security("PASSWORD_CHANGED", f"owner_id={owner.id}")
             flash("Password updated. Please log in again on other devices.", "success")
-        elif action == "update_profile":
+        elif action in ("update_profile", "profile"):
             email = _safe_text(request.form.get("email"), max_len=254)
             phone = _safe_text(request.form.get("phone"), max_len=30)
             cafe_name = _safe_text(request.form.get("cafe_name"), max_len=100)
@@ -236,6 +236,10 @@ def owner_profile():
                 owner.email = email
             owner.phone = phone
             owner.cafe_name = cafe_name
+            _allowed_currencies = {"gbp","usd","eur","inr","aud","cad","sgd","aed","nzd","jpy"}
+            _new_cur = (request.form.get("currency") or "gbp").lower().strip()
+            if _new_cur in _allowed_currencies:
+                owner.currency = _new_cur
             db.session.commit()
             flash("Profile updated.", "success")
         return redirect(url_for("web_owner.owner_profile"))
@@ -485,8 +489,16 @@ def download_all_table_qr_posters():
                 qr = _qr.make(table_url)
                 qr.save(png_buf, format="PNG")
             else:
-                import qrcode as _qr2
-                _qr2.make(table_url).save(png_buf, format="PNG")
+                try:
+                    import qrcode as _qr
+                    qr = _qr.QRCode(error_correction=_qr.constants.ERROR_CORRECT_H)
+                    qr.add_data(table_url)
+                    qr.make(fit=True)
+                    qr.make_image(fill_color="black", back_color="white").save(png_buf, format="PNG")
+                except Exception as _qr_err:
+                    import logging as _lg
+                    _lg.getLogger("cafe.owner").warning("QR fallback failed: %s", _qr_err)
+                    png_buf = __import__("io").BytesIO()
             safe_name = _re.sub(r"[^a-zA-Z0-9_\-]+", "_",
                                 str(table.get("name") or table["id"]))[:40] or table["id"]
             zf.writestr(f"qr-{safe_name}-{table['id']}.png", png_buf.getvalue())
@@ -499,3 +511,41 @@ def download_all_table_qr_posters():
         mimetype="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{safe_cafe}-table-qr-posters.zip"'},
     )
+
+@bp.route("/owner/tables/<table_id>/qr.png")
+@login_required
+def table_qr(table_id: str):
+    """Generate and return QR code PNG for a single table."""
+    import io as _io
+    from app.models import CafeTable
+
+    owner_id = logged_in_owner_id()
+    table = db.session.get(CafeTable, table_id)
+    if not table or table.owner_id != owner_id:
+        abort(404)
+
+    table_url = url_for("web_public.table_order", table_id=table_id, _external=True)
+
+    try:
+        import qrcode as _qr
+        qr = _qr.QRCode(
+            version=1,
+            error_correction=_qr.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(table_url)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white")
+
+        buf = _io.BytesIO()
+        qr_img.save(buf, format="PNG")
+        buf.seek(0)
+
+        from flask import Response as _Resp
+        return _Resp(buf.getvalue(), mimetype="image/png")
+    except ImportError:
+        abort(503, "QR code generation not available")
+    except Exception as _e:
+        abort(500, f"QR generation failed: {_e}")
+

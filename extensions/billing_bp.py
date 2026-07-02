@@ -87,6 +87,29 @@ from lib_payments import (
     mask_secret,
 )
 
+# ---------------------------------------------------------------------------
+# Currency helpers
+# ---------------------------------------------------------------------------
+
+_CURRENCY_SYMBOLS = {
+    "gbp": "£", "usd": "$", "eur": "€", "inr": "₹",
+    "aud": "A$", "cad": "C$", "sgd": "S$", "aed": "د.إ",
+    "nzd": "NZ$", "jpy": "¥", "cny": "¥", "krw": "₩",
+}
+
+
+def _owner_currency(owner_id: int) -> tuple[str, str]:
+    """Return (currency_code, currency_symbol) for the given owner."""
+    owner = db.session.get(Owner, owner_id)
+    code = (getattr(owner, "currency", None) or "gbp").lower()
+    return code, _CURRENCY_SYMBOLS.get(code, code.upper())
+
+
+def _fmt_amount(amount: float, symbol: str) -> str:
+    """Format a monetary amount with the owner's currency symbol."""
+    return f"{symbol}{amount:.2f}"
+
+
 bp = Blueprint("billing", __name__)
 
 # ---------------------------------------------------------------------------
@@ -252,6 +275,7 @@ def _billing_overview(owner_id: int) -> dict:
         "refund_ratio": refund_ratio, "open_tabs": open_tabs,
         "open_value": round(open_value, 2),
         "as_of": datetime.now(timezone.utc).isoformat(),
+        "net_revenue": round(revenue - refunds, 2),
     }
 
 
@@ -525,7 +549,8 @@ def owner_billing_adjust(order_id: int):
                  payload={"discount": totals.discount, "service_charge": totals.service_charge,
                           "tax": totals.tax, "tip": totals.tip, "total": totals.total})
     _invalidate_billing_cache(owner_id)
-    flash(f"Bill updated. New total ₹{totals.total:.2f}.", "billing_ok")
+    _, _sym = _owner_currency(owner_id)
+    flash(f"Bill updated. New total {_sym}{totals.total:.2f}.", "billing_ok")
     return redirect(url_for("billing.owner_billing_order_detail", order_id=order_id))
 
 
@@ -590,7 +615,8 @@ def owner_billing_add_item(order_id: int):
                  payload={"item_id": item_id, "name": name, "quantity": qty,
                           "new_total": float(order.total or 0)})
     _invalidate_billing_cache(owner_id)
-    flash(f"Added {qty}× {name}. New total ₹{float(order.total or 0):.2f}.", "billing_ok")
+    _, _sym = _owner_currency(owner_id)
+    flash(f"Added {qty}× {name}. New total {_sym}{float(order.total or 0):.2f}.", "billing_ok")
     return redirect(url_for("billing.owner_billing_order_detail", order_id=order_id))
 
 
@@ -622,7 +648,8 @@ def owner_billing_remove_item(order_id: int, idx: int):
                  payload={"item_id": removed.get("id"), "name": removed.get("name"),
                           "new_total": float(order.total or 0)})
     _invalidate_billing_cache(owner_id)
-    flash(f"Removed {removed.get('name', 'item')}. New total ₹{float(order.total or 0):.2f}.",
+    _, _sym = _owner_currency(owner_id)
+    flash(f"Removed {removed.get('name', 'item')}. New total {_sym}{float(order.total or 0):.2f}.",
           "billing_ok")
     return redirect(url_for("billing.owner_billing_order_detail", order_id=order_id))
 
@@ -687,7 +714,8 @@ def owner_billing_settle(order_id: int):
     _invalidate_billing_cache(owner_id)
     msg = f"Settled. Invoice {invoice_no}."
     if change_due > 0:
-        msg += f" Change due: ₹{change_due:.2f}."
+        _, _sym = _owner_currency(owner_id)
+        msg += f" Change due: {_sym}{change_due:.2f}."
     flash(msg, "billing_ok")
     return redirect(url_for("billing.owner_billing_invoice", order_id=order_id))
 
@@ -750,7 +778,8 @@ def owner_billing_refund(order_id: int):
     already = float(order.refund_amount or 0)
     max_refundable = float(order.total or 0) - already
     if amount > max_refundable + 0.01:
-        flash(f"Cannot refund ₹{amount:.2f} — only ₹{max_refundable:.2f} remains.", "billing_error")
+        _, _sym = _owner_currency(owner_id)
+        flash(f"Cannot refund {_sym}{amount:.2f} — only {_sym}{max_refundable:.2f} remains.", "billing_error")
         return redirect(url_for("billing.owner_billing_order_detail", order_id=order_id))
     if not reason:
         flash("Refunds require a reason for the audit log.", "billing_error")
@@ -780,7 +809,8 @@ def owner_billing_refund(order_id: int):
                  amount=amount, reason=reason, invoice_number=order.invoice_number or "",
                  payload={"refund_total": float(order.refund_amount)})
     _invalidate_billing_cache(owner_id)
-    flash(f"Refunded ₹{amount:.2f}. Total refunded: ₹{float(order.refund_amount):.2f}.",
+    _, _sym = _owner_currency(owner_id)
+    flash(f"Refunded {_sym}{amount:.2f}. Total refunded: {_sym}{float(order.refund_amount):.2f}.",
           "billing_ok")
     return redirect(url_for("billing.owner_billing_order_detail", order_id=order_id))
 
@@ -1047,7 +1077,8 @@ def owner_billing_drawer():
         db.session.commit()
         _billing_log(owner_id=owner_id, order_id=None, action="drawer_count",
                      amount=counted, reason=notes, payload=variance_d)
-        flash(f"Drawer recorded — variance ₹{variance_d['variance']:.2f} ({variance_d['severity']}).",
+        _, _sym = _owner_currency(owner_id)
+        flash(f"Drawer recorded — variance {_sym}{variance_d['variance']:.2f} ({variance_d['severity']}).",
               "billing_ok")
         return redirect(url_for("billing.owner_billing_drawer"))
     history = (CashDrawerCount.query.filter_by(owner_id=owner_id)
@@ -1361,11 +1392,11 @@ def owner_billing_create_charge(order_id: int):
     try:
         provider_obj = _provider_for_credential(cred)
         intent = provider_obj.create_payment_intent(
-            amount=amount, currency="INR",
+            amount=amount, currency=(_owner_currency(owner_id)[0].upper()),
             metadata={"order_id": order_id, "owner_id": owner_id})
         op = OnlinePayment(
             order_id=order_id, owner_id=owner_id, provider=cred.provider,
-            intent_id=intent.id, amount=amount, currency="INR",
+            intent_id=intent.id, amount=amount, currency=(_owner_currency(owner_id)[0].upper()),
             status="pending", raw=intent.raw or {})
         db.session.add(op)
         db.session.commit()
@@ -1399,7 +1430,7 @@ def billing_pay_page(order_id: int):
         order=order, payment=op, provider=op.provider,
         public_key=cred.public_key, mode=cred.mode,
         amount_minor=int(round(float(op.amount or 0) * 100)),
-        currency=op.currency or "INR",
+        currency=op.currency or (_owner_currency(owner_id)[0].upper()),
         checkout_url=raw.get("checkout_url") or "",
         cashfree_session_id=(raw.get("extra") or {}).get("payment_session_id", "")
                             if op.provider == "cashfree" else "",

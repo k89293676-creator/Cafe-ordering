@@ -40,13 +40,13 @@ function switchTab(tabId) {
   history.replaceState(null, "", `#${tabId}`);
 }
 
-// Wire up all tab buttons (sidebar + tab bar)
-document.querySelectorAll("[data-tab]").forEach(btn => {
-  btn.addEventListener("click", (e) => {
-    // Prevent href="#" from scrolling to top on <a> elements
-    if (btn.tagName === 'A') e.preventDefault();
-    switchTab(btn.dataset.tab);
-  });
+// Wire up tab buttons via event delegation (handles dynamically added elements)
+document.addEventListener("click", function(e) {
+  const btn = e.target.closest("[data-tab]");
+  if (!btn) return;
+  // Prevent href="#" from scrolling to top on <a> elements
+  if (btn.tagName === "A") e.preventDefault();
+  switchTab(btn.dataset.tab);
 });
 
 // Activate tab from hash on load

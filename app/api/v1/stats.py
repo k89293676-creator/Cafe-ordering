@@ -65,9 +65,21 @@ def stats_today():
 
     avg_order: float | None = round(revenue / completed_count, 2) if completed_count else None
 
+    from app.models.core import Owner
+    _owner = db.session.get(Owner, owner_id)
+    _currency = (_owner.currency or "gbp").lower() if _owner else "gbp"
+    _SYMBOLS = {
+        "gbp": "£", "usd": "$", "eur": "€", "inr": "₹",
+        "aud": "A$", "cad": "C$", "sgd": "S$", "aed": "د.إ",
+        "nzd": "NZ$", "jpy": "¥", "cny": "¥", "krw": "₩",
+    }
+    _sym = _SYMBOLS.get(_currency, _currency.upper())
+
     return jsonify(
         orders=orders,
         revenue=round(revenue, 2),
         pending=pending,
         avg_order=avg_order,
+        currency=_currency,
+        currency_symbol=_sym,
     ), 200

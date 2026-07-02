@@ -122,6 +122,22 @@
                 <input type="tel" name="phone" value="{{ owner.phone or '' }}" placeholder="+91 9999999999" maxlength="30" />
               </div>
               <div class="field">
+                <label>Currency</label>
+                {% set _cur = (owner.currency or 'gbp') %}
+                <select name="currency" style="width:100%;padding:0.65rem 1rem;border:1.5px solid var(--border);border-radius:var(--radius);font-family:inherit;font-size:0.875rem;background:var(--surface);color:var(--text-primary);">
+                  <option value="gbp"{% if _cur=='gbp' %} selected{% endif %}>£ British Pound (GBP)</option>
+                  <option value="usd"{% if _cur=='usd' %} selected{% endif %}>$ US Dollar (USD)</option>
+                  <option value="eur"{% if _cur=='eur' %} selected{% endif %}>€ Euro (EUR)</option>
+                  <option value="inr"{% if _cur=='inr' %} selected{% endif %}>₹ Indian Rupee (INR)</option>
+                  <option value="aud"{% if _cur=='aud' %} selected{% endif %}>A$ Australian Dollar (AUD)</option>
+                  <option value="cad"{% if _cur=='cad' %} selected{% endif %}>C$ Canadian Dollar (CAD)</option>
+                  <option value="sgd"{% if _cur=='sgd' %} selected{% endif %}>S$ Singapore Dollar (SGD)</option>
+                  <option value="aed"{% if _cur=='aed' %} selected{% endif %}>د.إ UAE Dirham (AED)</option>
+                  <option value="nzd"{% if _cur=='nzd' %} selected{% endif %}>NZ$ New Zealand Dollar (NZD)</option>
+                  <option value="jpy"{% if _cur=='jpy' %} selected{% endif %}>¥ Japanese Yen (JPY)</option>
+                </select>
+              </div>
+              <div class="field">
                 <label>Logo URL</label>
                 <input name="logo_url" value="{{ branding.logoUrl or '' }}" placeholder="https://example.com/logo.png" maxlength="500" />
               </div>

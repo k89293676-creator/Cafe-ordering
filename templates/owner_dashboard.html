@@ -463,12 +463,13 @@
       <style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}</style>
       <script>
       (function(){
-        var sym = "{{ currency_symbol | default('£') }}";
+        var sym = "{{ owner.currencySymbol if owner else currency_symbol | default('£') }}";
         function fmt(v){ return sym + Number(v).toFixed(2); }
         function load(){
           fetch('/api/v1/stats/today')
             .then(function(r){ return r.json(); })
             .then(function(d){
+              if (d.currency_symbol) { sym = d.currency_symbol; }
               document.getElementById('tg-orders').textContent = d.orders ?? '—';
               document.getElementById('tg-revenue').textContent = d.revenue != null ? fmt(d.revenue) : '—';
               document.getElementById('tg-pending').textContent = d.pending ?? '—';

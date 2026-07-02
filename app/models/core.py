@@ -37,6 +37,7 @@ class Owner(db.Model):
     notes = db.Column(db.Text, default="", server_default="")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     # Stripe subscription columns (added additively)
+    currency = db.Column(db.String(10), default="gbp", server_default="gbp", nullable=False)
     stripe_customer_id = db.Column(db.Text, nullable=True)
     stripe_subscription_id = db.Column(db.Text, nullable=True)
     # Onboarding wizard state
@@ -61,6 +62,15 @@ class Owner(db.Model):
     @property
     def isSuperadmin(self) -> bool:  # noqa: N802
         return bool(self.is_superadmin)
+
+    @property
+    def currencySymbol(self) -> str:  # noqa: N802
+        _SYMBOLS = {
+            "gbp": "£", "usd": "$", "eur": "€", "inr": "₹",
+            "aud": "A$", "cad": "C$", "sgd": "S$", "aed": "د.إ",
+            "nzd": "NZ$", "jpy": "¥", "cny": "¥", "krw": "₩",
+        }
+        return _SYMBOLS.get((self.currency or "gbp").lower(), (self.currency or "GBP").upper())
 
 
 class CafeTable(db.Model):
