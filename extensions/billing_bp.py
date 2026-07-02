@@ -272,17 +272,33 @@ def _billing_overview(owner_id: int) -> dict:
         db.session.query(db.func.coalesce(db.func.sum(Order.total), 0))
         .filter(Order.owner_id == owner_id, Order.payment_status == "unpaid",
                 Order.status != "cancelled").scalar() or 0)
+    # Voided orders today (by updated_at so same-day voids appear)
+    voided_today_q = (Order.query
+                      .filter(Order.owner_id == owner_id,
+                              Order.payment_status == "voided",
+                              Order.updated_at >= start).all())
+    voided_today = len(voided_today_q)
+    voided_value_today = round(sum(float(o.total or 0) for o in voided_today_q), 2)
+    # Payment mode breakdown for the revenue-by-method table
+    flat_payments = [p for o in paid_today
+                     for p in (o.payments_breakdown or [])
+                     if isinstance(p, dict)]
+    per_mode_raw = summarise_payment_breakdown(flat_payments)
+    per_mode = {k: v for k, v in per_mode_raw.items() if k != "_total"}
     avg_ticket = round(revenue / len(paid_today), 2) if paid_today else 0.0
+    net_revenue = round(revenue - refunds, 2)
     refund_ratio = round(refunds / (revenue + refunds) * 100.0, 2) if (revenue + refunds) else 0.0
+    tip_ratio = round(tips / net_revenue * 100.0, 1) if net_revenue > 0 else 0.0
     return {
-        "revenue": round(revenue, 2), "orders_paid": len(paid_today),
-        "average_ticket": avg_ticket,
+        "revenue": round(revenue, 2), "net_revenue": net_revenue,
+        "orders_paid": len(paid_today), "average_ticket": avg_ticket,
         "tax_collected": round(tax, 2), "service_charge": round(svc, 2),
-        "tips": round(tips, 2), "refunds": round(refunds, 2),
-        "refund_ratio": refund_ratio, "open_tabs": open_tabs,
-        "open_value": round(open_value, 2),
+        "tips": round(tips, 2), "tip_ratio": tip_ratio,
+        "refunds": round(refunds, 2), "refund_ratio": refund_ratio,
+        "open_tabs": open_tabs, "open_value": round(open_value, 2),
+        "voided_today": voided_today, "voided_value_today": voided_value_today,
+        "per_mode": per_mode,
         "as_of": datetime.now(timezone.utc).isoformat(),
-        "net_revenue": round(revenue - refunds, 2),
     }
 
 
@@ -309,7 +325,7 @@ def _billing_sparkline_7d(owner_id: int) -> dict:
             "total_net": round(sum(net_vals), 2), "peak": max(net_vals) if net_vals else 0.0}
 
 
-def _billing_health_compute(owner_id: int) -> dict:
+def _billing_health_compute(owner_id: int, *, include_metrics: bool = True) -> dict:
     snapshot: dict = {"owner_id": owner_id, "checks": [], "ok": True, "degraded": False}
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
@@ -341,7 +357,19 @@ def _billing_health_compute(owner_id: int) -> dict:
         snapshot["degraded"] = True
         snapshot["error"] = str(exc)
     snapshot["ok"] = all(c.get("ok") for c in snapshot["checks"]) and not snapshot["degraded"]
-    # --- Live metrics for the health dashboard page ---
+    # --- Live metrics for the health dashboard page (skipped on lightweight calls) ---
+    if not include_metrics:
+        if snapshot["degraded"]:
+            snapshot["verdict"] = "degraded"
+        elif any(c.get("severity") == "alert" for c in snapshot["checks"]):
+            snapshot["verdict"] = "critical"
+        elif any(c.get("severity") == "warn" for c in snapshot["checks"]):
+            snapshot["verdict"] = "warn"
+        else:
+            snapshot["verdict"] = "ok"
+        snapshot["issues"] = [c["label"] for c in snapshot["checks"] if not c.get("ok")]
+        snapshot["metrics"] = {}
+        return snapshot
     try:
         unsettled_val = float(
             db.session.query(db.func.coalesce(db.func.sum(Order.total), 0))
@@ -477,7 +505,7 @@ def owner_billing_overview():
         recent_paid=[_bill_dict(o) for o in recent_paid],
         settings=settings,
         sparkline=_billing_sparkline_7d(owner_id),
-        health=_billing_health_compute(owner_id),
+        health=_billing_health_compute(owner_id, include_metrics=False),
         owner_username=logged_in_owner(),
     )))
 
@@ -1147,6 +1175,7 @@ def owner_billing_drawer():
                      "severity": h.severity or "ok",
                      "severity_class": _severity_pill(h.severity or "ok"),
                      "notes": h.notes or "", "counted_by": h.counted_by_username or "",
+                     "counted_by_username": h.counted_by_username or "",
                      "created_at": h.created_at.isoformat() if h.created_at else ""}
                     for h in history]
     cash_in_today = float(

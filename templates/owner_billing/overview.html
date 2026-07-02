@@ -13,8 +13,8 @@
 <div class="grid grid-stats" style="margin-bottom:1.5rem;">
   <div class="stat ok">
     <div class="label">Net Revenue</div>
-    <div class="value">{{ currency_symbol }}{{ '%.2f'|format(overview.revenue) }}</div>
-    <div class="sub">{{ overview.orders_paid }} paid orders</div>
+    <div class="value">{{ currency_symbol }}{{ '%.2f'|format(overview.net_revenue) }}</div>
+    <div class="sub">{{ overview.orders_paid }} paid orders · gross {{ currency_symbol }}{{ '%.2f'|format(overview.revenue) }}</div>
   </div>
   <div class="stat">
     <div class="label">Average Ticket</div>
