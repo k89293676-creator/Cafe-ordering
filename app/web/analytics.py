@@ -68,6 +68,7 @@ def owner_analytics():
     return render_template(
         "owner_analytics.html",
         owner=owner,
+        owner_username=owner.username if owner else "",
         settings=settings,
         days=days,
         total_revenue=total_revenue,

@@ -93,11 +93,20 @@ def table_order(table_id: str):
     owner_id = table.get("ownerId")
     menu = load_owner_menu(owner_id) if owner_id else {"categories": []}
     settings = load_settings(owner_id)
+    # Derive cafe_name and branding for the template
+    cafe_name = "Cafe"
+    if owner_id:
+        from app.models import Owner
+        _owner = db.session.get(Owner, owner_id)
+        if _owner:
+            cafe_name = _owner.cafe_name or _owner.username or "Cafe"
     return render_template(
         "table_order.html",
         table=table,
         menu=menu,
         settings=settings,
+        cafe_name=cafe_name,
+        branding=settings,
     )
 
 

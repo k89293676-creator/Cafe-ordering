@@ -35,8 +35,9 @@ def owner_inventory():
     settings = load_settings(owner_id)
     low_stock = [i for i in ingredients if float(i.stock or 0) <= float(i.low_stock_threshold or 5)]
     return render_template(
-        "owner_inventory.html",
+        "inventory.html",
         owner=owner,
+        owner_username=owner.username if owner else "",
         ingredients=[_ingredient_dict(i) for i in ingredients],
         low_stock_count=len(low_stock),
         settings=settings,

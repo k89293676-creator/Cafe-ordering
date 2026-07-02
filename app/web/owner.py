@@ -244,7 +244,8 @@ def owner_profile():
             flash("Profile updated.", "success")
         return redirect(url_for("web_owner.owner_profile"))
     settings = load_settings(owner.id)
-    return render_template("owner_profile.html", owner=owner, settings=settings)
+    return render_template("owner_profile.html", owner=owner, settings=settings,
+                           owner_username=owner.username if owner else "")
 
 
 @bp.route("/owner/tables", methods=["GET"])
@@ -326,7 +327,8 @@ def kitchen():
     owner_id = logged_in_owner_id()
     owner = logged_in_owner_obj()
     settings = load_settings(owner_id)
-    return render_template("kitchen.html", owner=owner, settings=settings)
+    return render_template("kitchen.html", owner=owner, settings=settings,
+                           owner_username=owner.username if owner else "")
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +447,7 @@ def owner_customers():
         customers=customers,
         search=search,
         owner=owner,
+        owner_username=owner.username if owner else "",
     )
 
 
