@@ -13,7 +13,7 @@ from flask import Blueprint, jsonify
 
 from app.extensions import db, limiter
 from app.models import Order, Owner
-from app.utils.security import login_required
+from app.utils.security import api_login_required
 from app.services.auth import logged_in_owner_id
 
 log = logging.getLogger("cafe.api.billing_summary")
@@ -34,7 +34,7 @@ def _owner_currency(owner_id: int) -> tuple[str, str]:
 
 
 @bp.route("/api/v1/billing/summary")
-@login_required
+@api_login_required
 @limiter.limit("60 per minute")
 def billing_summary():
     """Return today's and 7-day billing summary with currency metadata.

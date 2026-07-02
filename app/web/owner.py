@@ -462,15 +462,15 @@ def download_all_table_qr_posters():
 
     owner_id = logged_in_owner_id()
     owner = logged_in_owner_obj()
-    tables = [t for t in load_tables() if t.get("ownerId") == owner_id]
+    tables = load_owner_tables(owner_id)
     if not tables:
         flash("Add at least one table before downloading posters.")
         return redirect(url_for("web_owner.owner_tables"))
 
     cafe_name = (owner.cafe_name if owner else None) or "Welcome"
     branding = load_settings(owner_id) if owner_id else {}
-    brand_color = branding.brandColor if hasattr(branding, "brandColor") else "#4f46e5"
-    logo_url = branding.logoUrl if hasattr(branding, "logoUrl") else ""
+    brand_color = branding.get("brandColor", "#4f46e5")
+    logo_url = branding.get("logoUrl", "")
 
     # Try PIL / qrcode for branded posters; fall back to raw QR bytes if unavailable
     try:

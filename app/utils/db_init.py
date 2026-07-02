@@ -111,8 +111,9 @@ def _init_db() -> None:
         # Stripe subscription columns
         _add_column_if_missing(conn, "owners", "stripe_customer_id", "TEXT")
         _add_column_if_missing(conn, "owners", "stripe_subscription_id", "TEXT")
-        # Onboarding wizard
-        _add_column_if_missing(conn, "owners", "onboarding_complete", "BOOLEAN DEFAULT FALSE")
+        # Onboarding wizard — DEFAULT TRUE so existing owners are not force-redirected;
+        # new owners get False via the ORM Python-level default at insert time.
+        _add_column_if_missing(conn, "owners", "onboarding_complete", "BOOLEAN DEFAULT TRUE")
         # Per-owner currency code (ISO 4217 lower-case, e.g. 'gbp', 'usd')
         _add_column_if_missing(conn, "owners", "currency", "TEXT DEFAULT 'gbp'")
         # settings evolution

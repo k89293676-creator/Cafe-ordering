@@ -219,9 +219,13 @@ def owner_login_totp_verify():
                 resp = make_response(redirect(url_for("web_owner.owner_dashboard")))
                 if remember_me:
                     raw = create_remember_token(owner.id)
+                    is_secure = bool(
+                        request.is_secure
+                        or request.headers.get("X-Forwarded-Proto") == "https"
+                    )
                     resp.set_cookie(
                         _REMEMBER_COOKIE, raw, max_age=90 * 86400,
-                        httponly=True, samesite="Lax",
+                        httponly=True, samesite="Lax", secure=is_secure,
                     )
                 return resp
             else:
