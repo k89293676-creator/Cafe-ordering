@@ -47,8 +47,7 @@ def _validate_env() -> None:
         if _coerced.startswith("postgres://"):
             _coerced = _coerced.replace("postgres://", "postgresql://", 1)
         if not _re.match(r"^[\w+]+://", _coerced):
-            _preview = _coerced[:60].replace("
-", " ")
+            _preview = _coerced[:60].replace("\n", " ")
             errors.append(
                 f"DATABASE_URL does not look like a valid connection URL. "
                 f"Expected postgresql://user:pass@host:port/db, "
