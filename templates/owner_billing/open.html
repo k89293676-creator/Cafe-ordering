@@ -18,7 +18,7 @@
 <div class="grid grid-stats" style="margin-bottom:1rem;">
   <div class="stat primary">
     <div class="label">Open Value</div>
-    <div class="value">₹{{ '%.2f'|format(open_value) }}</div>
+    <div class="value">{{ currency_symbol }}{{ '%.2f'|format(open_value) }}</div>
     <div class="sub">{{ total }} unsettled bill{{ '' if total == 1 else 's' }}</div>
   </div>
   <div class="stat" id="statRecent">
@@ -113,6 +113,7 @@
 
 {% block extrabody %}
 <script>
+  var currSym = "{{ currency_symbol if currency_symbol is defined else "₹" }}";
   // ---- Server-rendered seed ----
   const ORDERS = {{ orders|tojson }};
   const csrf = document.querySelector('meta[name="csrf-token"]').content;
@@ -122,7 +123,7 @@
   let queryStr = '';
 
   // ---- Helpers ----
-  const fmt = n => '₹' + (Number(n) || 0).toFixed(2);
+  const fmt = n => currSym + (Number(n) || 0).toFixed(2);
   function ageBucket(iso) {
     if (!iso) return 'recent';
     const ageMs = Date.now() - new Date(iso).getTime();

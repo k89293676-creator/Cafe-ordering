@@ -9,7 +9,8 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/static/css/styles.css" />
   <link rel="stylesheet" href="/static/css/enhancements.css" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+  var currSym = "{{ currency_symbol if currency_symbol is defined else "₹" }}";</script>
   <style>
     .analytics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
     @media (max-width: 900px) { .analytics-grid { grid-template-columns: 1fr; } }
@@ -120,7 +121,7 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
           </div>
         </div>
-        <div class="kpi-card-value">₹{{ '%.0f'|format(analytics.totalRevenue) }}</div>
+        <div class="kpi-card-value">{{ currency_symbol }}{{ '%.0f'|format(analytics.totalRevenue) }}</div>
         <div class="kpi-card-sub">Completed orders only</div>
       </div>
       <div class="kpi-card">
@@ -140,7 +141,7 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>
           </div>
         </div>
-        <div class="kpi-card-value">₹{{ '%.0f'|format(analytics.avgOrderValue) }}</div>
+        <div class="kpi-card-value">{{ currency_symbol }}{{ '%.0f'|format(analytics.avgOrderValue) }}</div>
         <div class="kpi-card-sub">Per completed order</div>
       </div>
       <div class="kpi-card">
@@ -186,7 +187,7 @@ new Chart(document.getElementById('revenueChart'), {
   data: {
     labels: A.revenueByDay.map(d => d.date),
     datasets: [{
-      label: 'Revenue (₹)',
+      label: 'Revenue (' + currSym + ')',
       data: A.revenueByDay.map(d => d.revenue),
       backgroundColor: 'rgba(79,70,229,.85)',
       hoverBackgroundColor: 'rgba(79,70,229,1)',
@@ -199,7 +200,7 @@ new Chart(document.getElementById('revenueChart'), {
                tooltip: { callbacks: { footer: () => 'Click to see orders' } } },
     scales: {
       x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 10 } } },
-      y: { beginAtZero: true, ticks: { callback: v => '₹' + v } }
+      y: { beginAtZero: true, ticks: { callback: v => currSym +  v } }
     },
     onClick(evt, elements) {
       if (!elements.length) return;
@@ -322,7 +323,7 @@ async function openDayDrillDown(date) {
         </div>
         <div style="font-size:.8rem;color:#6b7280;margin:.2rem 0;">${esc(o.customerName || 'Guest')} · ${(o.createdAt||'').slice(11,16)}</div>
         <div style="margin:.3rem 0;">${items}</div>
-        <div style="font-size:.82rem;font-weight:700;color:#0f172a;">₹${Number(o.total||0).toFixed(2)}</div>
+        <div style="font-size:.82rem;font-weight:700;color:#0f172a;">${currSym}${Number(o.total||0).toFixed(2)}</div>
       </div>`;
     }).join('');
   } catch (e) {

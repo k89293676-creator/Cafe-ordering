@@ -60,7 +60,7 @@
             </td>
             <td>{% if log.order_id %}<a href="{{ url_for('owner_billing_order_detail', order_id=log.order_id) }}">#{{ log.order_id }}</a>{% else %}—{% endif %}</td>
             <td class="mono">{{ log.invoice_number or '—' }}</td>
-            <td class="right mono">₹{{ '%.2f'|format(log.amount or 0) }}{% if log.payment_method %} <span class="muted">({{ log.payment_method }})</span>{% endif %}</td>
+            <td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(log.amount or 0) }}{% if log.payment_method %} <span class="muted">({{ log.payment_method }})</span>{% endif %}</td>
             <td>{{ log.actor_username or '—' }}<br/><span class="muted mono" style="font-size:.7rem;">{{ log.ip }}</span></td>
             <td style="max-width:340px;">
               {% if log.reason %}<div style="font-size:.85rem;">{{ log.reason }}</div>{% endif %}

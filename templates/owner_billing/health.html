@@ -21,7 +21,7 @@
 
 <div class="grid grid-stats" style="margin-bottom:1.25rem;">
   <div class="stat"><div class="label">Stuck "settling"</div><div class="value">{{ snapshot.metrics.stuck_settling_count }}</div><div class="sub">should always be 0</div></div>
-  <div class="stat"><div class="label">Unsettled value</div><div class="value">₹{{ '%.2f'|format(snapshot.metrics.unsettled_value) }}</div><div class="sub">open tabs total</div></div>
+  <div class="stat"><div class="label">Unsettled value</div><div class="value">{{ currency_symbol }}{{ '%.2f'|format(snapshot.metrics.unsettled_value) }}</div><div class="sub">open tabs total</div></div>
   <div class="stat"><div class="label">Recent settle</div><div class="value">{% if snapshot.metrics.recent_settle_seconds is not none %}{{ '%.2f'|format(snapshot.metrics.recent_settle_seconds) }}s{% else %}—{% endif %}</div><div class="sub">latency p≈last</div></div>
   <div class="stat"><div class="label">Webhook fails (1h)</div><div class="value">{{ snapshot.metrics.webhook_failures_last_hour }}</div><div class="sub">delete &amp; retry if &gt;5</div></div>
   <div class="stat"><div class="label">Active providers</div><div class="value">{{ snapshot.metrics.payment_credentials_active }}</div><div class="sub">online charging</div></div>
@@ -30,8 +30,8 @@
 <div class="panel" style="margin-bottom:1.25rem;">
   <h2 style="margin-top:0;">Configured limits</h2>
   <table>
-    <tr><td>Step-up auth required for refunds above</td><td class="right mono">₹{{ '%.2f'|format(thresholds.refund) }}</td></tr>
-    <tr><td>Step-up auth required for voids above</td><td class="right mono">₹{{ '%.2f'|format(thresholds.void) }}</td></tr>
+    <tr><td>Step-up auth required for refunds above</td><td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(thresholds.refund) }}</td></tr>
+    <tr><td>Step-up auth required for voids above</td><td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(thresholds.void) }}</td></tr>
     <tr><td>Daily refund cap (% of gross revenue)</td><td class="right mono">{{ '%.0f'|format(thresholds.refund_daily_pct) }}%</td></tr>
     <tr><td>Refund velocity cap (per hour)</td><td class="right mono">{{ thresholds.velocity }}</td></tr>
     <tr><td>Drawer variance alert threshold</td><td class="right mono">{{ '%.1f'|format(thresholds.drawer_pct) }}%</td></tr>

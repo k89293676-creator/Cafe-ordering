@@ -135,7 +135,7 @@
             <div class="line">
               <span class="qty">{{ it.quantity or 1 }}×</span>
               <span class="name">{{ it.name or 'Item' }}</span>
-              <span class="amt">₹{{ '%.2f'|format((it.price or 0) * (it.quantity or 1)) }}</span>
+              <span class="amt">{{ currency_symbol }}{{ '%.2f'|format((it.price or 0) * (it.quantity or 1)) }}</span>
             </div>
           {% endfor %}
         </div>
@@ -144,23 +144,23 @@
 
     <div class="totals">
       {% if order.subtotal %}
-        <div class="line"><span>Subtotal</span><span class="amt">₹{{ '%.2f'|format(order.subtotal or 0) }}</span></div>
+        <div class="line"><span>Subtotal</span><span class="amt">{{ currency_symbol }}{{ '%.2f'|format(order.subtotal or 0) }}</span></div>
       {% endif %}
       {% if order.discount %}
-        <div class="line"><span>Discount</span><span class="amt" style="color:#86efac;">−₹{{ '%.2f'|format(order.discount or 0) }}</span></div>
+        <div class="line"><span>Discount</span><span class="amt" style="color:#86efac;">−{{ currency_symbol }}{{ '%.2f'|format(order.discount or 0) }}</span></div>
       {% endif %}
       {% if order.service_charge %}
-        <div class="line"><span>Service charge</span><span class="amt">₹{{ '%.2f'|format(order.service_charge or 0) }}</span></div>
+        <div class="line"><span>Service charge</span><span class="amt">{{ currency_symbol }}{{ '%.2f'|format(order.service_charge or 0) }}</span></div>
       {% endif %}
       {% if order.tax %}
-        <div class="line"><span>Tax</span><span class="amt">₹{{ '%.2f'|format(order.tax or 0) }}</span></div>
+        <div class="line"><span>Tax</span><span class="amt">{{ currency_symbol }}{{ '%.2f'|format(order.tax or 0) }}</span></div>
       {% endif %}
       {% if order.tip %}
-        <div class="line"><span>Tip</span><span class="amt">₹{{ '%.2f'|format(order.tip or 0) }}</span></div>
+        <div class="line"><span>Tip</span><span class="amt">{{ currency_symbol }}{{ '%.2f'|format(order.tip or 0) }}</span></div>
       {% endif %}
       <div class="line total">
         <span>Amount due</span>
-        <span class="amt">₹{{ '%.2f' % (payment.amount or 0) }}</span>
+        <span class="amt">{{ currency_symbol }}{{ '%.2f' % (payment.amount or 0) }}</span>
       </div>
     </div>
 
@@ -173,7 +173,7 @@
         </div>
       {% else %}
         <button id="pay-btn" class="btn">
-          Pay ₹{{ '%.2f' % (payment.amount or 0) }}
+          Pay {{ currency_symbol }}{{ '%.2f' % (payment.amount or 0) }}
         </button>
         <div id="status"></div>
         <div class="secure">

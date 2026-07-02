@@ -422,13 +422,13 @@
           </div>
         </div>
         <div class="stat-card stat-card--revenue">
-          <div class="stat-icon emerald">₹</div>
+          <div class="stat-icon emerald">{{ currency_symbol }}</div>
           <div class="stat-info">
             <div class="stat-value stat-value--revenue">{{ '{:,.0f}'.format(total_revenue) }}</div>
             <div class="stat-label">Total Revenue</div>
             {% set _completed_for_avg = (total_completed if total_completed is defined else (completed_orders | length)) %}
             {% if _completed_for_avg > 0 %}
-            <div class="stat-avg">avg ₹{{ '%.0f' | format(total_revenue / _completed_for_avg) }} / order</div>
+            <div class="stat-avg">avg {{ currency_symbol }}{{ '%.0f' | format(total_revenue / _completed_for_avg) }} / order</div>
             {% endif %}
           </div>
         </div>
@@ -682,7 +682,7 @@
                         <span class="order-status-badge status-pending badge-pending">Pending</span>
                       {% endif %}
                     </div>
-                    <div class="order-row-total">₹{{ '%.2f' | format((order.total or 0) | float) }}</div>
+                    <div class="order-row-total">{{ currency_symbol }}{{ '%.2f' | format((order.total or 0) | float) }}</div>
                     <div class="order-row-actions" style="gap:.5rem;">
                       {% if order.pickupCode %}
                       <span title="Pickup Code" style="font-family:monospace;background:#f3f4f6;padding:.15rem .5rem;border-radius:.4rem;font-size:.85rem;">🎫 {{ order.pickupCode }}</span>
@@ -737,7 +737,7 @@
                 <div class="kpi-list">
                   <div class="kpi-row">
                     <div class="kpi-label"><span class="kpi-dot" style="background:#4f46e5;"></span>Total Revenue</div>
-                    <div class="kpi-value kpi-value--primary">₹{{ '%.2f' | format(total_revenue) }}</div>
+                    <div class="kpi-value kpi-value--primary">{{ currency_symbol }}{{ '%.2f' | format(total_revenue) }}</div>
                   </div>
                   <div class="kpi-row">
                     <div class="kpi-label"><span class="kpi-dot" style="background:#10b981;"></span>Orders Completed</div>
@@ -746,7 +746,7 @@
                   <div class="kpi-row">
                     <div class="kpi-label"><span class="kpi-dot" style="background:#f59e0b;"></span>Avg. Order Value</div>
                     <div class="kpi-value">
-                      {% if completed_orders | length > 0 %}₹{{ '%.2f' | format(total_revenue / (completed_orders | length)) }}{% else %}—{% endif %}
+                      {% if completed_orders | length > 0 %}{{ currency_symbol }}{{ '%.2f' | format(total_revenue / (completed_orders | length)) }}{% else %}—{% endif %}
                     </div>
                   </div>
                   <div class="kpi-row">
@@ -780,7 +780,7 @@
                     </div>
                     <div class="order-row-right">
                       <span class="order-status-badge status-completed">Done</span>
-                      <div class="order-row-total" style="margin-top:0.25rem;">₹{{ '%.2f' | format((order.total or 0) | float) }}</div>
+                      <div class="order-row-total" style="margin-top:0.25rem;">{{ currency_symbol }}{{ '%.2f' | format((order.total or 0) | float) }}</div>
                     </div>
                   </div>
                   {% endfor %}
@@ -906,7 +906,7 @@
                             {% if item.description %}<div style="font-size:0.8rem;color:var(--text-muted);">{{ item.description }}</div>{% endif %}
                             {% if item.tags %}<div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.2rem;">{{ item.tags | join(', ') }}</div>{% endif %}
                           </div>
-                          <div class="item-price">₹{{ '%.2f' | format(item.price) }}</div>
+                          <div class="item-price">{{ currency_symbol }}{{ '%.2f' | format(item.price) }}</div>
                         </div>
                         <div class="item-row-actions">
                           <form action="{{ url_for('toggle_menu_item_availability', item_id=item.id) }}" method="post" style="display:inline;">
@@ -989,7 +989,7 @@
                     <input name="itemName" placeholder="e.g. Latte" required />
                   </div>
                   <div class="field">
-                    <label>Price (₹)</label>
+                    <label>Price ({{ currency_symbol }})</label>
                     <input name="itemPrice" type="number" step="0.01" placeholder="0.00" min="0" max="9999.99" required />
                   </div>
                   <div class="field">
@@ -1120,13 +1120,13 @@
                   {% for item in (order['items'] or []) %}
                   <div class="order-line">
                     <span>{{ item.name | default('Item') }} × {{ item.quantity | default(1) }}</span>
-                    <span>₹{{ '%.2f' | format((item.lineTotal or 0) | float) }}</span>
+                    <span>{{ currency_symbol }}{{ '%.2f' | format((item.lineTotal or 0) | float) }}</span>
                   </div>
                   {% endfor %}
                 </div>
                 <div class="order-total-row">
                   <span class="order-total-label">Total</span>
-                  <span class="order-total-value">₹{{ '%.2f' | format((order.total or 0) | float) }}</span>
+                  <span class="order-total-value">{{ currency_symbol }}{{ '%.2f' | format((order.total or 0) | float) }}</span>
                 </div>
                 {% if order.pickupCode %}
                 <div style="font-family:monospace;background:#f3f4f6;padding:.2rem .6rem;border-radius:.4rem;font-size:.82rem;margin-bottom:.5rem;">🎫 Pickup: {{ order.pickupCode }}</div>
@@ -1180,13 +1180,13 @@
                   {% for item in (order['items'] or []) %}
                   <div class="order-line">
                     <span>{{ item.name | default('Item') }} × {{ item.quantity | default(1) }}</span>
-                    <span>₹{{ '%.2f' | format((item.lineTotal or 0) | float) }}</span>
+                    <span>{{ currency_symbol }}{{ '%.2f' | format((item.lineTotal or 0) | float) }}</span>
                   </div>
                   {% endfor %}
                 </div>
                 <div class="order-total-row">
                   <span class="order-total-label">Total</span>
-                  <span class="order-total-value">₹{{ '%.2f' | format((order.total or 0) | float) }}</span>
+                  <span class="order-total-value">{{ currency_symbol }}{{ '%.2f' | format((order.total or 0) | float) }}</span>
                 </div>
                 {% if order.pickupCode %}
                 <div style="font-family:monospace;background:#f3f4f6;padding:.2rem .6rem;border-radius:.4rem;font-size:.82rem;margin-bottom:.5rem;">🎫 Pickup: {{ order.pickupCode }}</div>
@@ -1232,7 +1232,7 @@
                 </div>
                 <div class="order-total-row">
                   <span class="order-total-label">Total</span>
-                  <span class="order-total-value">₹{{ '%.2f' | format((order.total or 0) | float) }}</span>
+                  <span class="order-total-value">{{ currency_symbol }}{{ '%.2f' | format((order.total or 0) | float) }}</span>
                 </div>
               </div>
               {% endfor %}

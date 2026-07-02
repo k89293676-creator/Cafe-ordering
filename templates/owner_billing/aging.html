@@ -2,26 +2,27 @@
 {% block title %}Open Tabs Aging{% endblock %}
 {% block content %}
 <h1>Open Tabs &mdash; Aging Report</h1>
-<p class="muted" style="margin-top:-.75rem;">{{ buckets._total.count }} open bills, total exposure <strong>₹{{ '%.2f'|format(buckets._total.value) }}</strong>.</p>
+<p class="muted" style="margin-top:-.75rem;">{{ buckets._total.count }} open bills, total exposure <strong>{{ currency_symbol }}{{ '%.2f'|format(buckets._total.value) }}</strong>.</p>
 
 <div class="grid grid-stats" style="margin-bottom:1.5rem;">
-  <div class="stat ok"><div class="label">Fresh (&lt;1h)</div><div class="value">{{ buckets.under_1h.count }}</div><div class="sub">₹{{ '%.2f'|format(buckets.under_1h.value) }}</div></div>
-  <div class="stat"><div class="label">Active (1-4h)</div><div class="value">{{ buckets['1h_to_4h'].count }}</div><div class="sub">₹{{ '%.2f'|format(buckets['1h_to_4h'].value) }}</div></div>
-  <div class="stat warn"><div class="label">Stale (4-24h)</div><div class="value">{{ buckets['4h_to_24h'].count }}</div><div class="sub">₹{{ '%.2f'|format(buckets['4h_to_24h'].value) }}</div></div>
-  <div class="stat danger"><div class="label">Critical (&gt;24h)</div><div class="value">{{ buckets.over_24h.count }}</div><div class="sub">₹{{ '%.2f'|format(buckets.over_24h.value) }}</div></div>
+  <div class="stat ok"><div class="label">Fresh (&lt;1h)</div><div class="value">{{ buckets.under_1h.count }}</div><div class="sub">{{ currency_symbol }}{{ '%.2f'|format(buckets.under_1h.value) }}</div></div>
+  <div class="stat"><div class="label">Active (1-4h)</div><div class="value">{{ buckets['1h_to_4h'].count }}</div><div class="sub">{{ currency_symbol }}{{ '%.2f'|format(buckets['1h_to_4h'].value) }}</div></div>
+  <div class="stat warn"><div class="label">Stale (4-24h)</div><div class="value">{{ buckets['4h_to_24h'].count }}</div><div class="sub">{{ currency_symbol }}{{ '%.2f'|format(buckets['4h_to_24h'].value) }}</div></div>
+  <div class="stat danger"><div class="label">Critical (&gt;24h)</div><div class="value">{{ buckets.over_24h.count }}</div><div class="sub">{{ currency_symbol }}{{ '%.2f'|format(buckets.over_24h.value) }}</div></div>
 </div>
 
 <div class="panel" style="margin-bottom:1.5rem;">
   <h2>Aging Distribution</h2>
   <canvas id="agingChart" width="600" height="200"></canvas>
   <script>
+  var currSym = "{{ currency_symbol if currency_symbol is defined else "₹" }}";
     const agingCtx = document.getElementById('agingChart').getContext('2d');
     const agingChart = new Chart(agingCtx, {
       type: 'bar',
       data: {
         labels: ['<1h', '1-4h', '4-24h', '>24h'],
         datasets: [{
-          label: 'Amount (₹)',
+          label: 'Amount (' + currSym + ')',
           data: [
             {{ buckets.under_1h.value }},
             {{ buckets['1h_to_4h'].value }},
@@ -43,7 +44,7 @@
             beginAtZero: true,
             ticks: {
               callback: function(value) {
-                return '₹' + value.toFixed(0);
+                return currSym +  value.toFixed(0);
               }
             }
           }
@@ -68,7 +69,7 @@
             <td><strong>{{ o.tableName or '—' }}</strong></td>
             <td>{{ o.customerName }}</td>
             <td><span class="pill {{ bucket_class }}">{{ age_label }}</span></td>
-            <td class="right mono">₹{{ '%.2f'|format(o.total) }}</td>
+            <td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(o.total) }}</td>
             <td><a class="btn btn-primary btn-sm" href="{{ url_for('owner_billing_order_detail', order_id=o.id) }}">Settle →</a></td>
           </tr>
         {% endfor %}

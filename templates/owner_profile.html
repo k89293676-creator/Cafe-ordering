@@ -161,7 +161,7 @@
           <div class="card-body">
             <form action="{{ url_for('owner_profile') }}" method="post">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <input type="hidden" name="action" value="password" />
+              <input type="hidden" name="action" value="change_password" />
               <div class="field">
                 <label>Current Password</label>
                 <div class="input-with-toggle">

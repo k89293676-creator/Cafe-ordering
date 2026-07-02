@@ -13,42 +13,42 @@
 <div class="grid grid-stats" style="margin-bottom:1.5rem;">
   <div class="stat ok">
     <div class="label">Net Revenue</div>
-    <div class="value">₹{{ '%.2f'|format(overview.revenue) }}</div>
+    <div class="value">{{ currency_symbol }}{{ '%.2f'|format(overview.revenue) }}</div>
     <div class="sub">{{ overview.orders_paid }} paid orders</div>
   </div>
   <div class="stat">
     <div class="label">Average Ticket</div>
-    <div class="value">₹{{ '%.2f'|format(overview.average_ticket) }}</div>
+    <div class="value">{{ currency_symbol }}{{ '%.2f'|format(overview.average_ticket) }}</div>
     <div class="sub">Across today’s settled bills</div>
   </div>
   <div class="stat warn">
     <div class="label">Open Tabs</div>
     <div class="value">{{ overview.open_tabs }}</div>
-    <div class="sub">Exposure ₹{{ '%.2f'|format(overview.open_value) }}</div>
+    <div class="sub">Exposure {{ currency_symbol }}{{ '%.2f'|format(overview.open_value) }}</div>
   </div>
   <div class="stat">
     <div class="label">{{ settings.tax_label or 'Tax' }} Collected</div>
-    <div class="value">₹{{ '%.2f'|format(overview.tax_collected) }}</div>
+    <div class="value">{{ currency_symbol }}{{ '%.2f'|format(overview.tax_collected) }}</div>
   </div>
   <div class="stat">
     <div class="label">Service Charge</div>
-    <div class="value">₹{{ '%.2f'|format(overview.service_charge) }}</div>
+    <div class="value">{{ currency_symbol }}{{ '%.2f'|format(overview.service_charge) }}</div>
   </div>
   <div class="stat">
     <div class="label">Tips</div>
-    <div class="value">₹{{ '%.2f'|format(overview.tips) }}</div>
+    <div class="value">{{ currency_symbol }}{{ '%.2f'|format(overview.tips) }}</div>
     <div class="sub">{{ overview.tip_ratio }}% of net revenue</div>
   </div>
   <div class="stat danger">
     <div class="label">Refunds</div>
-    <div class="value">₹{{ '%.2f'|format(overview.refunds) }}</div>
+    <div class="value">{{ currency_symbol }}{{ '%.2f'|format(overview.refunds) }}</div>
     <div class="sub">{{ overview.refund_ratio }}% of settled revenue</div>
   </div>
   {% if overview.voided_today %}
   <div class="stat warn">
     <div class="label">Voided Today</div>
     <div class="value">{{ overview.voided_today }}</div>
-    <div class="sub">₹{{ '%.2f'|format(overview.voided_value_today) }} written off</div>
+    <div class="sub">{{ currency_symbol }}{{ '%.2f'|format(overview.voided_value_today) }} written off</div>
   </div>
   {% endif %}
 </div>
@@ -63,19 +63,20 @@
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
     <div>
       <h2 style="margin-top:0;font-size:1.05rem;font-weight:700;letter-spacing:-.01em;">Last 7 days — Net Revenue</h2>
-      <p class="muted" style="font-size:.88rem;margin-top:-.25rem;">Total: <strong>₹{{ '%.2f'|format(sparkline.total_net) }}</strong> · Peak day: <strong>₹{{ '%.2f'|format(sparkline.peak) }}</strong> · Avg/day: <strong>₹{{ '%.2f'|format(sparkline.total_net / (sparkline.labels|length) if sparkline.labels|length else 0) }}</strong></p>
+      <p class="muted" style="font-size:.88rem;margin-top:-.25rem;">Total: <strong>{{ currency_symbol }}{{ '%.2f'|format(sparkline.total_net) }}</strong> · Peak day: <strong>{{ currency_symbol }}{{ '%.2f'|format(sparkline.peak) }}</strong> · Avg/day: <strong>{{ currency_symbol }}{{ '%.2f'|format(sparkline.total_net / (sparkline.labels|length) if sparkline.labels|length else 0) }}</strong></p>
     </div>
     <button type="button" class="btn btn-ghost btn-sm" id="export-7d-csv" title="Download 7-day breakdown as CSV">⬇ Export CSV</button>
   </div>
   <canvas id="revenueChart" width="700" height="200"></canvas>
   <script>
+  var currSym = "{{ currency_symbol if currency_symbol is defined else "₹" }}";
     const ctx = document.getElementById('revenueChart').getContext('2d');
     const revenueChart = new Chart(ctx, {
       type: 'bar',
       data: {
         labels: {{ sparkline.labels|tojson }},
         datasets: [{
-          label: 'Net Revenue (₹)',
+          label: 'Net Revenue (' + currSym + ')',
           data: {{ sparkline.net|tojson }},
           backgroundColor: 'rgba(34, 197, 94, 0.8)',
           borderColor: 'rgba(34, 197, 94, 1)',
@@ -89,7 +90,7 @@
             beginAtZero: true,
             ticks: {
               callback: function(value) {
-                return '₹' + value.toFixed(0);
+                return currSym + value.toFixed(0);
               }
             }
           }
@@ -108,9 +109,9 @@
       {% for label in sparkline.labels %}
         <tr>
           <td class="mono">{{ label }}</td>
-          <td class="right mono">₹{{ '%.2f'|format(sparkline.gross[loop.index0]) }}</td>
+          <td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(sparkline.gross[loop.index0]) }}</td>
           <td class="right mono {% if sparkline.refund_pct[loop.index0] > 10 %}muted{% endif %}" style="{% if sparkline.refund_pct[loop.index0] > 10 %}color:var(--danger);{% endif %}">{{ '%.1f'|format(sparkline.refund_pct[loop.index0]) }}%</td>
-          <td class="right mono"><strong>₹{{ '%.2f'|format(sparkline.net[loop.index0]) }}</strong></td>
+          <td class="right mono"><strong>{{ currency_symbol }}{{ '%.2f'|format(sparkline.net[loop.index0]) }}</strong></td>
         </tr>
       {% endfor %}
     </tbody>
@@ -130,7 +131,7 @@
         {% for mode, amt in overview.per_mode.items() %}
           <tr>
             <td><strong>{{ mode|title }}</strong></td>
-            <td class="right mono">₹{{ '%.2f'|format(amt) }}</td>
+            <td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(amt) }}</td>
             <td class="right muted">{{ '%.1f'|format((amt / total * 100) if total else 0) }}%</td>
           </tr>
         {% endfor %}
@@ -171,7 +172,7 @@
                 label: (ctx) => {
                   const sum = paymentValues.reduce((a, b) => a + b, 0) || 1;
                   const v = ctx.parsed || 0;
-                  return ` ${ctx.label}: ₹${v.toFixed(2)} (${(v/sum*100).toFixed(1)}%)`;
+                  return ` ${ctx.label}: ${currSym}${v.toFixed(2)} (${(v/sum*100).toFixed(1)}%)`;
                 }
               }
             }
@@ -196,7 +197,7 @@
             <td>{{ o.tableName or '—' }}</td>
             <td>{{ o.customerName }}</td>
             <td><span class="pill pill-paid">{{ o.paymentMethod or 'paid' }}</span></td>
-            <td class="right mono">₹{{ '%.2f'|format(o.total) }}{% if o.refundAmount %} <span class="muted">−₹{{ '%.2f'|format(o.refundAmount) }}</span>{% endif %}</td>
+            <td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(o.total) }}{% if o.refundAmount %} <span class="muted">−{{ currency_symbol }}{{ '%.2f'|format(o.refundAmount) }}</span>{% endif %}</td>
             <td class="muted mono">{{ o.paidAt[:19] if o.paidAt else '—' }}</td>
             <td><a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_invoice', order_id=o.id) }}">Invoice</a></td>
           </tr>

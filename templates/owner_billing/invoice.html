@@ -106,27 +106,27 @@
           <td>{{ loop.index }}</td>
           <td>{{ item.name }}{% if item.notes %}<br/><small style="color:#888;">{{ item.notes }}</small>{% endif %}</td>
           <td class="right">{{ item.quantity or 1 }}</td>
-          <td class="right">₹{{ '%.2f'|format(item.price or 0) }}</td>
-          <td class="right">₹{{ '%.2f'|format(item.lineTotal or (item.price or 0) * (item.quantity or 1)) }}</td>
+          <td class="right">{{ currency_symbol }}{{ '%.2f'|format(item.price or 0) }}</td>
+          <td class="right">{{ currency_symbol }}{{ '%.2f'|format(item.lineTotal or (item.price or 0) * (item.quantity or 1)) }}</td>
         </tr>
       {% endfor %}
     </tbody>
   </table>
 
   <table class="totals">
-    <tr><td>Subtotal</td><td class="right">₹{{ '%.2f'|format(order.subtotal) }}</td></tr>
-    {% if order.discount %}<tr><td>Discount</td><td class="right">−₹{{ '%.2f'|format(order.discount) }}</td></tr>{% endif %}
-    {% if order.serviceCharge %}<tr><td>Service Charge</td><td class="right">₹{{ '%.2f'|format(order.serviceCharge) }}</td></tr>{% endif %}
-    {% if order.tax %}<tr><td>{{ settings.tax_label or 'Tax' }}{% if settings.tax_rate_percent %} ({{ settings.tax_rate_percent }}%){% endif %}</td><td class="right">₹{{ '%.2f'|format(order.tax) }}</td></tr>{% endif %}
-    {% if order.tip %}<tr><td>Tip</td><td class="right">₹{{ '%.2f'|format(order.tip) }}</td></tr>{% endif %}
-    <tr class="grand"><td>Grand Total</td><td class="right">₹{{ '%.2f'|format(order.total) }}</td></tr>
-    {% if order.refundAmount %}<tr><td>Refunded</td><td class="right">−₹{{ '%.2f'|format(order.refundAmount) }}</td></tr>{% endif %}
+    <tr><td>Subtotal</td><td class="right">{{ currency_symbol }}{{ '%.2f'|format(order.subtotal) }}</td></tr>
+    {% if order.discount %}<tr><td>Discount</td><td class="right">−{{ currency_symbol }}{{ '%.2f'|format(order.discount) }}</td></tr>{% endif %}
+    {% if order.serviceCharge %}<tr><td>Service Charge</td><td class="right">{{ currency_symbol }}{{ '%.2f'|format(order.serviceCharge) }}</td></tr>{% endif %}
+    {% if order.tax %}<tr><td>{{ settings.tax_label or 'Tax' }}{% if settings.tax_rate_percent %} ({{ settings.tax_rate_percent }}%){% endif %}</td><td class="right">{{ currency_symbol }}{{ '%.2f'|format(order.tax) }}</td></tr>{% endif %}
+    {% if order.tip %}<tr><td>Tip</td><td class="right">{{ currency_symbol }}{{ '%.2f'|format(order.tip) }}</td></tr>{% endif %}
+    <tr class="grand"><td>Grand Total</td><td class="right">{{ currency_symbol }}{{ '%.2f'|format(order.total) }}</td></tr>
+    {% if order.refundAmount %}<tr><td>Refunded</td><td class="right">−{{ currency_symbol }}{{ '%.2f'|format(order.refundAmount) }}</td></tr>{% endif %}
   </table>
 
   {% if order.paymentsBreakdown %}
   <div class="pay">
     <strong>Payment received:</strong>
-    {% for p in order.paymentsBreakdown %}{{ p.method|title }} ₹{{ '%.2f'|format(p.amount) }}{% if p.reference %} ({{ p.reference }}){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+    {% for p in order.paymentsBreakdown %}{{ p.method|title }} {{ currency_symbol }}{{ '%.2f'|format(p.amount) }}{% if p.reference %} ({{ p.reference }}){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
   </div>
   {% endif %}
 

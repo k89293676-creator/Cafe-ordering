@@ -21,14 +21,14 @@
 </form>
 
 <div class="grid grid-stats" style="margin-bottom:1.5rem;">
-  <div class="stat ok"><div class="label">Net Revenue</div><div class="value">₹{{ '%.2f'|format(summary.net_revenue) }}</div><div class="sub">{{ summary.orders }} orders</div></div>
-  <div class="stat"><div class="label">Gross Revenue</div><div class="value">₹{{ '%.2f'|format(summary.gross_revenue) }}</div></div>
-  <div class="stat danger"><div class="label">Refunds</div><div class="value">₹{{ '%.2f'|format(summary.refunds) }}</div></div>
-  <div class="stat warn"><div class="label">Voided Bills</div><div class="value">{{ summary.voided_count }}</div><div class="sub">₹{{ '%.2f'|format(summary.voided_value) }}</div></div>
-  <div class="stat"><div class="label">Tax Collected</div><div class="value">₹{{ '%.2f'|format(summary.tax) }}</div></div>
-  <div class="stat"><div class="label">Service Charge</div><div class="value">₹{{ '%.2f'|format(summary.service_charge) }}</div></div>
-  <div class="stat"><div class="label">Tips</div><div class="value">₹{{ '%.2f'|format(summary.tips) }}</div></div>
-  <div class="stat"><div class="label">Discounts Given</div><div class="value">₹{{ '%.2f'|format(summary.discounts) }}</div></div>
+  <div class="stat ok"><div class="label">Net Revenue</div><div class="value">{{ currency_symbol }}{{ '%.2f'|format(summary.net_revenue) }}</div><div class="sub">{{ summary.orders }} orders</div></div>
+  <div class="stat"><div class="label">Gross Revenue</div><div class="value">{{ currency_symbol }}{{ '%.2f'|format(summary.gross_revenue) }}</div></div>
+  <div class="stat danger"><div class="label">Refunds</div><div class="value">{{ currency_symbol }}{{ '%.2f'|format(summary.refunds) }}</div></div>
+  <div class="stat warn"><div class="label">Voided Bills</div><div class="value">{{ summary.voided_count }}</div><div class="sub">{{ currency_symbol }}{{ '%.2f'|format(summary.voided_value) }}</div></div>
+  <div class="stat"><div class="label">Tax Collected</div><div class="value">{{ currency_symbol }}{{ '%.2f'|format(summary.tax) }}</div></div>
+  <div class="stat"><div class="label">Service Charge</div><div class="value">{{ currency_symbol }}{{ '%.2f'|format(summary.service_charge) }}</div></div>
+  <div class="stat"><div class="label">Tips</div><div class="value">{{ currency_symbol }}{{ '%.2f'|format(summary.tips) }}</div></div>
+  <div class="stat"><div class="label">Discounts Given</div><div class="value">{{ currency_symbol }}{{ '%.2f'|format(summary.discounts) }}</div></div>
 </div>
 
 <div class="panel" style="margin-bottom:1.5rem;">
@@ -41,10 +41,10 @@
       <tbody>
         {% for mode, amt in summary.by_mode.items() %}
           {% if mode != '_total' %}
-            <tr><td><strong>{{ mode|title }}</strong></td><td class="right mono">₹{{ '%.2f'|format(amt) }}</td></tr>
+            <tr><td><strong>{{ mode|title }}</strong></td><td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(amt) }}</td></tr>
           {% endif %}
         {% endfor %}
-        <tr style="border-top:2px solid var(--line);"><td><strong>Total</strong></td><td class="right mono"><strong>₹{{ '%.2f'|format(summary.by_mode.get('_total', 0)) }}</strong></td></tr>
+        <tr style="border-top:2px solid var(--line);"><td><strong>Total</strong></td><td class="right mono"><strong>{{ currency_symbol }}{{ '%.2f'|format(summary.by_mode.get('_total', 0)) }}</strong></td></tr>
       </tbody>
     </table>
     <canvas id="eodChart" width="400" height="200" style="margin-top:1rem;"></canvas>
@@ -96,8 +96,8 @@
             <td>{{ o.tableName or '—' }}</td>
             <td>{{ o.customerName }}</td>
             <td><span class="pill {{ 'pill-refunded' if o.paymentStatus == 'refunded' else 'pill-paid' }}">{{ o.paymentMethod }}</span></td>
-            <td class="right mono">₹{{ '%.2f'|format(o.total) }}</td>
-            <td class="right mono">{{ ('₹%.2f'|format(o.refundAmount)) if o.refundAmount else '—' }}</td>
+            <td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(o.total) }}</td>
+            <td class="right mono">{{ (currency_symbol + ('%.2f'|format(o.refundAmount))) if o.refundAmount else '—' }}</td>
           </tr>
         {% endfor %}
       </tbody>
@@ -112,7 +112,7 @@
     <thead><tr><th>#</th><th>Table</th><th class="right">Value</th><th>Reason</th></tr></thead>
     <tbody>
       {% for o in voided %}
-        <tr><td class="mono">#{{ o.id }}</td><td>{{ o.tableName or '—' }}</td><td class="right mono">₹{{ '%.2f'|format(o.total) }}</td><td>{{ o.voidReason }}</td></tr>
+        <tr><td class="mono">#{{ o.id }}</td><td>{{ o.tableName or '—' }}</td><td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(o.total) }}</td><td>{{ o.voidReason }}</td></tr>
       {% endfor %}
     </tbody>
   </table>

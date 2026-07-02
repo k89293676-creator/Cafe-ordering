@@ -244,10 +244,15 @@ def owner_profile():
             if _new_cur in _allowed_currencies:
                 owner.currency = _new_cur
             db.session.commit()
+            # Also save branding settings (logo URL, brand color)
+            _logo_url = _safe_text(request.form.get("logo_url"), max_len=500) or ""
+            _brand_color = request.form.get("brand_color", "#4f46e5")
+            save_settings(owner.id, _logo_url, _brand_color)
             flash("Profile updated.", "success")
         return redirect(url_for("web_owner.owner_profile"))
     settings = load_settings(owner.id)
     return render_template("owner_profile.html", owner=owner, settings=settings,
+                           branding=settings,
                            owner_username=owner.username if owner else "")
 
 

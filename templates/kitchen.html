@@ -395,7 +395,8 @@
   </div>
 </template>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js">
+      var currSym = "{{ currency_symbol if currency_symbol is defined else "₹" }}";</script>
 <script>
   const CSRF = '{{ csrf_token() }}';
 
@@ -793,10 +794,10 @@
               ${(it.modifiers && it.modifiers.length)
                 ? `<div class="text-muted small ps-1">+ ${it.modifiers.map(m => {
                     const p = Number(m.priceDelta ?? m.price ?? 0);
-                    return esc(m.name) + (p ? ` <span class="text-info">(+₹${p.toFixed(0)})</span>` : '');
+                    return esc(m.name) + (p ? ` <span class="text-info">(+${currSym}${p.toFixed(0)})</span>` : '');
                   }).join(', ')}</div>` : ''}
             </div>
-            <span class="item-price">₹${Number(it.lineTotal || 0).toFixed(0)}</span>
+            <span class="item-price">${currSym}${Number(it.lineTotal || 0).toFixed(0)}</span>
           </div>`;
       }).join('');
       node.querySelector('.card-items').innerHTML = itemsHtml;
@@ -808,7 +809,7 @@
       }
       node.querySelector('.card-actions').innerHTML = actionsHTML(o);
       node.querySelector('.card-time').textContent  = (o.createdAt || '').slice(11, 16) || '—';
-      node.querySelector('.card-total').textContent = '₹' + Number(o.total || 0).toFixed(0);
+      node.querySelector('.card-total').textContent = currSym +  Number(o.total || 0).toFixed(0);
       grid.appendChild(node);
     });
 

@@ -55,7 +55,7 @@
     <div class="col-md-3 col-6"><div class="stat-tile"><div class="stat-label">Total items</div><div class="stat-value">{{ total }}</div></div></div>
     <div class="col-md-3 col-6"><div class="stat-tile danger"><div class="stat-label">Out of stock</div><div class="stat-value" id="stat-out">0</div></div></div>
     <div class="col-md-3 col-6"><div class="stat-tile warn"><div class="stat-label">Low stock</div><div class="stat-value" id="stat-low">0</div></div></div>
-    <div class="col-md-3 col-6"><div class="stat-tile"><div class="stat-label">Stock value</div><div class="stat-value">₹{{ '%.0f'|format(total_value) }}</div></div></div>
+    <div class="col-md-3 col-6"><div class="stat-tile"><div class="stat-label">Stock value</div><div class="stat-value">{{ currency_symbol }}{{ '%.0f'|format(total_value) }}</div></div></div>
   </div>
 
   <div class="card mb-4">
@@ -70,7 +70,7 @@
         <div class="col-md-1"><input class="form-control" name="unit" placeholder="Unit" value="unit"/></div>
         <div class="col-md-2"><input class="form-control" type="number" step="0.001" min="0" name="stock" placeholder="Stock" value="0"/></div>
         <div class="col-md-2"><input class="form-control" type="number" step="0.001" min="0" name="low_stock_threshold" placeholder="Low alert" value="5"/></div>
-        <div class="col-md-2"><input class="form-control" type="number" step="0.01" min="0" name="cost_per_unit" placeholder="Cost/unit ₹" value="0"/></div>
+        <div class="col-md-2"><input class="form-control" type="number" step="0.01" min="0" name="cost_per_unit" placeholder="Cost/unit {{ currency_symbol }}" value="0"/></div>
         <div class="col-md-1">
           <select name="menu_item_id" class="form-select">
             <option value="">— No link —</option>
@@ -141,12 +141,12 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <input type="hidden" name="stock" value="{{ s }}"/>
                 <input type="hidden" name="low_stock_threshold" value="{{ t }}"/>
-                <span class="text-muted small">₹</span>
+                <span class="text-muted small">{{ currency_symbol }}</span>
                 <input type="number" step="0.01" min="0" name="cost_per_unit" value="{{ '%.2f'|format(cost) }}" class="form-control form-control-sm" style="width:80px;" title="Cost per unit"/>
                 <button class="btn btn-sm btn-outline-secondary" title="Save cost"><i class="bi bi-check-lg"></i></button>
               </form>
             </td>
-            <td class="text-muted">{% if cost > 0 %}₹{{ '%.0f'|format(s * cost) }}{% else %}—{% endif %}</td>
+            <td class="text-muted">{% if cost > 0 %}{{ currency_symbol }}{{ '%.0f'|format(s * cost) }}{% else %}—{% endif %}</td>
             <td>{{ '%.3f'|format(i.qty_per_order|float) }}</td>
             <td>
               {% set link = (menu_items|selectattr('id','equalto',i.menu_item_id)|list|first) %}

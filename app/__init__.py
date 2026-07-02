@@ -509,6 +509,19 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
 
     app.jinja_env.globals["url_for"] = _safe_url_for
 
+    # ── Per-request currency symbol (per-owner, overrides app-wide default) ──
+    @app.context_processor
+    def _inject_currency_symbol() -> dict:
+        """Inject currency_symbol based on the logged-in owner's saved currency."""
+        try:
+            from app.services.auth import logged_in_owner_obj
+            owner = logged_in_owner_obj()
+            if owner:
+                return {"currency_symbol": owner.currencySymbol}
+        except Exception:
+            pass
+        return {}
+
     # ── External blueprints (existing extensions/) ────────────────────────────
     try:
         from extensions import init_extensions
