@@ -26,6 +26,113 @@ let tipPercent     = 0;    // 0 = no tip, otherwise percentage or custom
 let customTip      = 0;
 let favourites     = JSON.parse(localStorage.getItem("cafe_favourites") || "[]");
 
+/* ── Order persistence (survives page refresh / tab restore) ── */
+const _ORDER_KEY   = TABLE_ID ? `cafe_active_${TABLE_ID}` : null;
+const _HISTORY_KEY = TABLE_ID ? `cafe_history_${TABLE_ID}` : null;
+
+/** Save a just-placed order to localStorage so it survives a refresh. */
+function _saveOrder(order) {
+  if (!_ORDER_KEY || !order) return;
+  try {
+    localStorage.setItem(_ORDER_KEY, JSON.stringify({
+      id:           order.id,
+      pickupCode:   order.pickupCode   || "",
+      status:       order.status       || "pending",
+      customerName: order.customerName || "",
+      items:        order.items        || [],
+      total:        order.total        || 0,
+      placedAt:     order.createdAt    || new Date().toISOString(),
+    }));
+  } catch {}
+}
+
+/** Update just the status field on the saved order. */
+function _updateOrderStatus(status) {
+  if (!_ORDER_KEY) return;
+  try {
+    const s = JSON.parse(localStorage.getItem(_ORDER_KEY));
+    if (s) { s.status = status; localStorage.setItem(_ORDER_KEY, JSON.stringify(s)); }
+  } catch {}
+}
+
+/**
+ * Move the active saved order into the history list, then clear it.
+ * Called when the customer clicks "Order Something Else" or cancels.
+ */
+function _archiveOrder() {
+  if (!_ORDER_KEY) return;
+  try {
+    const s = JSON.parse(localStorage.getItem(_ORDER_KEY));
+    if (s && s.id) {
+      const hist = JSON.parse(localStorage.getItem(_HISTORY_KEY) || "[]");
+      if (!hist.find(o => o.id === s.id)) {
+        hist.unshift(s);
+        localStorage.setItem(_HISTORY_KEY, JSON.stringify(hist.slice(0, 10)));
+      }
+    }
+  } catch {}
+  localStorage.removeItem(_ORDER_KEY);
+}
+
+/** Return previous orders for this table (this browser). */
+function _getOrderHistory() {
+  if (!_HISTORY_KEY) return [];
+  try { return JSON.parse(localStorage.getItem(_HISTORY_KEY) || "[]"); } catch { return []; }
+}
+
+/**
+ * On page load: if there is a saved active order, restore the tracker.
+ * The SSE reconnect will immediately push the latest real status.
+ */
+function _restoreOrder() {
+  if (!_ORDER_KEY) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem(_ORDER_KEY));
+    if (!saved || !saved.id) return;
+    if (["completed", "cancelled", "voided"].includes(saved.status)) {
+      _archiveOrder();
+      return;
+    }
+    currentOrderId = saved.id;
+    /* Show the pickup-success panel on the main page */
+    const pickupDiv    = $("pickup-success");
+    const pickupCodeEl = $("pickup-code-display");
+    if (pickupDiv && pickupCodeEl) {
+      pickupCodeEl.textContent = saved.pickupCode || "—";
+      pickupDiv.style.display  = "block";
+    }
+    showTracker(saved);
+    showToast("Reconnected to your order.");
+  } catch {}
+}
+
+/** Compact HTML strip listing previous orders (shown in cart after reset). */
+function _historyStrip() {
+  const hist = _getOrderHistory();
+  if (!hist.length) return "";
+  const statusLabel = {
+    pending:"Pending", preparing:"Preparing", ready:"Ready!",
+    completed:"Completed", cancelled:"Cancelled", voided:"Voided",
+  };
+  const statusColor = {
+    pending:"#f59e0b", preparing:"#3b82f6", ready:"#10b981",
+    completed:"#6b7280", cancelled:"#ef4444", voided:"#9ca3af",
+  };
+  const rows = hist.map(o => {
+    const lbl = statusLabel[o.status] || o.status;
+    const col = statusColor[o.status] || "#6b7280";
+    const code = o.pickupCode ? ` &middot; 🎫 ${esc(o.pickupCode)}` : "";
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-bottom:1px solid #f3f4f6;font-size:.8rem;">
+      <span style="color:#374151;">Order #${esc(String(o.id))}${code}</span>
+      <span style="color:${col};font-weight:600;">${lbl}</span>
+    </div>`;
+  }).join("");
+  return `<div id="order-history-strip" style="padding:.75rem 1.25rem;border-top:1px solid #e5e7eb;background:#f9fafb;">
+    <div style="font-size:.7rem;font-weight:700;color:#6b7280;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.5rem;">Previous Orders</div>
+    ${rows}
+  </div>`;
+}
+
 /* ── Tiny helpers ── */
 const $  = id  => document.getElementById(id);
 const qs = sel => document.querySelector(sel);
@@ -486,6 +593,7 @@ async function placeOrder(name) {
 
     if (res.ok && data.order) {
       currentOrderId = data.order.id;
+      _saveOrder(data.order);
 
       /* Show pickup-success panel on the main page */
       const pickupDiv = $("pickup-success");
@@ -646,6 +754,9 @@ function patchTrackerStatus(status) {
   if (lblEl)   lblEl.textContent   = si.label;
   if (descEl)  descEl.textContent  = si.desc;
 
+  /* Persist status change so page refresh still shows updated state */
+  _updateOrderStatus(status);
+
   /* Keep the main-page #order-status-tracker div in sync */
   const mainTrackerEl = $("order-status-tracker");
   if (mainTrackerEl) {
@@ -726,6 +837,7 @@ async function cancelOrder(orderId) {
     if (res.ok) {
       showToast("Order cancelled.");
       patchTrackerStatus("cancelled");
+      _archiveOrder();
       btn?.remove();
     } else {
       showToast(data.description || data.error || "Could not cancel order.");
@@ -739,6 +851,7 @@ async function cancelOrder(orderId) {
 
 /* ── Reset to ordering ── */
 function resetToOrdering() {
+  _archiveOrder();
   stopPolling();
   currentOrderId = null;
   orderDone      = false;
@@ -803,6 +916,14 @@ function resetToOrdering() {
       </form>
       <div id="checkout-resp" class="o-resp"></div>
     </div>`;
+
+  /* Append order history strip (previous orders at this table) */
+  const histHtml = _historyStrip();
+  if (histHtml) {
+    const strip = document.createElement("div");
+    strip.innerHTML = histHtml;
+    cartEl.appendChild(strip.firstElementChild);
+  }
 
   wireCartPanel(cartEl);
   syncCart();
@@ -991,6 +1112,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (cartEl) wireCartPanel(cartEl);
   syncCart();
   loadMenu();
+  _restoreOrder();
 
   /* ── Dietary filter buttons ── */
   document.querySelectorAll(".js-diet-filter").forEach(btn => {
