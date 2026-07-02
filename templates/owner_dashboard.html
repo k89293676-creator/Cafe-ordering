@@ -116,6 +116,7 @@
           <span class="slink-title">Billing</span>
           <span class="slink-sub">Revenue &amp; settlements</span>
         </div>
+        {% if billing_open_count %}<span class="link-badge" style="background:{% if billing_open_count > 5 %}#ef4444{% else %}#f59e0b{% endif %};">{{ billing_open_count }}</span>{% endif %}
       </a>
 
       <div class="sidebar-section-label" style="margin-top:1rem;">Integrations &amp; Setup</div>
@@ -511,6 +512,48 @@
 
       <!-- ===================== OVERVIEW TAB ===================== -->
       <div id="tab-overview" class="tab-panel active">
+
+        <!-- Billing quick-stats widget -->
+        <div class="card" style="margin-bottom:1rem;">
+          <div class="card-header">
+            <div>
+              <h3>Billing Today</h3>
+              <div class="card-subtitle">Live settlement snapshot</div>
+            </div>
+            <div style="display:flex;gap:.4rem;align-items:center;">
+              <a class="btn btn-sm btn-primary" href="{{ url_for('owner_billing_open') }}">
+                Open Tabs{% if billing_open_count %}&nbsp;<span class="tab-count">{{ billing_open_count }}</span>{% endif %}
+              </a>
+              <a class="btn btn-sm btn-secondary" href="{{ url_for('owner_billing_overview') }}">Full Report</a>
+              <a class="btn btn-sm btn-secondary" href="{{ url_for('owner_billing_eod') }}">End of Day</a>
+            </div>
+          </div>
+          <div class="card-body" style="padding-top:.5rem;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem;margin-bottom:.5rem;">
+              <div style="text-align:center;padding:.9rem .75rem;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;">
+                <div style="font-size:1.45rem;font-weight:800;color:#16a34a;">{{ currency_symbol }}{{ '%.2f'|format(billing_net_today) }}</div>
+                <div style="font-size:.72rem;color:#15803d;font-weight:600;margin-top:.2rem;text-transform:uppercase;letter-spacing:.04em;">Net Revenue Today</div>
+              </div>
+              <div style="text-align:center;padding:.9rem .75rem;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;">
+                <div style="font-size:1.45rem;font-weight:800;color:#2563eb;">{{ billing_settled_today }}</div>
+                <div style="font-size:.72rem;color:#1d4ed8;font-weight:600;margin-top:.2rem;text-transform:uppercase;letter-spacing:.04em;">Bills Settled</div>
+              </div>
+              <a href="{{ url_for('owner_billing_open') }}" style="text-decoration:none;">
+                <div style="text-align:center;padding:.9rem .75rem;{% if billing_open_count > 5 %}background:#fef2f2;border:1px solid #fecaca;{% elif billing_open_count > 0 %}background:#fffbeb;border:1px solid #fde68a;{% else %}background:#f8fafc;border:1px solid #e2e8f0;{% endif %}border-radius:10px;">
+                  <div style="font-size:1.45rem;font-weight:800;color:{% if billing_open_count > 5 %}#dc2626{% elif billing_open_count > 0 %}#d97706{% else %}#94a3b8{% endif %};">{{ billing_open_count }}</div>
+                  <div style="font-size:.72rem;font-weight:600;color:{% if billing_open_count > 5 %}#991b1b{% elif billing_open_count > 0 %}#92400e{% else %}#64748b{% endif %};margin-top:.2rem;text-transform:uppercase;letter-spacing:.04em;">Open Tabs ↗</div>
+                </div>
+              </a>
+            </div>
+            {% if billing_open_count > 0 %}
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+              <a class="btn btn-sm btn-primary" href="{{ url_for('owner_billing_open') }}">Settle open tabs →</a>
+              <a class="btn btn-sm btn-secondary" href="{{ url_for('owner_billing_aging') }}">View aging report</a>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+
         {% if integration_health %}
         <div class="card" style="margin-bottom:1rem;">
           <div class="card-header">

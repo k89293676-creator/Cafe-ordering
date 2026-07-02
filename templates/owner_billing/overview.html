@@ -239,7 +239,7 @@
       const net       = {{ sparkline.net|tojson    if sparkline and sparkline.labels else '[]' }};
       const refundPct = {{ sparkline.refund_pct|tojson if sparkline and sparkline.labels else '[]' }};
       if (!labels.length) return;
-      const rows = [['Day', 'Gross (INR)', 'Refund %', 'Net (INR)']];
+      const rows = [['Day', 'Gross (' + currSym + ')', 'Refund %', 'Net (' + currSym + ')']];
       labels.forEach((d, i) => {
         rows.push([d, (gross[i] || 0).toFixed(2),
                   (refundPct[i] || 0).toFixed(2),

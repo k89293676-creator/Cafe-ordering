@@ -66,6 +66,7 @@ from lib_billing_security import (
     stepup_refund_threshold,
     stepup_required_for_refund,
     stepup_required_for_void,
+    stepup_session_ttl_seconds,
     stepup_void_threshold,
     verify_password_constant_time,
 )
@@ -247,8 +248,9 @@ def _invalidate_billing_cache(owner_id: int) -> None:
 
 
 def _severity_pill(severity: str) -> str:
-    return {"ok": "pill pill--ok", "warn": "pill pill--warn",
-            "alert": "pill pill--alert"}.get((severity or "ok").lower(), "pill pill--ok")
+    # Maps to CSS classes defined in _base.html: pill-paid (green), pill-warm (yellow), pill-aged (red)
+    return {"ok": "pill-paid", "warn": "pill-warm",
+            "alert": "pill-aged"}.get((severity or "ok").lower(), "pill-paid")
 
 
 def _billing_overview(owner_id: int) -> dict:
@@ -339,6 +341,52 @@ def _billing_health_compute(owner_id: int) -> dict:
         snapshot["degraded"] = True
         snapshot["error"] = str(exc)
     snapshot["ok"] = all(c.get("ok") for c in snapshot["checks"]) and not snapshot["degraded"]
+    # --- Live metrics for the health dashboard page ---
+    try:
+        unsettled_val = float(
+            db.session.query(db.func.coalesce(db.func.sum(Order.total), 0))
+            .filter(Order.owner_id == owner_id, Order.payment_status == "unpaid",
+                    Order.status != "cancelled").scalar() or 0)
+        stuck = int(db.session.query(db.func.count(Order.id))
+                    .filter(Order.owner_id == owner_id,
+                            Order.payment_status == "settling").scalar() or 0)
+        last_paid = (Order.query.filter(Order.owner_id == owner_id,
+                                        Order.payment_status == "paid")
+                     .order_by(Order.paid_at.desc()).first())
+        recent_settle_sec = None
+        if last_paid and last_paid.paid_at:
+            recent_settle_sec = (datetime.now(timezone.utc) - last_paid.paid_at).total_seconds()
+        since_1h = datetime.now(timezone.utc) - timedelta(hours=1)
+        wh_fails = int(db.session.query(db.func.count(WebhookEventLog.id))
+                       .filter(WebhookEventLog.owner_id == owner_id,
+                               WebhookEventLog.status == "failed",
+                               WebhookEventLog.created_at >= since_1h).scalar() or 0)
+        active_creds = int(db.session.query(db.func.count(PaymentProviderCredential.id))
+                           .filter(PaymentProviderCredential.owner_id == owner_id,
+                                   PaymentProviderCredential.is_active == True).scalar() or 0)
+        snapshot["metrics"] = {
+            "stuck_settling_count": stuck,
+            "unsettled_value": round(unsettled_val, 2),
+            "recent_settle_seconds": recent_settle_sec,
+            "webhook_failures_last_hour": wh_fails,
+            "payment_credentials_active": active_creds,
+        }
+    except Exception:
+        snapshot["metrics"] = {
+            "stuck_settling_count": 0, "unsettled_value": 0.0,
+            "recent_settle_seconds": None, "webhook_failures_last_hour": 0,
+            "payment_credentials_active": 0,
+        }
+    # --- Verdict and issues summary ---
+    if snapshot["degraded"]:
+        snapshot["verdict"] = "degraded"
+    elif any(c.get("severity") == "alert" for c in snapshot["checks"]):
+        snapshot["verdict"] = "critical"
+    elif any(c.get("severity") == "warn" for c in snapshot["checks"]):
+        snapshot["verdict"] = "warn"
+    else:
+        snapshot["verdict"] = "ok"
+    snapshot["issues"] = [c["label"] for c in snapshot["checks"] if not c.get("ok")]
     return snapshot
 
 
@@ -429,6 +477,7 @@ def owner_billing_overview():
         recent_paid=[_bill_dict(o) for o in recent_paid],
         settings=settings,
         sparkline=_billing_sparkline_7d(owner_id),
+        health=_billing_health_compute(owner_id),
         owner_username=logged_in_owner(),
     )))
 
@@ -1111,9 +1160,15 @@ def owner_billing_drawer():
     expected_today = round(cash_in_today - cash_ref_today, 2)
     return _no_store(make_response(render_template(
         "owner_billing/drawer.html",
-        history=history_rows, expected_today=expected_today,
+        history=history_rows,
+        recent=history_rows,              # template alias
+        expected_today=expected_today,
+        expected_cash=round(cash_in_today, 2),   # gross cash in today
+        cash_refunds=round(cash_ref_today, 2),   # cash refunded today
         today=today_start.strftime("%Y-%m-%d"),
+        today_str=today_start.strftime("%Y-%m-%d"),  # template alias
         variance_alert_pct=drawer_variance_alert_pct(),
+        alert_pct=drawer_variance_alert_pct(),   # template alias
         owner_username=logged_in_owner(),
     )))
 
@@ -1129,9 +1184,17 @@ def owner_billing_health():
     snapshot = _billing_health_compute(owner_id)
     for c in snapshot.get("checks", []):
         c["pill_class"] = _severity_pill(c.get("severity", "ok"))
+    thresholds = {
+        "refund": stepup_refund_threshold(),
+        "void": stepup_void_threshold(),
+        "refund_daily_pct": refund_daily_cap_pct(),
+        "velocity": refund_velocity_per_hour(),
+        "drawer_pct": drawer_variance_alert_pct(),
+        "stepup_ttl": stepup_session_ttl_seconds(),
+    }
     return _no_store(make_response(render_template(
         "owner_billing/health.html",
-        snapshot=snapshot, owner_username=logged_in_owner(),
+        snapshot=snapshot, thresholds=thresholds, owner_username=logged_in_owner(),
     )))
 
 

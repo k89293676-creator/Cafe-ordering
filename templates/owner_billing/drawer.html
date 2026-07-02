@@ -46,7 +46,7 @@
               <td>{{ r.counted_by_username or '—' }}</td>
               <td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(r.expected_cash or 0) }}</td>
               <td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(r.counted_cash or 0) }}</td>
-              <td class="right mono"><span class="pill {{ severity_class(r.severity) }}">{% if r.variance >= 0 %}+{% endif %}{{ currency_symbol }}{{ '%.2f'|format(r.variance or 0) }}</span></td>
+              <td class="right mono"><span class="pill {{ r.severity_class }}">{% if r.variance >= 0 %}+{% endif %}{{ currency_symbol }}{{ '%.2f'|format(r.variance or 0) }}</span></td>
               <td>{% if r.notes %}<span class="muted" title="{{ r.notes }}">📝</span>{% endif %}</td>
             </tr>
           {% endfor %}

@@ -173,6 +173,22 @@ def owner_dashboard():
     _menu_dict = {"categories": _menu_categories}
     menu_json = _json.dumps(_menu_dict, indent=2)
 
+    # Billing snapshot for dashboard widgets
+    _today_utc_start = _dt.datetime.combine(
+        _dt.date.today(), _dt.time.min, tzinfo=_dt.timezone.utc)
+    billing_open_count = int(
+        db.session.query(_sqla_func.count(Order.id))
+        .filter(Order.owner_id == owner_id, Order.payment_status == "unpaid",
+                Order.status != "cancelled").scalar() or 0)
+    billing_net_today = float(
+        db.session.query(_sqla_func.coalesce(_sqla_func.sum(Order.total), 0))
+        .filter(Order.owner_id == owner_id, Order.payment_status == "paid",
+                Order.paid_at >= _today_utc_start).scalar() or 0)
+    billing_settled_today = int(
+        db.session.query(_sqla_func.count(Order.id))
+        .filter(Order.owner_id == owner_id, Order.payment_status == "paid",
+                Order.paid_at >= _today_utc_start).scalar() or 0)
+
     return render_template(
         "owner_dashboard.html",
         owner=owner,
@@ -198,6 +214,9 @@ def owner_dashboard():
         owner_username=owner.username if owner else "",
         menu=_menu_dict,
         menu_json=menu_json,
+        billing_open_count=billing_open_count,
+        billing_net_today=billing_net_today,
+        billing_settled_today=billing_settled_today,
     )
 
 
