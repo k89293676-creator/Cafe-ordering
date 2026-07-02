@@ -689,7 +689,7 @@
                       {% endif %}
                       <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="display:inline;">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                        <select name="status" onchange="this.form.submit()" class="btn btn-secondary btn-sm" style="padding:.2rem .5rem;cursor:pointer;">
+                        <select name="status" onchange="handleStatusChange(this)" class="btn btn-secondary btn-sm" style="padding:.2rem .5rem;cursor:pointer;">
                           <option value="pending" {% if order.status=='pending' %}selected{% endif %}>Pending</option>
                           <option value="preparing" {% if order.status in ('confirmed','preparing') %}selected{% endif %}>Preparing</option>
                           <option value="ready" {% if order.status=='ready' %}selected{% endif %}>Ready</option>
@@ -1100,14 +1100,14 @@
         <div class="kanban-board">
 
           <!-- Column: Pending -->
-          <div class="kanban-col">
+          <div class="kanban-col" data-kanban-col="pending">
             <div class="kanban-col-header kanban-col-header--pending">
               <span class="kanban-col-title">Pending</span>
               <span class="kanban-col-count">{{ orders_new | length }}</span>
             </div>
             {% if orders_new %}
               {% for order in orders_new %}
-              <div class="order-card" data-order-id="{{ order.id }}">
+              <div class="order-card" data-order-id="{{ order.id }}" data-status="{{ order.status }}">
                 <div class="order-card-head">
                   <div>
                     <div class="order-id">Order #{{ order.id }}</div>
@@ -1134,7 +1134,7 @@
                 <div class="order-card-actions">
                   <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="flex:1;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                    <select name="status" onchange="this.form.submit()" class="btn btn-secondary btn-sm btn-full" style="cursor:pointer;">
+                    <select name="status" onchange="handleStatusChange(this)" class="btn btn-secondary btn-sm btn-full" style="cursor:pointer;">
                       <option value="pending" selected>Pending</option>
                       <option value="preparing">Preparing</option>
                       <option value="ready">Ready</option>
@@ -1151,14 +1151,14 @@
           </div>
 
           <!-- Column: In Progress -->
-          <div class="kanban-col">
+          <div class="kanban-col" data-kanban-col="inprogress">
             <div class="kanban-col-header kanban-col-header--preparing">
               <span class="kanban-col-title">In Progress</span>
               <span class="kanban-col-count">{{ orders_inprogress | length }}</span>
             </div>
             {% if orders_inprogress %}
               {% for order in orders_inprogress %}
-              <div class="order-card" data-order-id="{{ order.id }}">
+              <div class="order-card" data-order-id="{{ order.id }}" data-status="{{ order.status }}">
                 <div class="order-card-head">
                   <div>
                     <div class="order-id">Order #{{ order.id }}</div>
@@ -1194,7 +1194,7 @@
                 <div class="order-card-actions">
                   <form action="{{ url_for('update_order_status', order_id=order.id) }}" method="post" style="flex:1;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                    <select name="status" onchange="this.form.submit()" class="btn btn-secondary btn-sm btn-full" style="cursor:pointer;">
+                    <select name="status" onchange="handleStatusChange(this)" class="btn btn-secondary btn-sm btn-full" style="cursor:pointer;">
                       <option value="pending" {% if order.status=='pending' %}selected{% endif %}>Pending</option>
                       <option value="preparing" {% if order.status in ('confirmed','preparing') %}selected{% endif %}>Preparing</option>
                       <option value="ready" {% if order.status=='ready' %}selected{% endif %}>Ready</option>
@@ -1211,7 +1211,7 @@
           </div>
 
           <!-- Column: Completed -->
-          <div class="kanban-col">
+          <div class="kanban-col" data-kanban-col="done">
             <div class="kanban-col-header kanban-col-header--completed">
               <span class="kanban-col-title">Completed</span>
               <span class="kanban-col-count">{{ completed_orders | length }}</span>

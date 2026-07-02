@@ -224,6 +224,46 @@ def orders_api():
     return {"orders": orders, "limit": limit, "offset": offset, "count": len(orders)}, 200
 
 
+
+@bp.route("/api/v1/orders/lookup")
+@bp.route("/api/orders/lookup")
+@limiter.limit("20 per minute")
+def order_lookup_by_code():
+    """Find an order by its pickup code — no auth required, used by customers."""
+    from app.models import Order as _Order
+    code = (request.args.get("code") or "").strip().upper()
+    if not code or len(code) > 16:
+        abort(400, description="Pickup code required.")
+    order = (
+        _Order.query
+        .filter(_Order.pickup_code.ilike(code))
+        .order_by(_Order.id.desc())
+        .first()
+    )
+    if not order:
+        abort(404, description="No order found with that pickup code.")
+    safe_order = {
+        "id":           order.id,
+        "status":       order.status or "pending",
+        "tableName":    getattr(order, "table_name", "") or "",
+        "customerName": getattr(order, "customer_name", "") or "",
+        "items":        [],
+        "total":        float(getattr(order, "total", 0) or 0),
+        "pickupCode":   order.pickup_code or "",
+        "createdAt":    str(order.created_at) if getattr(order, "created_at", None) else "",
+    }
+    # Try to include items if available
+    try:
+        import json as _json
+        raw = getattr(order, "items", None)
+        if isinstance(raw, str):
+            safe_order["items"] = _json.loads(raw) or []
+        elif isinstance(raw, list):
+            safe_order["items"] = raw
+    except Exception:
+        pass
+    return {"order": safe_order}, 200
+
 @bp.route("/api/v1/orders/<int:order_id>")
 @bp.route("/api/orders/<int:order_id>")
 @limiter.limit("20 per minute; 60 per hour")

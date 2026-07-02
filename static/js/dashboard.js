@@ -202,12 +202,11 @@ function handleSSEEvent(payload) {
     showNewOrderBanner(payload.data);
     scheduleRefresh(4000);
   } else if (payload.type === "order_updated") {
-    // Update the status badge in-place if the order row exists in the DOM
     const data = payload.data || {};
-    const updated = updateOrderRowInPlace(data.id, data.status);
-    if (!updated) {
-      // Row not in current view — schedule a quiet refresh
-      scheduleRefresh(2000);
+    const moved = moveKanbanCard(data.id, data.status);
+    if (!moved) {
+      // Card not yet in DOM (e.g. new order just confirmed) — refresh quietly
+      scheduleRefresh(3000);
     }
   } else if (payload.type === "table_call" || payload.type === "table_call_update") {
     // Re-broadcast as a window event so the table-call IIFE in
@@ -220,33 +219,106 @@ function handleSSEEvent(payload) {
   }
 }
 
-function updateOrderRowInPlace(orderId, newStatus) {
+/**
+ * AJAX handler for the kanban status dropdown.
+ * Submits the status change without a page reload; the SSE event that follows
+ * will call moveKanbanCard() to animate the card into the right column.
+ */
+function handleStatusChange(select) {
+  const form   = select.closest("form");
+  const card   = select.closest("[data-order-id]");
+  const orderId  = card ? parseInt(card.dataset.orderId, 10) : null;
+  const newStatus = select.value;
+  if (!orderId || !newStatus || !form) return;
+
+  select.disabled = true;
+  const csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
+  fetch(form.action, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    body: `status=${encodeURIComponent(newStatus)}&csrf_token=${encodeURIComponent(csrf)}`,
+  })
+  .then(r => {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    // SSE will fire order_updated → moveKanbanCard()
+  })
+  .catch(() => {
+    select.disabled = false;
+    alert("Status update failed. The page will reload.");
+    location.reload();
+  })
+  .finally(() => { select.disabled = false; });
+}
+
+/**
+ * Move an order card to the correct kanban column and update all counts.
+ * Columns must have data-kanban-col="pending|inprogress|done" attributes.
+ */
+function moveKanbanCard(orderId, newStatus) {
   if (!orderId || !newStatus) return false;
-  const STATUS_LABELS = {
-    pending: "Pending",
-    preparing: "Preparing",
-    ready: "Ready",
-    completed: "Completed",
-    cancelled: "Cancelled",
-  };
-  const STATUS_CLASSES = {
-    pending: "badge-pending",
-    preparing: "badge-preparing",
-    ready: "badge-ready",
-    completed: "badge-done",
-    cancelled: "badge-cancelled",
-  };
-  // Find order row by data attribute or by ID pattern
-  const row = document.querySelector(`[data-order-id="${orderId}"]`);
-  if (!row) return false;
-  const badge = row.querySelector(".status-badge, [class*='badge-']");
+
+  const card = document.querySelector(`[data-order-id="${orderId}"]`);
+  if (!card) return false;
+
+  // ── 1. Update status badge ────────────────────────────────────────────────
+  const STATUS_LABELS  = { pending:"Pending", preparing:"Preparing", ready:"Ready",
+                           completed:"Done", cancelled:"Cancelled", voided:"Voided" };
+  const STATUS_CLASSES = { pending:"status-pending", preparing:"status-preparing",
+                           ready:"status-ready", completed:"status-completed",
+                           cancelled:"status-cancelled", voided:"status-cancelled" };
+
+  const badge = card.querySelector(".order-status-badge");
   if (badge) {
     badge.textContent = STATUS_LABELS[newStatus] || newStatus;
-    badge.className = badge.className.replace(/badge-\w+/, "");
-    badge.classList.add(STATUS_CLASSES[newStatus] || "badge-pending");
+    badge.className   = `order-status-badge ${STATUS_CLASSES[newStatus] || "status-pending"}`;
   }
+
+  // Update the select dropdown to show the current value
+  const sel = card.querySelector("select[name='status']");
+  if (sel) sel.value = newStatus;
+  card.dataset.status = newStatus;
+
+  // ── 2. Move to target column ──────────────────────────────────────────────
+  const STATUS_TO_COL = {
+    pending:   "pending",
+    preparing: "inprogress", ready: "inprogress",
+    completed: "done", cancelled: "done", voided: "done", served: "done",
+  };
+  const targetColId = STATUS_TO_COL[newStatus];
+  const targetColEl = targetColId
+    ? document.querySelector(`[data-kanban-col="${targetColId}"]`)
+    : null;
+  const currentColEl = card.closest("[data-kanban-col]");
+
+  if (targetColEl && targetColEl !== currentColEl) {
+    card.parentNode.removeChild(card);
+    // Insert before the empty-state element (or just append)
+    const emptyEl = targetColEl.querySelector(".kanban-empty");
+    if (emptyEl) {
+      targetColEl.insertBefore(card, emptyEl);
+      emptyEl.style.display = "none";
+    } else {
+      targetColEl.appendChild(card);
+    }
+  }
+
+  // ── 3. Refresh column counts & empty states ───────────────────────────────
+  document.querySelectorAll("[data-kanban-col]").forEach(col => {
+    const cards   = col.querySelectorAll(".order-card");
+    const countEl = col.querySelector(".kanban-col-count");
+    if (countEl) countEl.textContent = cards.length;
+
+    const emptyEl = col.querySelector(".kanban-empty");
+    if (emptyEl) emptyEl.style.display = cards.length ? "none" : "";
+  });
+
   return true;
 }
+
+
 
 function showNewOrderBanner(data) {
   const banner = document.getElementById("new-order-banner");

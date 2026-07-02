@@ -696,6 +696,44 @@ function trackerHtml(order) {
   </div>`;
 }
 
+
+/* ── Pickup-code lookup ── */
+async function lookupByCode(code) {
+  const respEl = $("lookup-resp");
+  const btn    = $("lookup-code-btn");
+  if (!code) {
+    if (respEl) respEl.textContent = "Please enter a pickup code.";
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = "Looking…"; }
+  if (respEl) respEl.textContent = "";
+  try {
+    const res  = await fetch(`/api/orders/lookup?code=${encodeURIComponent(code.toUpperCase())}`);
+    const data = await res.json();
+    if (res.ok && data.order) {
+      const order = data.order;
+      currentOrderId = order.id;
+      _saveOrder(order);
+      const pickupDiv    = $("pickup-success");
+      const pickupCodeEl = $("pickup-code-display");
+      if (pickupDiv && pickupCodeEl) {
+        pickupCodeEl.textContent = order.pickupCode || code;
+        pickupDiv.style.display  = "block";
+        pickupDiv.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      showTracker(order);
+      showToast("Order found!");
+    } else {
+      if (respEl) respEl.textContent =
+        data.description || data.error || "No order found with that code.";
+    }
+  } catch {
+    if (respEl) respEl.textContent = "Network error. Please try again.";
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Find"; }
+  }
+}
+
 function showTracker(order) {
   const cart = qs(".o-cart");
   if (!cart) return;
@@ -1113,6 +1151,15 @@ document.addEventListener("DOMContentLoaded", () => {
   syncCart();
   loadMenu();
   _restoreOrder();
+
+  /* ── Pickup-code lookup form ── */
+  $("lookup-code-btn")?.addEventListener("click", () => {
+    const code = ($("lookup-code-input")?.value || "").trim().toUpperCase();
+    lookupByCode(code);
+  });
+  $("lookup-code-input")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") lookupByCode((e.target.value || "").trim().toUpperCase());
+  });
 
   /* ── Dietary filter buttons ── */
   document.querySelectorAll(".js-diet-filter").forEach(btn => {

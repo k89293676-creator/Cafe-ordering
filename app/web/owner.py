@@ -180,6 +180,7 @@ def owner_dashboard():
         settings=settings,
         recent_orders=recent_orders,
         pending_orders=pending_orders,
+        completed_orders=[o for o in recent_orders if o.get("status") in _COMPLETED_STATUSES],
         pending_count=sum(1 for o in pending_orders if o["status"] == "pending"),
         preparing_count=preparing_count,
         revenue_today=revenue_today,
@@ -346,6 +347,8 @@ def update_order_status(order_id: int):
         _notify_order_status(order_id, new_status)
         log_security("ORDER_STATUS_UPDATE", f"order_id={order_id} status={new_status!r}")
 
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return {"ok": True, "status": new_status}, 200
     return redirect(request.referrer or url_for("web_owner.owner_dashboard"))
 
 
