@@ -29,14 +29,10 @@ from typing import Iterable
 from flask import Blueprint, Response, abort, request
 from sqlalchemy import func
 
-from app import (
-    Order,
-    Owner,
-    db,
-    limiter,
-    logged_in_owner_id,
-    login_required,
-)
+from app.models import Order, Owner
+from app.extensions import db, limiter
+from app.utils.security import login_required
+from app.services.auth import logged_in_owner_id
 from ._helpers import parse_date_range, safe_float
 from .models import Employee, OrderEmployeeAssignment
 

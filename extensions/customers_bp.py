@@ -13,7 +13,8 @@ from flask import (
     url_for,
 )
 
-from app import Order, bcrypt, db, limiter
+from app.models import Order
+from app.extensions import db, limiter, bcrypt
 from .models import Customer
 
 bp = Blueprint("customers", __name__)

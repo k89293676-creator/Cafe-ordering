@@ -22,7 +22,9 @@ from typing import Optional
 
 from flask import Blueprint, abort, jsonify, request
 
-from app import db, login_required, logged_in_owner_id, limiter
+from app.extensions import db, limiter
+from app.utils.security import login_required
+from app.services.auth import logged_in_owner_id
 
 log = logging.getLogger(__name__)
 
@@ -155,6 +157,14 @@ def _push_all(subs: list[PushSubscription], payload: dict) -> None:
     # Take copies of the data we need — avoid DB session issues across threads.
     entries = [(s.endpoint, s.p256dh, s.auth, s.id) for s in subs]
 
+    # Capture the Flask app before the thread starts — the current_app proxy
+    # is not available inside a daemon thread (no request/app context).
+    try:
+        from flask import current_app as _ca
+        _flask_app = _ca._get_current_object()
+    except RuntimeError:
+        _flask_app = None
+
     def _worker():
         v = _get_vapid()
         if v is None:
@@ -175,12 +185,12 @@ def _push_all(subs: list[PushSubscription], payload: dict) -> None:
                 status = resp.status_code if resp is not None else None
                 if status in (404, 410):
                     try:
-                        from app import app as flask_app  # local import to avoid circular
-                        with flask_app.app_context():
-                            row = db.session.get(PushSubscription, sub_id)
-                            if row:
-                                db.session.delete(row)
-                                db.session.commit()
+                        if _flask_app is not None:
+                            with _flask_app.app_context():
+                                row = db.session.get(PushSubscription, sub_id)
+                                if row:
+                                    db.session.delete(row)
+                                    db.session.commit()
                     except Exception:
                         pass
             except Exception as exc:

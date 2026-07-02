@@ -10,15 +10,9 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, render_template
 
-from app import (
-    Cafe,
-    Feedback,
-    Order,
-    Owner,
-    db,
-    login_required,
-    superadmin_required,
-)
+from app.models import Cafe, Feedback, Order, Owner
+from app.extensions import db
+from app.utils.security import login_required, superadmin_required
 from ._helpers import safe_float
 from .models import TableCall
 

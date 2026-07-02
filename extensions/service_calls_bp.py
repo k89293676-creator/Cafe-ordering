@@ -25,18 +25,11 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, abort, jsonify, request, stream_with_context
 
-from app import (
-    csrf,  # noqa: F401  (re-exported import keeps blueprint import order intact)
-    db,
-    limiter,
-    load_tables,
-    login_required,
-    logged_in_owner_id,
-    _notify_owner,
-    _notify_table_call,
-    _sse_lock,
-    _sse_table_subs,
-)
+from app.extensions import csrf, db, limiter  # noqa: F401
+from app.services.tables import load_tables
+from app.utils.security import login_required
+from app.services.auth import logged_in_owner_id
+from app.services.notifications import _notify_owner, _notify_table_call, _sse_lock, _sse_table_subs
 from .models import TableCall
 
 bp = Blueprint("service_calls", __name__)

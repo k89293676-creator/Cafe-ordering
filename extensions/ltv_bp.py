@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, abort, jsonify, render_template, request
 
-from app import Order, login_required, logged_in_owner_id
+from app.models import Order
+from app.utils.security import login_required
+from app.services.auth import logged_in_owner_id
 from ._helpers import parse_date_range, safe_float
 
 bp = Blueprint("ltv", __name__)

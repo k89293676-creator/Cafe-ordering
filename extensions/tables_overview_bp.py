@@ -31,17 +31,12 @@ from threading import Lock
 from flask import Blueprint, abort, jsonify, render_template, request
 from sqlalchemy import func
 
-from app import (
-    CafeTable,
-    Order,
-    db,
-    login_required,
-    logged_in_owner,
-    logged_in_owner_id,
-    _db_update_order_status,
-    _notify_owner,
-    _notify_order_status,
-)
+from app.models import CafeTable, Order
+from app.extensions import db
+from app.utils.security import login_required
+from app.services.auth import logged_in_owner, logged_in_owner_id
+from app.services.orders import _db_update_order_status
+from app.services.notifications import _notify_owner, _notify_order_status
 from .models import TableCall
 
 
