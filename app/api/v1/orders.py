@@ -271,15 +271,27 @@ def get_order(order_id: int):
     order = _db_get_order(order_id)
     if not order:
         abort(404, description="Order not found.")
+    pay_status = order.get("paymentStatus", "unpaid")
     safe_order = {
         "id": order["id"],
         "status": order.get("status", "pending"),
         "tableName": order.get("tableName", ""),
         "customerName": order.get("customerName", ""),
         "items": order.get("items", []),
+        "subtotal": order.get("subtotal", 0),
+        "tip": order.get("tip", 0),
         "total": order.get("total", 0),
+        "discount": order.get("discount", 0),
+        "tax": order.get("tax", 0),
+        "serviceCharge": order.get("serviceCharge", 0),
         "pickupCode": order.get("pickupCode", ""),
         "createdAt": order.get("createdAt", ""),
+        "updatedAt": order.get("updatedAt", ""),
+        "paymentStatus": pay_status,
+        "paymentMethod": order.get("paymentMethod", ""),
+        "balanceDue": round(float(order.get("total", 0)), 2) if pay_status != "paid" else 0.0,
+        "paidAt": order.get("paidAt"),
+        "invoiceNumber": order.get("invoiceNumber", ""),
     }
     return {"order": safe_order}, 200
 

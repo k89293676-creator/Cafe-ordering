@@ -572,6 +572,10 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
     <div class="kpi-icon attn">🔴</div>
     <div><div class="kpi-label">Needs attention</div><div class="kpi-val kpi-attn-val" id="kpi-attn">0</div></div>
   </div>
+  <div class="kpi-item">
+    <div class="kpi-icon" style="background:var(--bill-bg);font-size:.88rem;">💳</div>
+    <div><div class="kpi-label">Bill requests</div><div class="kpi-val" id="kpi-bill">0</div></div>
+  </div>
   <div class="kpi-spacer"></div>
   <div class="view-switcher">
     <button class="view-btn active" data-view="grid">
@@ -727,13 +731,19 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
     </div>
     <div class="modal-body">
       <p class="modal-sub" id="detail-sub"></p>
+      <!-- Bill link — visible whenever the table has an open order,
+           independent of whether there are active calls. Bug fix:
+           this was previously nested inside detail-calls-sec and would
+           be hidden whenever the calls section was collapsed. -->
+      <div id="detail-bill-sec" style="display:none;margin-bottom:.75rem;">
+        <a class="mbtn bill" id="detail-bill-link" href="#" style="font-size:.78rem;padding:.4rem .85rem;">💳 Open bill &amp; payment</a>
+      </div>
       <!-- Active calls section (shown only when there are open calls) -->
       <div class="modal-sec" id="detail-calls-sec" style="display:none;">
         <div class="modal-sec-title" style="color:var(--attn-fg);">🔔 Open Service Calls</div>
         <div class="active-calls-list" id="detail-active-calls"></div>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.15rem;">
           <button class="mbtn danger" id="detail-clear-calls" style="font-size:.78rem;padding:.4rem .85rem;">✓ Resolve all calls</button>
-          <a class="mbtn bill" id="detail-bill-link" href="#" style="font-size:.78rem;padding:.4rem .85rem;display:none;">💳 Open bill</a>
         </div>
       </div>
       <!-- 7-day stats -->
@@ -874,7 +884,14 @@ let sseRetryDelay  = 2000;
 
 /* ── Utilities ────────────────────────────────── */
 function esc(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function money(n){ return '₹'+Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+/* Currency — populated on first API response so the correct owner symbol
+   is used everywhere. Hard-coded defaults (₹ / en-IN) are overwritten
+   immediately by the real values from /api/owner/tables/overview. */
+let _CUR_SYM    = '₹';
+let _CUR_LOCALE = 'en-IN';
+function money(n){
+  return _CUR_SYM + Number(n||0).toLocaleString(_CUR_LOCALE,{minimumFractionDigits:2,maximumFractionDigits:2});
+}
 function fmtAge(s){
   s=Math.max(0,Math.floor(Number(s)||0));
   if(s<60) return s+'s';
@@ -1034,6 +1051,14 @@ function updateKPI(tables, summary){
   /* FIX: prevAttnCount starts at -1; only alert when count genuinely grows after first load */
   if(prevAttnCount >= 0 && attnCount > prevAttnCount){ playAlert(); }
   prevAttnCount = attnCount;
+  /* Bill-request KPI */
+  const billEl = document.getElementById('kpi-bill');
+  if(billEl){
+    const billCount = summary.billRequests||0;
+    billEl.textContent = billCount;
+    billEl.style.color = billCount>0 ? 'var(--bill-fg)' : '';
+    billEl.style.fontWeight = billCount>0 ? '800' : '';
+  }
 }
 
 /* ═══════════════════════════════════════════════
@@ -1120,11 +1145,16 @@ function buildCard(t){
       escalateHtml=`<span class="escalate-pill">⏱ escalates in ${fmtAge(remaining)}</span>`;
     }
     const stuckHtml=o.stuck?`<span class="stuck-badge">⚠ STUCK ${fmtAge(o.ageSeconds)}</span>`:'';
+    /* Payment status badge */
+    const payBadge = (o.paymentStatus && o.paymentStatus!=='unpaid')
+      ? `<span class="o-pill" style="${o.paymentStatus==='paid'?'background:#dcfce7;color:#15803d;':'background:#fef3c7;color:#92400e;'}">${esc(o.paymentStatus)}</span>`
+      : '';
     orderHtml=`
       <div class="order-block ${o.stuck?'ob-stuck':'ob-normal'}">
         <div class="order-block-top">
           <span class="order-id-txt">Order #${Number(o.id)||0}</span>
           <span class="o-pill ${pc}">${esc(o.status)}</span>
+          ${payBadge}
         </div>
         ${stuckHtml}${escalateHtml}
         <div class="order-meta">
@@ -1147,6 +1177,12 @@ function buildCard(t){
   /* ─ Calls block (inline, type-aware) ─ */
   let callsHtml='';
   if(c.count){
+    /* Bill-call CTA: if there is a bill request and the table has an
+       open order, show a direct "Open bill →" prompt so staff can
+       settle without hunting through menus. */
+    const billCTA=(c.hasBillCall&&o)
+      ? `<a class="calls-manage-btn" href="/owner/billing/orders/${o.id}" style="background:var(--bill-bg);color:var(--bill-fg);font-weight:600;">💳 Open bill →</a>`
+      : '';
     callsHtml=`<div class="calls-block">
       <div class="calls-header">
         <div class="calls-title">🔔 ${c.count} call${c.count===1?'':'s'}</div>
@@ -1155,6 +1191,7 @@ function buildCard(t){
       </div>
       <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
         <span class="calls-age">latest <span data-age="${c.latestAgeSeconds}" class="age-tick">${fmtAge(c.latestAgeSeconds)}</span> ago</span>
+        ${billCTA}
         <button class="calls-manage-btn" data-act="managecalls">Manage →</button>
         <button class="calls-manage-btn" data-act="clear">Resolve all</button>
       </div>
@@ -1185,6 +1222,10 @@ function buildCard(t){
   let acts=`<button class="act-btn" data-act="detail">Details</button>`;
   if(o){
     acts+=`<a class="act-btn ab-bill" href="/owner/billing/orders/${o.id}">💳 Bill</a>`;
+    /* Quick-settle: only show when the order isn't already paid */
+    if(o.paymentStatus!=='paid'){
+      acts+=`<button class="act-btn ab-success" data-act="settle" title="Mark as paid (cash)">💰 Settle</button>`;
+    }
     acts+=`<button class="act-btn ab-success" data-act="close">✓ Close</button>`;
     acts+=`<button class="act-btn" data-act="transfer">⇄ Transfer</button>`;
   } else {
@@ -1283,13 +1324,15 @@ function renderKanban(tables){
 function renderFloor(tables){
   floorGrid.innerHTML=tables.map(t=>{
     const callDot=t.openCalls&&t.openCalls.count?`<div class="floor-table-calls">🔔 ${t.openCalls.count}</div>`:'';
+    /* Bill-request badge — stands out visually above the regular call dot */
+    const billDot=t.openCalls&&t.openCalls.hasBillCall?`<div class="floor-table-calls" style="background:var(--bill-bg);color:var(--bill-fg);">💳 Bill</div>`:'';
     const sub=t.openOrder?money(t.openOrder.total):(t.cleaning?'Cleaning':'Free');
     return `<div class="floor-table ft-${t.status}" data-id="${esc(t.id)}" data-name="${esc(t.name)}">
       <div class="floor-table-badge"></div>
       <div class="floor-table-icon">${FLOOR_ICONS[t.status]||'🪑'}</div>
       <div class="floor-table-name">${esc(t.name)}</div>
       <div class="floor-table-sub">${sub}</div>
-      ${callDot}
+      ${billDot||callDot}
     </div>`;
   }).join('');
 }
@@ -1335,6 +1378,9 @@ async function load(){
     if(!r.ok) throw new Error('HTTP '+r.status);
     prevSummary=lastData?.summary||null;
     lastData=await r.json();
+    /* Sync currency formatting from the owner's configured currency */
+    if(lastData.currencySymbol) _CUR_SYM    = lastData.currencySymbol;
+    if(lastData.currencyLocale) _CUR_LOCALE  = lastData.currencyLocale;
     setLive('connected');
     render();
     clearInterval(tickInterval);
@@ -1385,6 +1431,7 @@ function cardActionDelegate(root){
     const id=card.dataset.id, name=card.dataset.name, act=btn.dataset.act;
     if(act==='detail')      openDetail(id,name);
     if(act==='clear')       doClear(id,name);
+    if(act==='settle')      doSettle(id,name);
     if(act==='close')       doClose(id,name);
     if(act==='walkin')      openWalkin(id,name);
     if(act==='transfer')    openTransfer(id,name);
@@ -1403,6 +1450,14 @@ async function doClear(id,name){
   const{ok,data}=await postJSON(`/api/owner/tables/${id}/clear`);
   if(ok){ toast(`Cleared ${data.count||0} call(s) on ${name}`,'ok'); load(); }
   else toast(data.error||'Failed to clear calls','error');
+}
+async function doSettle(id,name){
+  /* Quick-settle: mark the open order as paid (cash) without opening
+     the full billing page. Staff can change the method there after. */
+  if(!confirm(`Mark ${name}'s order as paid (cash)?`)) return;
+  const{ok,data}=await postJSON(`/api/owner/tables/${id}/settle`,{method:'cash'});
+  if(ok){ toast(`${name}: order settled ✓`,'ok'); load(); }
+  else toast(data.error||'Failed to settle order','error');
 }
 async function doClose(id,name){
   const{ok,data}=await postJSON(`/api/owner/tables/${id}/close`);
@@ -1498,6 +1553,8 @@ async function openDetail(id,name){
   document.getElementById('note-input').value='';
   document.getElementById('detail-calls-sec').style.display='none';
   document.getElementById('detail-active-calls').innerHTML='';
+  const _billSecR=document.getElementById('detail-bill-sec');
+  if(_billSecR) _billSecR.style.display='none';
   showModal('modal-detail');
   try{
     const r=await fetch(`/api/owner/tables/${id}/detail`,{credentials:'same-origin',cache:'no-store'});
@@ -1519,27 +1576,36 @@ async function openDetail(id,name){
     } else {
       callsSec.style.display='none';
     }
-    /* Wire billing link if table has an open order */
+    /* Wire billing link if table has an open order.
+       Bug fix: detail-bill-sec is now a sibling of detail-calls-sec,
+       not nested inside it — so it stays visible even when there are
+       no active calls. */
     const tableRow=lastData&&lastData.tables.find(t=>t.id===id);
+    const billSec =document.getElementById('detail-bill-sec');
     const billLink=document.getElementById('detail-bill-link');
     if(tableRow&&tableRow.openOrder){
       billLink.href=`/owner/billing/orders/${tableRow.openOrder.id}`;
-      billLink.style.display='';
+      if(billSec) billSec.style.display='';
     } else {
-      billLink.style.display='none';
+      if(billSec) billSec.style.display='none';
     }
 
     /* ─ Recent orders list ─ */
     const ordEl=document.getElementById('recent-orders');
     const recentOrders=d.recentOrders||[];
     ordEl.innerHTML=recentOrders.length
-      ?recentOrders.map(o=>`<div class="d-item">
-          <div class="d-item-l">
-            <div class="d-item-title"><a href="/owner/billing/orders/${o.id}" style="color:var(--primary);font-weight:700;">Order #${o.id}</a> — ${esc(o.status)}</div>
-            <div class="d-item-sub">${o.customerName?esc(o.customerName)+' · ':''}${o.itemsCount} item${o.itemsCount===1?'':'s'} · ${fmtAge(o.ageSeconds)} ago</div>
-          </div>
-          <div class="d-item-r">${money(o.total)}</div>
-        </div>`).join('')
+      ?recentOrders.map(o=>{
+          const payBadge=(o.paymentStatus&&o.paymentStatus!=='unpaid')
+            ? `<span style="font-size:.7rem;padding:.1rem .45rem;border-radius:999px;${o.paymentStatus==='paid'?'background:#dcfce7;color:#15803d;':'background:#fef3c7;color:#92400e;'}">${esc(o.paymentStatus)}</span>`
+            : '';
+          return `<div class="d-item">
+            <div class="d-item-l">
+              <div class="d-item-title"><a href="/owner/billing/orders/${o.id}" style="color:var(--primary);font-weight:700;">Order #${o.id}</a> — ${esc(o.status)} ${payBadge}</div>
+              <div class="d-item-sub">${o.customerName?esc(o.customerName)+' · ':''}${o.itemsCount} item${o.itemsCount===1?'':'s'} · ${fmtAge(o.ageSeconds)} ago</div>
+            </div>
+            <div class="d-item-r">${money(o.total)}</div>
+          </div>`;
+        }).join('')
       :'<div style="color:var(--ink-3);font-size:.82rem;">No recent orders</div>';
 
     /* ─ Service call history ─ */

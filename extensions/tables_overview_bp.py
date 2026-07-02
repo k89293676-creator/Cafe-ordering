@@ -301,6 +301,26 @@ def api_overview():
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # Resolve owner's currency once so the front-end can format money()
+    # correctly using the actual symbol rather than a hard-coded ₹.
+    _CURRENCY_SYMBOLS = {
+        "gbp": "£", "usd": "$", "eur": "€", "inr": "₹",
+        "aud": "A$", "cad": "C$", "sgd": "S$", "aed": "د.إ",
+        "nzd": "NZ$", "jpy": "¥", "cny": "¥", "krw": "₩",
+    }
+    _CURRENCY_LOCALES = {
+        "inr": "en-IN", "jpy": "ja-JP", "cny": "zh-CN",
+        "krw": "ko-KR", "aed": "ar-AE",
+    }
+    try:
+        from app.models.core import Owner as _OwnerModel
+        _owner_obj = db.session.get(_OwnerModel, owner_id)
+        _currency = (_owner_obj.currency or "gbp").lower() if _owner_obj else "gbp"
+    except Exception:
+        _currency = "gbp"
+    _currency_symbol = _CURRENCY_SYMBOLS.get(_currency, _currency.upper())
+    _currency_locale = _CURRENCY_LOCALES.get(_currency, "en")
+
     # 1. Owner's tables (single query, indexed by owner_id).
     tables = (CafeTable.query
               .filter(CafeTable.owner_id == owner_id)
@@ -369,6 +389,7 @@ def api_overview():
         order_payload = None
         if order:
             order_age_s = _age_seconds(order.created_at, now)
+            pay_status = order.payment_status or "unpaid"
             order_payload = {
                 "id": order.id,
                 "status": order.status,
@@ -380,14 +401,24 @@ def api_overview():
                 # Lets the front-end show a ⚠ Stuck pill without
                 # having to re-derive the threshold rules in JS.
                 "stuck": _order_is_stuck(order, order_age_s),
+                # Payment fields — card badge + quick-settle button.
+                "paymentStatus": pay_status,
+                "balanceDue": (
+                    float(order.total or 0)
+                    if pay_status != "paid" else 0.0
+                ),
             }
 
         latest_call = calls[-1] if calls else None
+        has_bill_call = any(c.reason == "bill" for c in calls)
         calls_payload = {
             "count": len(calls),
             "latestReason": latest_call.reason if latest_call else None,
             "latestAgeSeconds": _age_seconds(latest_call.created_at, now) if latest_call else 0,
             "anyAcknowledged": any(c.status == "acknowledged" for c in calls),
+            # True when any open call is a bill request — used by the
+            # floor badge and the bill-call CTA on the card.
+            "hasBillCall": has_bill_call,
         }
 
         today_count, today_rev = today_by_table.get(t.id, (0, 0.0))
@@ -409,11 +440,18 @@ def api_overview():
             "cleaning": cleaning,
         })
 
+    bill_request_count = sum(1 for row in out if row["openCalls"]["hasBillCall"])
+
     return jsonify({
         "ok": True,
         "fetchedAt": _iso(now),
+        # Currency hint — front-end reads these once to drive money().
+        "currencySymbol": _currency_symbol,
+        "currencyCode": _currency,
+        "currencyLocale": _currency_locale,
         "summary": {
             "total": len(out),
+            "billRequests": bill_request_count,
             **counts,
         },
         "tables": out,
@@ -483,6 +521,7 @@ def api_detail(table_id: str):
         "recentOrders": [{
             "id": o.id,
             "status": o.status,
+            "paymentStatus": o.payment_status or "unpaid",
             "total": float(o.total or 0),
             "itemsCount": _items_count(o.items),
             "customerName": o.customer_name or "",
@@ -718,6 +757,46 @@ def api_cleaning(table_id: str):
     except Exception:
         pass
     return jsonify({"ok": True, "cleaning": _is_cleaning(owner_id, table_id)})
+
+
+@bp.route("/api/owner/tables/<table_id>/settle", methods=["POST"], endpoint="api_settle")
+@login_required
+def api_settle(table_id: str):
+    """Quick-settle: mark the open order on this table as paid.
+
+    Body (all optional): ``{"method": "cash"|"card"|"upi"|...}``.
+    Idempotent — returns 200 even when the order is already paid.
+    """
+    owner_id = logged_in_owner_id()
+    table = CafeTable.query.filter_by(id=table_id, owner_id=owner_id).first()
+    if not table:
+        abort(404)
+    open_order = (Order.query
+                  .filter(Order.owner_id == owner_id,
+                          Order.table_id == table_id,
+                          Order.status.in_(ACTIVE_ORDER_STATUSES))
+                  .order_by(Order.created_at.asc())
+                  .first())
+    if not open_order:
+        return jsonify({"ok": False, "error": "No open order on this table."}), 400
+    if open_order.payment_status == "paid":
+        return jsonify({"ok": True, "orderId": open_order.id,
+                        "paymentStatus": "paid", "alreadyPaid": True})
+    now = datetime.now(timezone.utc)
+    body = request.get_json(silent=True) or {}
+    method = (str(body.get("method", "cash"))).strip()[:32] or "cash"
+    open_order.payment_status = "paid"
+    open_order.payment_method = method
+    open_order.paid_at = now
+    open_order.updated_at = now
+    db.session.commit()
+    try:
+        _notify_owner(owner_id, "order_updated",
+                      {"id": open_order.id, "status": open_order.status,
+                       "paymentStatus": "paid"})
+    except Exception:
+        pass
+    return jsonify({"ok": True, "orderId": open_order.id, "paymentStatus": "paid"})
 
 
 @bp.route("/api/owner/tables/<table_id>/walkin", methods=["POST"], endpoint="api_walkin")
