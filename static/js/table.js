@@ -870,10 +870,12 @@ async function cancelOrder(orderId) {
 
   // Include pickup code so the server can verify the caller actually
   // placed this order (prevents cross-order cancellation by ID guessing).
+  // NOTE: saved.id is stored as a number; orderId may arrive as a string
+  // from data-oid attributes — compare as strings to avoid a type mismatch.
   let pickupCode = "";
   try {
     const saved = _ORDER_KEY ? JSON.parse(localStorage.getItem(_ORDER_KEY) || "null") : null;
-    if (saved && saved.id === orderId) pickupCode = saved.pickupCode || "";
+    if (saved && String(saved.id) === String(orderId)) pickupCode = saved.pickupCode || "";
   } catch {}
 
   try {
