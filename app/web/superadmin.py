@@ -277,6 +277,332 @@ def superadmin_leads():
     return render_template("superadmin/leads.html", leads=leads)
 
 
+@bp.route("/superadmin/last-error")
+@superadmin_required
+def superadmin_last_error():
+    """Read-only diagnostic: last N security/error events from the in-memory buffer.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    events = list(reversed(list(SECURITY_EVENT_BUFFER)))[:50]
+    if request.accept_mimetypes.best == "application/json" or request.args.get("format") == "json":
+        return jsonify(errors=events, captured=len(events)), 200
+    return jsonify(errors=events, captured=len(events)), 200
+
+
+@bp.route("/superadmin/audit")
+@superadmin_required
+def superadmin_audit():
+    """Browse the in-memory security audit ring buffer.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    q = (request.args.get("q") or "").strip().lower()
+    event_filter = (request.args.get("event") or "").strip()
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except ValueError:
+        page = 1
+    per_page = 100
+
+    events = list(SECURITY_EVENT_BUFFER)
+    events.reverse()
+
+    if event_filter:
+        events = [e for e in events if e.get("event", "").startswith(event_filter)]
+    if q:
+        events = [
+            e for e in events
+            if q in (e.get("event", "") + " " + e.get("detail", "") + " " + str(e.get("ip", ""))).lower()
+        ]
+
+    total = len(events)
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = min(page, pages)
+    start = (page - 1) * per_page
+    page_events = events[start: start + per_page]
+    event_types = sorted({e.get("event", "") for e in SECURITY_EVENT_BUFFER if e.get("event")})
+    log_security("SUPERADMIN_AUDIT_VIEW", f"q={q!r} event_filter={event_filter!r}")
+    return render_template(
+        "superadmin/audit.html",
+        events=page_events,
+        total=total,
+        page=page,
+        pages=pages,
+        per_page=per_page,
+        q=q,
+        event_filter=event_filter,
+        event_types=event_types,
+        buffer_capacity=getattr(SECURITY_EVENT_BUFFER, "maxlen", 1000),
+        verified_until=None,
+    )
+
+
+@bp.route("/superadmin/audit.json")
+@superadmin_required
+def superadmin_audit_json():
+    """Filterable JSON export of the security audit buffer.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    from datetime import datetime, timezone
+    q = (request.args.get("q") or "").strip().lower()
+    event_filter = (request.args.get("event") or "").strip()
+    events = list(SECURITY_EVENT_BUFFER)
+    events.reverse()
+    if event_filter:
+        events = [e for e in events if e.get("event", "").startswith(event_filter)]
+    if q:
+        events = [
+            e for e in events
+            if q in (e.get("event", "") + " " + e.get("detail", "") + " " + str(e.get("ip", ""))).lower()
+        ]
+    out = []
+    for e in events:
+        ts = float(e.get("ts", 0) or 0)
+        out.append({
+            "ts": ts,
+            "iso": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None,
+            "event": e.get("event", ""),
+            "ip": e.get("ip", ""),
+            "actor": e.get("actor"),
+            "detail": e.get("detail", ""),
+        })
+    log_security("SUPERADMIN_AUDIT_EXPORT", f"format=json count={len(out)}")
+    return jsonify(events=out, total=len(out)), 200
+
+
+@bp.route("/superadmin/audit.csv")
+@superadmin_required
+def superadmin_audit_csv():
+    """CSV export of the security audit buffer.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    import csv as _csv
+    import io as _io
+    from datetime import datetime, timezone
+    from flask import Response as _Resp
+
+    q = (request.args.get("q") or "").strip().lower()
+    event_filter = (request.args.get("event") or "").strip()
+    events = list(SECURITY_EVENT_BUFFER)
+    events.reverse()
+    if event_filter:
+        events = [e for e in events if e.get("event", "").startswith(event_filter)]
+    if q:
+        events = [
+            e for e in events
+            if q in (e.get("event", "") + " " + e.get("detail", "") + " " + str(e.get("ip", ""))).lower()
+        ]
+    buf = _io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow(["timestamp_iso", "epoch", "event", "ip", "actor", "detail"])
+    for e in events:
+        ts = float(e.get("ts", 0) or 0)
+        writer.writerow([
+            datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else "",
+            ts,
+            e.get("event", ""),
+            e.get("ip", ""),
+            e.get("actor") if e.get("actor") is not None else "",
+            e.get("detail", ""),
+        ])
+    log_security("SUPERADMIN_AUDIT_EXPORT", f"format=csv count={len(events)}")
+    from datetime import datetime as _dt
+    fname = "security-audit-" + _dt.utcnow().strftime("%Y%m%dT%H%M%SZ") + ".csv"
+    return _Resp(buf.getvalue(), mimetype="text/csv",
+                 headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@bp.route("/superadmin/devops")
+@superadmin_required
+def superadmin_devops():
+    """Operational hub: schema diagnostics, payment reconciliation, aggregator health.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    return render_template("superadmin/devops_index.html")
+
+
+def _collect_schema_diag() -> dict:
+    """Collect lightweight schema/pool diagnostics for the devops views."""
+    import time as _t
+    diag: dict = {}
+
+    try:
+        t0 = _t.monotonic()
+        db.session.execute(db.text("SELECT 1"))
+        diag["db_latency_ms"] = round((_t.monotonic() - t0) * 1000, 1)
+    except Exception as exc:
+        diag["db_latency_ms"] = None
+        diag["db_error"] = str(exc)
+
+    try:
+        pool = db.engine.pool
+        diag["pool"] = {
+            "size": getattr(pool, "size", lambda: None)(),
+            "checkedin": getattr(pool, "checkedin", lambda: None)(),
+            "checkedout": getattr(pool, "checkedout", lambda: None)(),
+            "overflow": getattr(pool, "overflow", lambda: None)(),
+        }
+    except Exception:
+        diag["pool"] = {}
+
+    try:
+        from alembic.runtime.migration import MigrationContext
+        from alembic.script import ScriptDirectory
+        from alembic.config import Config as _AlembicConfig
+        import os as _os
+        alembic_cfg = _AlembicConfig(_os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))), "alembic.ini"))
+        with db.engine.connect() as conn:
+            ctx = MigrationContext.configure(conn)
+            current = ctx.get_current_revision()
+        script = ScriptDirectory.from_config(alembic_cfg)
+        heads = script.get_heads()
+        diag["alembic"] = {"current": current, "heads": heads, "in_sync": current in heads}
+    except Exception as exc:
+        diag["alembic"] = {"error": str(exc)}
+
+    return diag
+
+
+@bp.route("/superadmin/devops/schema.json")
+@superadmin_required
+def superadmin_devops_schema_json():
+    """Machine-readable schema/pool diagnostics.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    diag = _collect_schema_diag()
+    return jsonify(diag), 200
+
+
+@bp.route("/superadmin/devops/schema")
+@superadmin_required
+def superadmin_devops_schema():
+    """Human-readable schema diagnostics page.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    diag = _collect_schema_diag()
+    return render_template("superadmin/devops_schema.html", diag=diag)
+
+
+@bp.route("/superadmin/devops/aggregators")
+@superadmin_required
+def superadmin_devops_aggregators():
+    """Aggregator (Swiggy / Zomato / UberEats) integration health view.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    from datetime import datetime, timezone, timedelta
+    from app.models import AggregatorPlatformCredential, AggregatorOrder, WebhookEventLog
+
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    yday = datetime.now(timezone.utc) - timedelta(hours=24)
+
+    try:
+        from app.models.aggregator import SUPPORTED_PLATFORMS
+    except ImportError:
+        SUPPORTED_PLATFORMS = []
+
+    platforms_summary = []
+    for plat in SUPPORTED_PLATFORMS:
+        creds = AggregatorPlatformCredential.query.filter_by(platform=plat).all()
+        active = [c for c in creds if getattr(c, "is_active", True)]
+        platforms_summary.append({
+            "platform": plat,
+            "configured": len(creds),
+            "active": len(active),
+            "modes": sorted({getattr(c, "mode", "test") or "test" for c in creds}),
+        })
+
+    volume_rows = (
+        db.session.query(
+            AggregatorOrder.platform,
+            AggregatorOrder.aggregator_status,
+            db.func.count(),
+            db.func.coalesce(db.func.sum(AggregatorOrder.total), 0),
+        )
+        .filter(AggregatorOrder.created_at >= today_start)
+        .group_by(AggregatorOrder.platform, AggregatorOrder.aggregator_status)
+        .all()
+    )
+    volume_today = [
+        {"platform": p, "status": s, "count": int(c), "gmv": float(g or 0)}
+        for p, s, c, g in volume_rows
+    ]
+
+    pending_count = AggregatorOrder.query.filter(
+        AggregatorOrder.aggregator_status == "placed",
+        AggregatorOrder.accepted_at.is_(None),
+        AggregatorOrder.rejected_at.is_(None),
+    ).count()
+
+    sig_failures = (
+        WebhookEventLog.query
+        .filter(WebhookEventLog.provider.like("agg:%"))
+        .filter(WebhookEventLog.event_type == "signature_invalid")
+        .filter(WebhookEventLog.received_at >= yday)
+        .count()
+    )
+
+    recent_events = (
+        WebhookEventLog.query
+        .filter(WebhookEventLog.provider.like("agg:%"))
+        .order_by(WebhookEventLog.received_at.desc())
+        .limit(20).all()
+    )
+
+    return render_template(
+        "superadmin/devops_aggregators.html",
+        platforms=platforms_summary,
+        volume_today=volume_today,
+        pending_count=pending_count,
+        sig_failures=sig_failures,
+        recent_events=recent_events,
+    )
+
+
+@bp.route("/superadmin/admin-keys")
+@superadmin_required
+def superadmin_admin_keys():
+    """List all admin access keys and let superadmins generate/revoke them.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    from flask import session as _sess
+    from app.models import Owner
+    from app.services.auth import _load_admin_keys_from_db, generate_admin_key_for_owner
+    from app.services.auth import logged_in_owner
+
+    keys = _load_admin_keys_from_db()
+    keys_by_owner = {int(k.get("owner_id", -1)): k for k in keys}
+    owners = Owner.query.order_by(Owner.username).all()
+    rows = []
+    for owner in owners:
+        record = keys_by_owner.get(int(owner.id))
+        rows.append({
+            "owner_id": owner.id,
+            "username": owner.username,
+            "email": owner.email or "",
+            "is_superadmin": bool(owner.is_superadmin),
+            "is_active": bool(owner.is_active),
+            "has_key": record is not None,
+            "generated_at": (record or {}).get("generated_at"),
+        })
+    new_key = _sess.pop("_new_admin_key", None)
+    new_key_owner = _sess.pop("_new_admin_key_owner", None)
+    return render_template(
+        "superadmin/admin_keys.html",
+        rows=rows,
+        new_key=new_key,
+        new_key_owner=new_key_owner,
+        owner_username=logged_in_owner(),
+    )
+
+
 @bp.route("/superadmin/analytics")
 @superadmin_required
 def superadmin_analytics():

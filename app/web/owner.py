@@ -691,3 +691,178 @@ def owner_table_bill(table_id: str):
         return redirect(url_for("web_owner.owner_dashboard") + "#table-calls")
     return redirect(url_for("web_owner.order_receipt", order_id=order.id, autoprint=1))
 
+
+# ---------------------------------------------------------------------------
+# Order quick-actions (Bug fixes — singular URL form, ported from legacy)
+# ---------------------------------------------------------------------------
+
+@bp.route("/owner/order/<int:order_id>/status", methods=["POST"])
+@login_required
+@limiter.limit("60 per minute")
+def update_order_status_singular(order_id: int):
+    """Singular-URL alias for /owner/orders/<id>/status (legacy + test compat)."""
+    from app.models import Order
+    owner_id = logged_in_owner_id()
+    new_status = (request.form.get("status") or "").strip().lower()
+    if new_status == "confirmed":
+        new_status = "preparing"
+    order = db.session.get(Order, order_id)
+    if not order or order.owner_id != owner_id:
+        abort(404, description="Order not found.")
+    if _db_update_order_status(order_id, new_status):
+        _notify_owner(owner_id, "order_updated", {"id": order_id, "status": new_status})
+        _notify_order_status(order_id, new_status)
+        log_security("ORDER_STATUS_UPDATE", f"order_id={order_id} status={new_status!r}")
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return {"ok": True, "status": new_status}, 200
+    return redirect(request.referrer or url_for("web_owner.owner_dashboard"))
+
+
+@bp.route("/owner/order/<int:order_id>/mark-paid", methods=["POST"])
+@login_required
+def mark_order_paid(order_id: int):
+    """Mark order as completed/paid from the receipt screen (one-click close).
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    from app.models import Order
+    owner_id = logged_in_owner_id()
+    order = Order.query.filter_by(id=order_id, owner_id=owner_id).first()
+    if not order:
+        abort(404)
+    if order.status not in ("completed", "cancelled"):
+        _db_update_order_status(order_id, "completed")
+        _notify_owner(owner_id, "order_updated", {"id": order_id, "status": "completed"})
+        _notify_order_status(order_id, "completed")
+        log_security("ORDER_MARK_PAID", f"order_id={order_id}")
+        flash(f"Order #{order_id} marked as paid and completed.", "success")
+    return redirect(request.referrer or url_for("web_owner.owner_dashboard") + "#table-calls")
+
+
+@bp.route("/owner/order/<int:order_id>/complete", methods=["POST"])
+@login_required
+def complete_order(order_id: int):
+    """Mark an order as completed.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    from app.models import Order
+    owner_id = logged_in_owner_id()
+    order = Order.query.filter_by(id=order_id, owner_id=owner_id).first()
+    if not order:
+        abort(404)
+    _db_update_order_status(order_id, "completed")
+    _notify_owner(owner_id, "order_updated", {"id": order_id, "status": "completed"})
+    _notify_order_status(order_id, "completed")
+    log_security("ORDER_COMPLETE", f"order_id={order_id}")
+    return redirect(request.referrer or url_for("web_owner.owner_dashboard") + "#orders")
+
+
+@bp.route("/owner/order/<int:order_id>/delete", methods=["POST"])
+@login_required
+def delete_order(order_id: int):
+    """Permanently delete an order record.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    from app.models import Order
+    from app.services.orders import _db_delete_order, _db_get_order
+    owner_id = logged_in_owner_id()
+    order_data = _db_get_order(order_id)
+    if not order_data or order_data.get("ownerId") != owner_id:
+        abort(403)
+    _db_delete_order(order_id)
+    log_security("ORDER_DELETE", f"order_id={order_id}")
+    flash("Order deleted.", "success")
+    return redirect(request.referrer or url_for("web_owner.owner_dashboard") + "#orders")
+
+
+# ---------------------------------------------------------------------------
+# Two-factor authentication setup / disable (Bug fixes — ported from legacy)
+# ---------------------------------------------------------------------------
+
+@bp.route("/owner/2fa/setup", methods=["GET", "POST"])
+@login_required
+def owner_2fa_setup():
+    """TOTP two-factor authentication enrollment.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    from flask import session
+    owner = logged_in_owner_obj()
+    if not owner:
+        return redirect(url_for("web_auth.owner_login"))
+
+    if request.method == "POST":
+        code = str(request.form.get("totp_code", "")).strip()
+        pending_secret = session.get("pending_totp_secret")
+        if not pending_secret:
+            flash("Session expired. Please start 2FA setup again.", "error")
+            return redirect(url_for("web_owner.owner_2fa_setup"))
+        try:
+            import pyotp  # type: ignore
+            totp = pyotp.TOTP(pending_secret)
+            if totp.verify(code, valid_window=1):
+                owner.totp_secret = pending_secret
+                owner.totp_enabled = True
+                db.session.commit()
+                session.pop("pending_totp_secret", None)
+                log_security("TOTP_ENABLED", f"owner_id={owner.id}")
+                flash("Two-factor authentication enabled successfully.", "success")
+                return redirect(url_for("web_owner.owner_profile"))
+            flash("Invalid verification code. Please try again.", "error")
+        except ImportError:
+            flash("Two-factor authentication library not installed.", "error")
+        except Exception as exc:
+            log_security("TOTP_SETUP_ERROR", f"owner_id={owner.id} err={exc!r}")
+            flash("2FA setup failed. Please try again.", "error")
+
+    try:
+        import pyotp  # type: ignore
+        import base64 as _b64
+        import io as _io
+        secret = session.get("pending_totp_secret") or pyotp.random_base32()
+        session["pending_totp_secret"] = secret
+        totp = pyotp.TOTP(secret)
+        otp_uri = totp.provisioning_uri(name=owner.username, issuer_name="CafePortal")
+        try:
+            import qrcode as _qr
+            qr_img = _qr.make(otp_uri)
+            buf = _io.BytesIO()
+            qr_img.save(buf, format="PNG")
+            buf.seek(0)
+            qr_b64 = _b64.b64encode(buf.read()).decode()
+        except ImportError:
+            qr_b64 = ""
+    except ImportError:
+        secret = ""
+        otp_uri = ""
+        qr_b64 = ""
+        flash("Two-factor authentication library not installed.", "error")
+
+    return render_template(
+        "owner_2fa_setup.html",
+        secret=secret,
+        qr_b64=qr_b64,
+        owner=owner,
+        owner_username=owner.username if owner else "",
+    )
+
+
+@bp.route("/owner/2fa/disable", methods=["POST"])
+@login_required
+def owner_2fa_disable():
+    """Disable TOTP two-factor authentication.
+
+    Bug fix: route existed in the legacy monolith but was not ported.
+    """
+    owner = logged_in_owner_obj()
+    if not owner:
+        return redirect(url_for("web_auth.owner_login"))
+    owner.totp_enabled = False
+    owner.totp_secret = None
+    db.session.commit()
+    log_security("TOTP_DISABLED", f"owner_id={owner.id}")
+    flash("Two-factor authentication disabled.", "success")
+    return redirect(url_for("web_owner.owner_profile"))
+
