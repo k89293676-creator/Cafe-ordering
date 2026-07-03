@@ -16,6 +16,24 @@ from app.utils.security import login_required
 bp = Blueprint("web_analytics", __name__)
 
 
+@bp.route("/owner/report/daily")
+@login_required
+@limiter.limit("20 per hour")
+def daily_report():
+    """Daily report page — redirects to the billing end-of-day summary.
+
+    Bug #13 fix: this route existed in the legacy monolith but was not ported
+    to the refactored app. The billing EOD route (/owner/billing/eod) in
+    extensions/billing_bp.py provides equivalent functionality; redirect there
+    so any bookmarked or linked report URLs continue to work.
+    """
+    date_param = request.args.get("date", "")
+    target = "/owner/billing/eod"
+    if date_param:
+        target = f"{target}?date={date_param}"
+    return redirect(target)
+
+
 @bp.route("/owner/analytics")
 @login_required
 def owner_analytics():
@@ -81,7 +99,7 @@ def owner_analytics():
     )
 
 
-@bp.route("/owner/export/orders.csv")
+@bp.route("/owner/export/orders")
 @login_required
 @limiter.limit("10 per hour")
 def export_orders_csv():

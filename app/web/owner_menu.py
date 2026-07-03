@@ -273,6 +273,21 @@ def save_menu_item():
 # Image upload for a menu item
 # ---------------------------------------------------------------------------
 
+@bp.route("/owner/menu/download")
+@login_required
+def download_menu():
+    """Download the owner's menu as a JSON file (Bug #16 fix — port from legacy monolith)."""
+    import json as _json
+    from flask import Response as _Resp
+    owner_id = logged_in_owner_id()
+    menu = load_owner_menu(owner_id)
+    return _Resp(
+        _json.dumps(menu, indent=2),
+        mimetype="application/json",
+        headers={"Content-Disposition": "attachment; filename=menu.json"},
+    )
+
+
 @bp.route("/owner/menu/ai-suggest", methods=["POST"])
 @login_required
 @limiter.limit("10 per hour")

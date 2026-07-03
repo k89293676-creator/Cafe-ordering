@@ -36,10 +36,19 @@ def owner_dashboard():
     _active_statuses = {"pending", "preparing", "ready"}
     pending_orders = [o for o in recent_orders if o["status"] in _active_statuses]
     preparing_count = sum(1 for o in recent_orders if o["status"] == "preparing")
-    revenue_today = sum(
-        o["total"] for o in recent_orders
-        if o.get("createdAt", "").startswith(_dt.date.today().isoformat())
-        and o["status"] not in ("cancelled", "voided")
+    # Bug #11 fix: query today's revenue directly from the DB so the result is
+    # not capped to the last 50 orders loaded for the dashboard display list.
+    _rev_today_start = _dt.datetime.combine(
+        _dt.date.today(), _dt.time.min, tzinfo=_dt.timezone.utc
+    )
+    revenue_today = float(
+        db.session.query(
+            _sqla_func.coalesce(_sqla_func.sum(Order.total), 0)
+        ).filter(
+            Order.owner_id == owner_id,
+            Order.created_at >= _rev_today_start,
+            Order.status.notin_(["cancelled", "voided"]),
+        ).scalar() or 0
     )
 
     # All-time completed-order stats
@@ -180,14 +189,22 @@ def owner_dashboard():
         db.session.query(_sqla_func.count(Order.id))
         .filter(Order.owner_id == owner_id, Order.payment_status == "unpaid",
                 Order.status != "cancelled").scalar() or 0)
+    # Bug #12 fix: orders may be marked paid without a paid_at timestamp (e.g.
+    # cash payments that set payment_status="paid" but leave paid_at NULL).
+    # Fall back to created_at when paid_at IS NULL so those orders are counted.
+    from sqlalchemy import or_ as _or, and_ as _and
+    _paid_today_filter = _or(
+        Order.paid_at >= _today_utc_start,
+        _and(Order.paid_at.is_(None), Order.created_at >= _today_utc_start),
+    )
     billing_net_today = float(
         db.session.query(_sqla_func.coalesce(_sqla_func.sum(Order.total), 0))
         .filter(Order.owner_id == owner_id, Order.payment_status == "paid",
-                Order.paid_at >= _today_utc_start).scalar() or 0)
+                _paid_today_filter).scalar() or 0)
     billing_settled_today = int(
         db.session.query(_sqla_func.count(Order.id))
         .filter(Order.owner_id == owner_id, Order.payment_status == "paid",
-                Order.paid_at >= _today_utc_start).scalar() or 0)
+                _paid_today_filter).scalar() or 0)
 
     return render_template(
         "owner_dashboard.html",
@@ -606,4 +623,71 @@ def table_qr(table_id: str):
         abort(503, "QR code generation not available")
     except Exception as _e:
         abort(500, f"QR generation failed: {_e}")
+
+
+# ---------------------------------------------------------------------------
+# Order receipt view (Bug #14 fix — port from legacy monolith)
+# ---------------------------------------------------------------------------
+
+@bp.route("/owner/order/<int:order_id>/receipt")
+@login_required
+def order_receipt(order_id: int):
+    """Print/view a receipt for a specific order."""
+    from app.models import Order
+    owner_id = logged_in_owner_id()
+    order = Order.query.filter_by(id=order_id, owner_id=owner_id).first()
+    if not order:
+        abort(404)
+    owner = logged_in_owner_obj()
+    cafe_name = (owner.cafe_name if owner else None) or "Cafe"
+    items = order.items if isinstance(order.items, list) else []
+    order_d = {
+        "id": order.id,
+        "tableId": order.table_id or "",
+        "tableName": order.table_name or order.table_id or "—",
+        "customerName": order.customer_name or "Guest",
+        "customerEmail": order.customer_email or "",
+        "customerPhone": order.customer_phone or "",
+        "items": items,
+        "subtotal": float(order.subtotal or 0),
+        "total": float(order.total or 0),
+        "tax": float(order.tax or 0),
+        "discount": float(order.discount or 0),
+        "status": order.status or "pending",
+        "paymentStatus": order.payment_status or "unpaid",
+        "paymentMethod": order.payment_method or "",
+        "invoiceNumber": order.invoice_number or "",
+        "createdAt": order.created_at.isoformat() if order.created_at else None,
+        "paidAt": order.paid_at.isoformat() if order.paid_at else None,
+        "pickupCode": order.pickup_code or "",
+    }
+    printed_at = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return render_template(
+        "receipt.html",
+        order=order_d,
+        cafe_name=cafe_name,
+        printed_at=printed_at,
+        autoprint=request.args.get("autoprint", "0"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Table bill shortcut (Bug #15 fix — port from legacy monolith)
+# ---------------------------------------------------------------------------
+
+@bp.route("/owner/table/<table_id>/bill")
+@login_required
+def owner_table_bill(table_id: str):
+    """Redirect to the billing order detail for the most recent open order at a table."""
+    from app.models import Order
+    owner_id = logged_in_owner_id()
+    order = (Order.query
+             .filter_by(owner_id=owner_id, table_id=table_id)
+             .filter(Order.status.notin_(["cancelled", "voided", "completed"]))
+             .order_by(Order.created_at.desc())
+             .first())
+    if not order:
+        flash("No open order found for that table.", "warning")
+        return redirect(url_for("web_owner.owner_dashboard") + "#table-calls")
+    return redirect(url_for("web_owner.order_receipt", order_id=order.id, autoprint=1))
 
