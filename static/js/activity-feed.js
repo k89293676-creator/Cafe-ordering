@@ -241,8 +241,10 @@ function initKitchenFeed(containerEl, badgeEl) {
    Uses /api/orders/<id>/stream (SSE) + polling fallback
    ========================================================== */
 
-function initCustomerFeed(containerEl, orderId) {
+function initCustomerFeed(containerEl, orderId, pickupCode) {
   if (!containerEl || !orderId) return null;
+  // pickup_code is required by the server IDOR fix; encode it safely.
+  const pcParam = pickupCode ? `?pickup_code=${encodeURIComponent(pickupCode)}` : "";
 
   const STATUS_META = {
     pending:   { icon:"⏳", label:"Order received",  sub:"We've got your order!", type:"info"    },
@@ -280,7 +282,7 @@ function initCustomerFeed(containerEl, orderId) {
 
   function startSSE() {
     try {
-      sse = new EventSource(`/api/orders/${orderId}/stream`);
+      sse = new EventSource(`/api/orders/${orderId}/stream${pcParam}`);
       sse.onmessage = e => {
         try {
           const d = JSON.parse(e.data);
@@ -298,7 +300,7 @@ function initCustomerFeed(containerEl, orderId) {
 
   async function pollOnce() {
     try {
-      const res = await fetch(`/api/orders/${orderId}`, { credentials: "same-origin" });
+      const res = await fetch(`/api/orders/${orderId}${pcParam}`, { credentials: "same-origin" });
       if (res.ok) {
         const d = await res.json();
         if (d.order?.status) handleStatus(d.order.status);

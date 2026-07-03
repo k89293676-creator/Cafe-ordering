@@ -757,13 +757,14 @@ function showTracker(order) {
   });
 
   openCart();
-  startPolling(order.id);
+  startPolling(order.id, order.pickupCode || "");
 
   /* ── Live Activity Log ── */
   if (window.initCustomerFeed) {
     window._cFeed = window.initCustomerFeed(
       document.getElementById("customer-activity-log"),
-      order.id
+      order.id,
+      order.pickupCode || ""
     );
   }
 }
@@ -825,9 +826,11 @@ function patchTrackerStatus(status) {
 }
 
 /* ── Real-time order tracking via SSE (replaces 5-second polling) ── */
-function _connectOrderSSE(orderId) {
+function _connectOrderSSE(orderId, pickupCode) {
   if (_sseOrderTries >= _SSE_ORDER_MAX) return;
-  _sseOrderSource = new EventSource(`/api/v1/orders/${orderId}/stream`);
+  // pickup_code is required by the server IDOR fix; encode it safely.
+  const pcParam = pickupCode ? `?pickup_code=${encodeURIComponent(pickupCode)}` : "";
+  _sseOrderSource = new EventSource(`/api/v1/orders/${orderId}/stream${pcParam}`);
 
   _sseOrderSource.onmessage = (event) => {
     try {
@@ -847,12 +850,12 @@ function _connectOrderSSE(orderId) {
     if (_sseOrderTries >= _SSE_ORDER_MAX) return;
     setTimeout(() => {
       _sseOrderDelay = Math.min(_sseOrderDelay * 2, 30000);
-      _connectOrderSSE(orderId);
+      _connectOrderSSE(orderId, pickupCode);
     }, _sseOrderDelay);
   };
 }
 
-function startOrderSSE(orderId) { stopOrderSSE(); _connectOrderSSE(orderId); }
+function startOrderSSE(orderId, pickupCode) { stopOrderSSE(); _connectOrderSSE(orderId, pickupCode); }
 
 function stopOrderSSE() {
   if (_sseOrderSource) { _sseOrderSource.close(); _sseOrderSource = null; }
@@ -860,7 +863,7 @@ function stopOrderSSE() {
 }
 
 /* ── Legacy shims so any caller of startPolling/stopPolling still works ── */
-function startPolling(orderId) { startOrderSSE(orderId); }
+function startPolling(orderId, pickupCode) { startOrderSSE(orderId, pickupCode); }
 function stopPolling() { stopOrderSSE(); }
 
 /* ── Cancel order ── */
