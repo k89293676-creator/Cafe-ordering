@@ -5,7 +5,7 @@ import csv
 import io
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, Response, abort, render_template, request
+from flask import Blueprint, Response, abort, redirect, render_template, request
 
 from app.extensions import db, limiter
 from app.services.auth import logged_in_owner_id, logged_in_owner_obj

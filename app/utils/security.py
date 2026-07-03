@@ -74,11 +74,11 @@ _LOCKOUT_WINDOW = 900  # 15 minutes
 
 
 def _client_ip() -> str:
-    return (
-        request.headers.get("X-Forwarded-For", request.remote_addr or "unknown")
-        .split(",")[0]
-        .strip()
-    )
+    # ProxyFix (configured in create_app with x_for=1) already normalises
+    # request.remote_addr to the real client IP.  Re-parsing X-Forwarded-For
+    # here would let attackers spoof their address and bypass the login
+    # rate-limiter by injecting a fake header value.
+    return request.remote_addr or "unknown"
 
 
 def log_security(event: str, detail: str = "") -> None:
@@ -204,8 +204,15 @@ def validate_uploaded_file(
 def login_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
-        from app.services.auth import logged_in_owner
+        from app.services.auth import logged_in_owner, logged_in_owner_obj
         if not logged_in_owner():
+            return redirect(url_for("web_auth.owner_login"))
+        # Enforce is_active on every request so a deactivated account cannot
+        # continue to use the app after an existing session was established.
+        owner = logged_in_owner_obj()
+        if owner is not None and not getattr(owner, "is_active", True):
+            log_security("LOGIN_REQUIRED_DEACTIVATED", f"path={request.path}")
+            session.clear()
             return redirect(url_for("web_auth.owner_login"))
         return view_func(*args, **kwargs)
     return wrapper
@@ -214,10 +221,16 @@ def login_required(view_func):
 def api_login_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
-        from app.services.auth import logged_in_owner
+        from app.services.auth import logged_in_owner, logged_in_owner_obj
         if not logged_in_owner():
             log_security("API_UNAUTHORISED", f"path={request.path}")
             return jsonify(description="Authentication required."), 401
+        # Enforce is_active so a deactivated owner's API session is rejected.
+        owner = logged_in_owner_obj()
+        if owner is not None and not getattr(owner, "is_active", True):
+            log_security("API_DEACTIVATED_ACCOUNT", f"path={request.path}")
+            session.clear()
+            return jsonify(description="Account has been deactivated."), 403
         return view_func(*args, **kwargs)
     return wrapper
 

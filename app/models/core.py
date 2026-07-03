@@ -11,7 +11,7 @@ class Cafe(db.Model):
     slug = db.Column(db.Text, unique=True, nullable=True)
     is_active = db.Column(db.Boolean, default=True, nullable=False, server_default="true")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
-    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), onupdate=db.func.now())
 
 
 class Owner(db.Model):
@@ -117,4 +117,4 @@ class Settings(db.Model):
     invoice_seq = db.Column(db.Integer, default=0, server_default="0")
     billing_address = db.Column(db.Text, default="", server_default="")
     billing_phone = db.Column(db.Text, default="", server_default="")
-    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), onupdate=db.func.now())

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, jsonify
 
 from app.extensions import db, limiter
-from app.utils.security import login_required
+from app.utils.security import api_login_required
 from app.services.auth import logged_in_owner_id
 
 log = logging.getLogger("cafe.api.stats")
@@ -21,7 +21,7 @@ bp = Blueprint("api_v1_stats", __name__)
 
 
 @bp.route("/api/v1/stats/today")
-@login_required
+@api_login_required
 @limiter.limit("120 per minute")
 def stats_today():
     """Return today's stats.

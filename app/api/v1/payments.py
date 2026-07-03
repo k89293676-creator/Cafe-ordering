@@ -31,10 +31,15 @@ _razorpay_cb = get_breaker("razorpay", failure_threshold=5, recovery_timeout=30)
 _aggregator_cb = get_breaker("aggregator", failure_threshold=5, recovery_timeout=30)
 
 
-@bp.route("/api/checkout", methods=["POST"])
+@bp.route("/api/payment/session", methods=["POST"])
+@bp.route("/api/v1/payment/session", methods=["POST"])
 @limiter.limit("10 per minute; 50 per hour")
 def checkout():
     """Create Stripe/Razorpay checkout session.
+
+    Previously at /api/checkout which conflicted with the order-placement
+    endpoint in orders.py.  Renamed to /api/payment/session to give each
+    endpoint a distinct, unambiguous path.
 
     Request JSON:
         {

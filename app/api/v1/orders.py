@@ -44,7 +44,7 @@ from app.services.menu import load_menu
 from app.services.tables import load_tables
 from app.utils.security import api_login_required, log_security
 from app.utils.serializers import _safe_text
-from app.cache import IdempotencyCache, ResponseCache
+from app.cache import IdempotencyCache, ResponseCache, _bg_queue
 
 bp = Blueprint("api_v1_orders", __name__)
 
@@ -65,14 +65,12 @@ def _invalidate_orders_cache(owner_id: int | None) -> None:
     if not owner_id:
         return
     try:
-        # ResponseCache supports a delete() or clear_prefix() method depending
-        # on the implementation.  We evict common pagination keys; the cache
-        # TTL (5 s) is a safety net for keys we don't explicitly evict.
-        for limit in (50, 100, 200, 500):
-            for offset in (0, 50, 100, 200):
-                _orders_response_cache.delete(
-                    f"orders:{owner_id}:limit={limit}:offset={offset}"
-                )
+        # ResponseCache.invalidate_prefix() clears all keys that start with the
+        # owner prefix in a single pass.  The previous code called .delete() which
+        # does not exist on ResponseCache (only .invalidate() / .invalidate_prefix()
+        # do), so it was silently swallowed by the except block and invalidation
+        # never actually happened.
+        _orders_response_cache.invalidate_prefix(f"orders:{owner_id}:")
     except Exception:
         pass  # cache eviction failure must never block a status update
 
@@ -195,10 +193,8 @@ def checkout():
             "status": "pending",
             "pickupCode": order_record["pickupCode"],
         })
-        from app.cache import BackgroundTaskQueue
-        _bg = BackgroundTaskQueue(name="cafe-bg")
-        _bg.submit(_push_new_order, owner_id, customer_name, order_record.get("total", 0),
-                   _name="push_new_order")
+        _bg_queue.submit(_push_new_order, owner_id, customer_name, order_record.get("total", 0),
+                         _name="push_new_order")
         # Invalidate the response cache so the new order appears immediately
         _invalidate_orders_cache(owner_id)
 
@@ -209,9 +205,7 @@ def checkout():
         _send_order_confirmation(rec)
 
     try:
-        from app.cache import BackgroundTaskQueue
-        _bg2 = BackgroundTaskQueue(name="cafe-bg")
-        _bg2.submit(_send_confirmation, order_record, _name="send_order_confirmation")
+        _bg_queue.submit(_send_confirmation, order_record, _name="send_order_confirmation")
     except Exception:
         pass
 
@@ -499,9 +493,7 @@ def reorder_api(order_id: int):
             "pickupCode": new_order.get("pickupCode", ""),
         })
         try:
-            from app.cache import BackgroundTaskQueue
-            _bg = BackgroundTaskQueue(name="cafe-bg")
-            _bg.submit(
+            _bg_queue.submit(
                 _push_new_order, owner_id,
                 new_order.get("customerName", "Guest"),
                 new_order.get("total", 0),
@@ -517,9 +509,7 @@ def reorder_api(order_id: int):
             from app.services.mail import _send_order_confirmation
             _send_order_confirmation(rec)
 
-        from app.cache import BackgroundTaskQueue
-        _bg2 = BackgroundTaskQueue(name="cafe-bg")
-        _bg2.submit(_send_confirmation, new_order, _name="send_reorder_confirmation")
+        _bg_queue.submit(_send_confirmation, new_order, _name="send_reorder_confirmation")
     except Exception:
         pass
 
