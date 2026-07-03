@@ -1,0 +1,160 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Cafe 11:11 — Billing Pro
+   Production-grade visual layer for the owner billing suite (Overview, Open
+   Tabs, Aging, EOD, Drawer, Refunds, Audit Log, Payment Methods, Health,
+   Settings). Loads after styles.css and the page's inline <style> block.
+   Fully additive — no JS selectors, data attributes, form actions, CSRF
+   tokens, or Jinja2 variables are touched. Only visual refinement.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Topbar — glass sticky header ─────────────────────────────────────── */
+.topbar {
+  background: rgba(20, 20, 20, .82) !important;
+  backdrop-filter: saturate(140%) blur(10px);
+  -webkit-backdrop-filter: saturate(140%) blur(10px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .04), 0 8px 24px -18px rgba(0, 0, 0, .6);
+}
+.topbar .brand {
+  background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 60%, #fde68a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ── Section nav — refined pill tabs ──────────────────────────────────── */
+.billnav {
+  backdrop-filter: saturate(140%) blur(8px);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+}
+.billnav a {
+  border-radius: 8px 8px 0 0;
+  transition: color .15s ease, background .15s ease, border-color .15s ease;
+}
+.billnav a:hover { background: rgba(255, 255, 255, .03); }
+.billnav a.active {
+  background: linear-gradient(180deg, rgba(245, 158, 11, .10) 0%, rgba(245, 158, 11, 0) 100%);
+}
+
+/* ── Stat cards — gradient top accent + hover lift ────────────────────── */
+.stat {
+  position: relative;
+  overflow: hidden;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .15s ease;
+}
+.stat::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--line-2), var(--line-2));
+  opacity: .6;
+}
+.stat.ok::before     { background: linear-gradient(90deg, #22c55e, #16a34a); opacity: 1; }
+.stat.warn::before   { background: linear-gradient(90deg, #fbbf24, #f59e0b); opacity: 1; }
+.stat.danger::before { background: linear-gradient(90deg, #f87171, #ef4444); opacity: 1; }
+.stat.primary::before{ background: linear-gradient(90deg, #f59e0b, #d97706); opacity: 1; }
+.stat:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-2);
+  box-shadow: 0 12px 28px -14px rgba(0, 0, 0, .55);
+}
+.stat .value { letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+
+/* ── Panels — softer depth, subtle hover on flush panels ──────────────── */
+.panel {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+  transition: box-shadow .15s ease;
+}
+.panel:hover { box-shadow: 0 6px 20px -12px rgba(0, 0, 0, .5); }
+.panel h2 {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+/* ── Tables — cleaner rows, sticky-friendly header ────────────────────── */
+th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-2);
+}
+tbody tr {
+  transition: background .12s ease;
+}
+tbody tr:hover { background: rgba(255, 255, 255, .035); }
+td.mono, th.mono { letter-spacing: -.01em; }
+
+/* ── Pills — dot prefix for quick scanning ────────────────────────────── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+.pill::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .85;
+  flex-shrink: 0;
+}
+
+/* ── Buttons — subtle gradient primary + refined interaction ─────────── */
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-2) 100%);
+  box-shadow: 0 4px 14px -4px rgba(245, 158, 11, .45);
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, var(--primary-2) 0%, var(--primary) 100%);
+  box-shadow: 0 6px 18px -4px rgba(245, 158, 11, .55);
+}
+.btn:active { transform: translateY(1px) scale(.98); }
+.btn-ghost:hover { border-color: var(--line-2); }
+
+/* ── Alerts — left accent bar ──────────────────────────────────────────── */
+.alert {
+  position: relative;
+  padding-left: 1.15rem;
+}
+.alert::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 3px 0 0 3px;
+}
+.alert-error::before { background: var(--danger); }
+.alert-ok::before    { background: var(--ok); }
+.alert-info::before  { background: var(--accent); }
+
+/* ── Fields — smoother focus transition ───────────────────────────────── */
+.field input, .field select, .field textarea {
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+/* ── Toasts — deeper shadow, tighter spring ───────────────────────────── */
+.bill-toast {
+  box-shadow: 0 18px 40px -14px rgba(0, 0, 0, .7);
+}
+
+/* ── Scrollbars — consistent thin styling ─────────────────────────────── */
+.billnav::-webkit-scrollbar { height: 0; }
+* { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; }
+
+/* ── Motion — gentle fade-in for panel content ────────────────────────── */
+@keyframes bpFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.wrap > .panel, .wrap > .grid {
+  animation: bpFadeIn .25s ease both;
+}
+
+/* ── Mobile refinements ────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .grid-stats { grid-template-columns: repeat(2, 1fr); }
+  .stat .value { font-size: 1.35rem; }
+}

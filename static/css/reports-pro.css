@@ -1,0 +1,121 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Cafe 11:11 — Reports Pro
+   Production-grade visual layer for the owner extensions/reports suite
+   (Employees, LTV, Menu Engineering, Sales Dashboard, Superadmin Panels).
+   Loads after styles.css and enhancements.css, and after the page's inline
+   <style> block. Fully additive — no JS selectors, data attributes, form
+   actions, or Jinja2 variables are touched. Only visual refinement.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Header — subtle divider + refined back link ──────────────────────── */
+.ext-header {
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #eef0f5;
+}
+.ext-header h1 { letter-spacing: -.02em; }
+.ext-header a.back {
+  display: inline-flex;
+  align-items: center;
+  padding: .4rem .75rem;
+  border-radius: 8px;
+  transition: background .15s ease, transform .1s ease;
+}
+.ext-header a.back:hover {
+  background: #eef2ff;
+  transform: translateX(-2px);
+}
+
+/* ── Filter bar — cleaner grouping ─────────────────────────────────────── */
+.ext-filter {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  transition: box-shadow .15s ease;
+}
+.ext-filter:focus-within { box-shadow: 0 0 0 3px rgba(79, 70, 229, .12); }
+.ext-filter input:focus, .ext-filter select:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, .12);
+}
+.ext-filter button {
+  transition: background .15s ease, transform .08s ease;
+}
+.ext-filter button:hover { background: #1e293b; }
+.ext-filter button:active { transform: translateY(1px); }
+
+/* ── KPI cards — gradient top accent + hover lift ─────────────────────── */
+.kpi {
+  position: relative;
+  overflow: hidden;
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.kpi::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #4f46e5, #7c3aed);
+}
+.kpi:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px -16px rgba(15, 23, 42, .22);
+}
+.kpi-value { font-variant-numeric: tabular-nums; }
+
+/* ── Cards — softer elevation on hover ────────────────────────────────── */
+.card {
+  transition: box-shadow .18s ease, transform .18s ease;
+}
+.card:hover { box-shadow: 0 8px 24px -14px rgba(15, 23, 42, .18); }
+.card h3 {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+.card h3::before {
+  content: "";
+  width: 4px;
+  height: 1rem;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #4f46e5, #7c3aed);
+}
+
+/* ── Tables — sticky header, tabular numbers, row hover ───────────────── */
+table.dt thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+table.dt tbody tr {
+  transition: background .12s ease;
+}
+table.dt tbody tr:hover { background: #f8fafc; }
+table.dt td { font-variant-numeric: tabular-nums; }
+
+/* ── Badges — refined weight and shadow ───────────────────────────────── */
+.badge {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .04);
+  letter-spacing: .03em;
+}
+
+/* ── Empty states ──────────────────────────────────────────────────────── */
+.empty {
+  border: 1px dashed #e2e8f0;
+  border-radius: 12px;
+  background: #fafbfd;
+}
+
+/* ── Motion — gentle entrance for grid + cards ────────────────────────── */
+@keyframes rpFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ext-grid, .card { animation: rpFadeIn .28s ease both; }
+
+/* ── Scrollbars ────────────────────────────────────────────────────────── */
+.chart-wrap { scrollbar-width: thin; }
+
+/* ── Mobile refinements ────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .ext-grid { grid-template-columns: repeat(2, 1fr); }
+  .kpi-value { font-size: 1.4rem; }
+}
