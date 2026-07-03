@@ -25,6 +25,7 @@ let activeFilter   = "";   // dietary filter: "vegan" | "gluten-free" | "nut-fre
 let tipPercent     = 0;    // 0 = no tip, otherwise percentage or custom
 let customTip      = 0;
 let favourites     = JSON.parse(localStorage.getItem("cafe_favourites") || "[]");
+let _lastToastStatus = null; // tracks last status we already toasted, so we only fire once per change
 
 /* ── Order persistence (survives page refresh / tab restore) ── */
 const _ORDER_KEY   = TABLE_ID ? `cafe_active_${TABLE_ID}` : null;
@@ -738,6 +739,10 @@ function showTracker(order) {
   const cart = qs(".o-cart");
   if (!cart) return;
 
+  /* Don't toast for the status the order already had when the tracker opened —
+     only for changes the kitchen pushes afterwards. */
+  _lastToastStatus = order.status || "pending";
+
   /* Swap cart panel content */
   cart.innerHTML = `
     <div class="o-drag-handle" aria-hidden="true"></div>
@@ -769,8 +774,68 @@ function showTracker(order) {
   }
 }
 
+/* ── Order-status toast — pops a card whenever the kitchen moves the order forward ── */
+function showOrderToast(status) {
+  const stack = $("order-toast-stack");
+  const si    = STATUS[status];
+  if (!stack || !si) return;
+
+  const el = document.createElement("div");
+  el.className = `o-toast o-toast--${status}`;
+  el.setAttribute("role", "status");
+  el.innerHTML =
+    `<span class="o-toast__icon" aria-hidden="true">${si.emoji}</span>` +
+    `<div class="o-toast__body">` +
+      `<p class="o-toast__title">${si.label}</p>` +
+      `<p class="o-toast__desc">${si.desc}</p>` +
+    `</div>` +
+    `<button class="o-toast__close" aria-label="Dismiss">&times;</button>`;
+
+  const dismiss = () => {
+    if (!el.isConnected) return;
+    el.classList.add("is-leaving");
+    setTimeout(() => el.remove(), 220);
+  };
+  el.querySelector(".o-toast__close")?.addEventListener("click", dismiss);
+
+  stack.appendChild(el);
+  setTimeout(dismiss, status === "ready" ? 9000 : 6000);
+
+  /* Buzz the device and flash the tab title if the guest isn't looking */
+  if (status === "ready" && "vibrate" in navigator) {
+    try { navigator.vibrate([120, 60, 120]); } catch {}
+  }
+  if (document.hidden) _flashTabTitle(status === "ready" ? "✅ Order Ready!" : `${si.emoji} ${si.label}`);
+}
+
+let _titleFlashTimer = null;
+let _originalTitle   = null;
+function _flashTabTitle(msg) {
+  if (_originalTitle === null) _originalTitle = document.title;
+  let on = false;
+  clearInterval(_titleFlashTimer);
+  _titleFlashTimer = setInterval(() => {
+    document.title = on ? _originalTitle : msg;
+    on = !on;
+  }, 1200);
+  const stop = () => {
+    clearInterval(_titleFlashTimer);
+    document.title = _originalTitle;
+    document.removeEventListener("visibilitychange", stop);
+  };
+  document.addEventListener("visibilitychange", function onVis() {
+    if (!document.hidden) { stop(); document.removeEventListener("visibilitychange", onVis); }
+  });
+}
+
 function patchTrackerStatus(status) {
   const si = STATUS[status] || STATUS.pending;
+
+  /* Notify the guest with a toast whenever the status actually changes */
+  if (status !== _lastToastStatus && (status === "preparing" || status === "ready")) {
+    showOrderToast(status);
+  }
+  _lastToastStatus = status;
 
   /* Remove cancel button if no longer pending */
   if (status !== "pending") $("cancel-btn")?.remove();
