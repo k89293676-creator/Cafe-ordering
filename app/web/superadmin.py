@@ -611,9 +611,20 @@ def superadmin_admin_keys_generate():
     Accepts JSON ``{"owner_id": <int>}`` or form field ``owner_id``.
     Returns ``{"ok": true, "key": "<raw-key>", "owner_id": <int>}`` on
     success.  The raw key is shown exactly once; store it securely.
+
+    Requires a *real* superadmin principal (``owner.is_superadmin=True``),
+    not just a generic admin session, to prevent privilege escalation via the
+    shared ``admin_authenticated`` session key.
     """
     from app.models import Owner
-    from app.services.auth import generate_admin_key_for_owner
+    from app.services.auth import generate_admin_key_for_owner, logged_in_owner_obj
+
+    # Enforce is_superadmin principal — superadmin_required alone permits
+    # generic admin sessions, which is not sufficient for key issuance.
+    caller = logged_in_owner_obj()
+    if not (caller and getattr(caller, "is_superadmin", False)):
+        log_security("SUPERADMIN_KEY_GEN_DENIED", f"caller_id={getattr(caller, 'id', None)}")
+        return jsonify(ok=False, error="Superadmin principal required"), 403
 
     data = request.get_json(silent=True) or {}
     owner_id_raw = data.get("owner_id") or request.form.get("owner_id")
@@ -639,9 +650,19 @@ def superadmin_admin_keys_revoke():
     Accepts JSON ``{"owner_id": <int>}`` or form field ``owner_id``.
     Returns ``{"ok": true, "revoked": true}`` if a key existed and was
     removed, or ``{"ok": true, "revoked": false}`` if no key was found.
+
+    Requires a *real* superadmin principal (``owner.is_superadmin=True``),
+    not just a generic admin session, to prevent privilege escalation via the
+    shared ``admin_authenticated`` session key.
     """
     from app.models import Owner
-    from app.services.auth import revoke_admin_key_for_owner
+    from app.services.auth import revoke_admin_key_for_owner, logged_in_owner_obj
+
+    # Enforce is_superadmin principal — same reasoning as /generate above.
+    caller = logged_in_owner_obj()
+    if not (caller and getattr(caller, "is_superadmin", False)):
+        log_security("SUPERADMIN_KEY_REVOKE_DENIED", f"caller_id={getattr(caller, 'id', None)}")
+        return jsonify(ok=False, error="Superadmin principal required"), 403
 
     data = request.get_json(silent=True) or {}
     owner_id_raw = data.get("owner_id") or request.form.get("owner_id")

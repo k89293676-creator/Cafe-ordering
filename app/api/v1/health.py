@@ -261,7 +261,13 @@ def version_endpoint():
 def ops_health():
     """Deep per-section health check — requires OPS_HEALTH_TOKEN when configured."""
     expected_token = os.environ.get("OPS_HEALTH_TOKEN", "")
-    if expected_token:
+    # /health/full is always token-gated (secure-by-default for the public
+    # alias). /api/ops/health retains the original optional-token behaviour for
+    # backward compatibility with internal tooling that predates this fix.
+    require_token = expected_token or (request.path == "/health/full")
+    if require_token:
+        if not expected_token:
+            return jsonify(ok=False, error="OPS_HEALTH_TOKEN is not configured on this server"), 503
         auth_header = request.headers.get("Authorization", "")
         provided = auth_header.removeprefix("Bearer ").strip()
         if not hmac.compare_digest(provided.encode(), expected_token.encode()):
