@@ -69,6 +69,8 @@ def feedback_summary():
     from app.models import Feedback
     from app.services.auth import logged_in_owner_id
     owner_id = logged_in_owner_id()
+    if not owner_id:
+        return jsonify(description="Could not determine owner identity."), 403
     feedback_list = Feedback.query.filter_by(owner_id=owner_id).all()
     avg = 0.0
     if feedback_list:

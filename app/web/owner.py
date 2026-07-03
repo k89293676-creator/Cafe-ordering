@@ -135,14 +135,29 @@ def owner_dashboard():
         "items": _int_items,
     }
 
-    # Recent webhook activity
+    # Recent webhook activity — scoped to this owner's payment intents so that
+    # webhook events belonging to other owners are never surfaced here.
+    # WebhookEventLog has no owner_id column; we join through OnlinePayment which
+    # carries owner_id and the matching intent_id.
     try:
+        from app.models.orders import OnlinePayment as _OP
+        _owner_intent_sq = (
+            db.session.query(_OP.intent_id)
+            .filter(_OP.owner_id == owner_id, _OP.intent_id != "")
+            .distinct()
+            .subquery()
+        )
         _recent_wh = (
-            WebhookEventLog.query.order_by(WebhookEventLog.id.desc()).limit(10).all()
+            WebhookEventLog.query
+            .filter(WebhookEventLog.intent_id.in_(_owner_intent_sq))
+            .order_by(WebhookEventLog.id.desc())
+            .limit(10)
+            .all()
         )
         _wh_24h = WebhookEventLog.query.filter(
             WebhookEventLog.received_at
-            >= _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=24)
+            >= _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=24),
+            WebhookEventLog.intent_id.in_(_owner_intent_sq),
         ).count()
         webhook_activity = {
             "counts": {"total_24h": _wh_24h},

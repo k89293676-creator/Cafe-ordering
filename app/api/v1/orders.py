@@ -300,6 +300,13 @@ def get_order(order_id: int):
     order = _db_get_order(order_id)
     if not order:
         abort(404, description="Order not found.")
+    # IDOR fix: require the pickup code so sequential order IDs cannot be
+    # enumerated by unauthenticated callers.  The cancel endpoint already
+    # enforces this pattern; get_order must be consistent.
+    provided_code = (request.args.get("pickup_code") or "").strip().upper()
+    expected_code = (order.get("pickupCode") or "").strip().upper()
+    if not expected_code or provided_code != expected_code:
+        abort(403, description="pickup_code query parameter is required to view this order.")
     pay_status = order.get("paymentStatus", "unpaid")
     safe_order = {
         "id": order["id"],
@@ -332,6 +339,12 @@ def customer_order_stream(order_id: int):
     order = _db_get_order(order_id)
     if not order:
         abort(404, description="Order not found.")
+    # IDOR fix: verify pickup code before opening the SSE stream so that
+    # arbitrary order IDs cannot be subscribed to by unauthenticated callers.
+    provided_code = (request.args.get("pickup_code") or "").strip().upper()
+    expected_code = (order.get("pickupCode") or "").strip().upper()
+    if not expected_code or provided_code != expected_code:
+        abort(403, description="pickup_code query parameter is required.")
     initial_status = order.get("status", "pending")
 
     my_queue: list[str] = []
