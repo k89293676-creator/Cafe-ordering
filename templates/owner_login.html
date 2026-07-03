@@ -52,74 +52,111 @@
   <link rel="stylesheet" href="/static/css/enhancements.css" />
 </head>
 <body>
-<div class="auth-page">
-  <div class="auth-logo">
-    <div class="auth-logo-wordmark">11:11</div>
-    <h1>Cafe 11:11</h1>
-    <p>Owner Management</p>
-  </div>
 
-  <div class="auth-card">
-    <h2>Welcome back</h2>
-    <p class="subtitle">Sign in to manage your cafe</p>
+<div class="auth-split">
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      {% for category, message in messages %}
-      <div class="alert alert-{{ 'error' if category in ('error','danger') else category }}">{{ message }}</div>
-      {% endfor %}
-    {% endif %}
-    {% endwith %}
-
-    <div class="lockout-warning" id="lockout-warning">
-      Too many failed attempts. Please wait before trying again.
+  <!-- ═══ Left: Brand panel ════════════════════════════════════════════════ -->
+  <div class="auth-split__brand">
+    <div>
+      <div class="auth-split__wordmark">11:11</div>
+      <div class="auth-split__cafe-name">Cafe 11:11</div>
     </div>
 
-    <form method="post" autocomplete="on" id="login-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      <div class="form-group">
-        <label for="username">Username or Email</label>
-        <input id="username" name="username" placeholder="Enter username or email"
-               autocomplete="username" required />
-      </div>
-      <div class="form-group">
-        <label for="password">Password</label>
-        <div class="input-with-toggle">
-          <input id="password" type="password" name="password"
-                 placeholder="Enter your password"
-                 autocomplete="current-password" required />
-          <button type="button" class="password-toggle" aria-label="Toggle password visibility"
-                  onclick="togglePw(this,'password')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-              <circle cx="12" cy="12" r="3"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-      <div class="form-group remember-row">
-        <input type="checkbox" id="remember_me" name="remember_me" value="on" />
-        <label for="remember_me">Keep me signed in for 90 days</label>
-      </div>
-      <button class="btn btn-primary btn-full" type="submit" style="margin-top:1rem;" id="signin-btn">
-        <span class="signin-btn-inner">
-          Sign In
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M5 12h14M12 5l7 7-7 7"/>
-          </svg>
-        </span>
-      </button>
-    </form>
+    <p class="auth-split__tagline">Run your café with quiet confidence</p>
 
-    <p class="auth-footer" style="margin-top:1.25rem;">
-      New owner? <a href="{{ url_for('web_auth.owner_signup') }}">Create an account</a>
-      <br />
-      Want to bring your café onboard? <a href="{{ url_for('web_public.owner_landing') }}">Learn more &amp; request access</a>
-      <br/>
-      Have an admin access key? <a href="{{ url_for('web_auth.owner_redeem_key') }}">Redeem it here</a>
-    </p>
+    <ul class="auth-split__features">
+      <li>
+        <span class="auth-split__feat-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        </span>
+        <span>Live table overview — see every table's status at a glance</span>
+      </li>
+      <li>
+        <span class="auth-split__feat-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18"/></svg>
+        </span>
+        <span>Instant order flow — from QR scan to kitchen ticket in seconds</span>
+      </li>
+      <li>
+        <span class="auth-split__feat-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </span>
+        <span>Revenue &amp; analytics — daily reports, trends, and top items</span>
+      </li>
+    </ul>
+
+    <blockquote class="auth-split__quote">
+      <p>"Our order errors dropped to near-zero the week we switched. The kitchen finally sees everything in real time."</p>
+      <cite>— Meera R., Café owner</cite>
+    </blockquote>
   </div>
+
+  <!-- ═══ Right: Form panel ════════════════════════════════════════════════ -->
+  <div class="auth-split__form">
+    <div class="auth-card">
+      <h2>Welcome back</h2>
+      <p class="subtitle">Sign in to manage your cafe</p>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ 'error' if category in ('error','danger') else category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+      {% endwith %}
+
+      <div class="lockout-warning" id="lockout-warning">
+        Too many failed attempts. Please wait before trying again.
+      </div>
+
+      <form method="post" autocomplete="on" id="login-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="form-group">
+          <label for="username">Username or Email</label>
+          <input id="username" name="username" placeholder="Enter username or email"
+                 autocomplete="username" required />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <div class="input-with-toggle">
+            <input id="password" type="password" name="password"
+                   placeholder="Enter your password"
+                   autocomplete="current-password" required />
+            <button type="button" class="password-toggle" aria-label="Toggle password visibility"
+                    onclick="togglePw(this,'password')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="form-group remember-row">
+          <input type="checkbox" id="remember_me" name="remember_me" value="on" />
+          <label for="remember_me">Keep me signed in for 90 days</label>
+        </div>
+        <button class="btn btn-primary btn-full" type="submit" style="margin-top:1rem;" id="signin-btn">
+          <span class="signin-btn-inner">
+            Sign In
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+          </span>
+        </button>
+      </form>
+
+      <p class="auth-footer" style="margin-top:1.25rem;">
+        New owner? <a href="{{ url_for('web_auth.owner_signup') }}">Create an account</a>
+        <br />
+        Want to bring your café onboard? <a href="{{ url_for('web_public.owner_landing') }}">Learn more &amp; request access</a>
+        <br/>
+        Have an admin access key? <a href="{{ url_for('web_auth.owner_redeem_key') }}">Redeem it here</a>
+      </p>
+    </div>
+  </div>
+
 </div>
+
 <script>
 function togglePw(btn, id) {
   const inp = document.getElementById(id);

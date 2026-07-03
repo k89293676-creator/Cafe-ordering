@@ -11,76 +11,113 @@
   <link rel="stylesheet" href="/static/css/enhancements.css" />
 </head>
 <body>
-<div class="auth-page">
-  <div class="auth-logo">
-    <div class="auth-logo-wordmark">11:11</div>
-    <h1>Cafe 11:11</h1>
-    <p>Owner Management</p>
+
+<div class="auth-split">
+
+  <!-- ═══ Left: Brand panel ════════════════════════════════════════════════ -->
+  <div class="auth-split__brand">
+    <div>
+      <div class="auth-split__wordmark">11:11</div>
+      <div class="auth-split__cafe-name">Cafe 11:11</div>
+    </div>
+
+    <p class="auth-split__tagline">Your café deserves better tools</p>
+
+    <ul class="auth-split__features">
+      <li>
+        <span class="auth-split__feat-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </span>
+        <span>Set up in minutes — QR codes, menu, tables all in one place</span>
+      </li>
+      <li>
+        <span class="auth-split__feat-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </span>
+        <span>Real-time kitchen display — no missed or confused orders</span>
+      </li>
+      <li>
+        <span class="auth-split__feat-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><polyline points="9 11 12 14 22 4"/></svg>
+        </span>
+        <span>Guest feedback &amp; reviews — collected automatically after every order</span>
+      </li>
+    </ul>
+
+    <blockquote class="auth-split__quote">
+      <p>"From paper slips to a fully digital kitchen in one afternoon. Wish we'd done this sooner."</p>
+      <cite>— Arjun K., Restaurant owner</cite>
+    </blockquote>
   </div>
 
-  <div class="auth-card">
-    <h2>Create your account</h2>
-    <p class="subtitle">Set up your owner credentials</p>
+  <!-- ═══ Right: Form panel ════════════════════════════════════════════════ -->
+  <div class="auth-split__form">
+    <div class="auth-card">
+      <h2>Create your account</h2>
+      <p class="subtitle">Set up your owner credentials</p>
 
-    {% with messages = get_flashed_messages() %}
-    {% if messages %}
-      {% for message in messages %}
-      <div class="alert alert-error">{{ message }}</div>
-      {% endfor %}
-    {% endif %}
-    {% endwith %}
-
-    {% if invitation %}
-      <div class="alert" style="background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;padding:.75rem;border-radius:.5rem;margin-bottom:1rem;">
-        <strong>Invitation accepted.</strong>
-        Your account will be created with the <code>{{ invitation.plan_tier }}</code> plan and activated immediately.
-      </div>
-    {% elif signup_mode == 'approval' %}
-      <div class="alert" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:.75rem;border-radius:.5rem;margin-bottom:1rem;">
-        <strong>Approval required.</strong>
-        New accounts are reviewed by an administrator before sign-in is enabled.
-        You will be notified once your account is approved.
-      </div>
-    {% elif signup_mode == 'invite_only' %}
-      <div class="alert alert-error">
-        Sign-ups are currently invite-only. Please use the invitation link sent to you.
-      </div>
-    {% endif %}
-
-    <form method="post" autocomplete="on">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      {% if invite_token %}
-      <input type="hidden" name="invite" value="{{ invite_token }}" />
+      {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-error">{{ message }}</div>
+        {% endfor %}
       {% endif %}
-      <div class="form-group">
-        <label for="cafe_name">Cafe Name <span style="font-weight:300;color:var(--text-muted);">(optional)</span></label>
-        <input id="cafe_name" name="cafe_name" placeholder="e.g. Cafe 11:11" autocomplete="organization" maxlength="200" />
-      </div>
-      <div class="form-group">
-        <label for="username">Username</label>
-        <input id="username" name="username" placeholder="Letters, digits, _ - . (3–64 chars)" autocomplete="username" required />
-      </div>
-      <div class="form-group">
-        <label for="email">Email <span style="font-weight:300;color:var(--text-muted);">(optional)</span></label>
-        <input id="email" type="email" name="email" placeholder="you@example.com" autocomplete="email" />
-      </div>
-      <div class="form-group">
-        <label for="password">Password</label>
-        <div class="input-with-toggle">
-          <input id="password" type="password" name="password" placeholder="Min. 8 chars, 1 letter &amp; 1 digit" autocomplete="new-password" required minlength="8" />
-          <button type="button" class="password-toggle" aria-label="Toggle password visibility" onclick="togglePw(this,'password')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-          </button>
-        </div>
-      </div>
-      <button class="btn btn-primary btn-full" type="submit" style="margin-top:0.75rem;">Create Account</button>
-    </form>
+      {% endwith %}
 
-    <p class="auth-footer">
-      Already have an account? <a href="{{ url_for('owner_login') }}">Sign in</a>
-    </p>
+      {% if invitation %}
+        <div class="alert" style="background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;padding:.75rem;border-radius:.5rem;margin-bottom:1rem;">
+          <strong>Invitation accepted.</strong>
+          Your account will be created with the <code>{{ invitation.plan_tier }}</code> plan and activated immediately.
+        </div>
+      {% elif signup_mode == 'approval' %}
+        <div class="alert" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:.75rem;border-radius:.5rem;margin-bottom:1rem;">
+          <strong>Approval required.</strong>
+          New accounts are reviewed by an administrator before sign-in is enabled.
+          You will be notified once your account is approved.
+        </div>
+      {% elif signup_mode == 'invite_only' %}
+        <div class="alert alert-error">
+          Sign-ups are currently invite-only. Please use the invitation link sent to you.
+        </div>
+      {% endif %}
+
+      <form method="post" autocomplete="on">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        {% if invite_token %}
+        <input type="hidden" name="invite" value="{{ invite_token }}" />
+        {% endif %}
+        <div class="form-group">
+          <label for="cafe_name">Cafe Name <span style="font-weight:300;color:var(--text-muted);">(optional)</span></label>
+          <input id="cafe_name" name="cafe_name" placeholder="e.g. Cafe 11:11" autocomplete="organization" maxlength="200" />
+        </div>
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input id="username" name="username" placeholder="Letters, digits, _ - . (3–64 chars)" autocomplete="username" required />
+        </div>
+        <div class="form-group">
+          <label for="email">Email <span style="font-weight:300;color:var(--text-muted);">(optional)</span></label>
+          <input id="email" type="email" name="email" placeholder="you@example.com" autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <div class="input-with-toggle">
+            <input id="password" type="password" name="password" placeholder="Min. 8 chars, 1 letter &amp; 1 digit" autocomplete="new-password" required minlength="8" />
+            <button type="button" class="password-toggle" aria-label="Toggle password visibility" onclick="togglePw(this,'password')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-full" type="submit" style="margin-top:0.75rem;">Create Account</button>
+      </form>
+
+      <p class="auth-footer">
+        Already have an account? <a href="{{ url_for('owner_login') }}">Sign in</a>
+      </p>
+    </div>
   </div>
+
 </div>
+
 <script>
 function togglePw(btn, id) {
   const inp = document.getElementById(id);
