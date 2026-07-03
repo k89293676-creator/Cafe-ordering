@@ -1488,12 +1488,15 @@ def owner_billing_create_charge(order_id: int):
         return redirect(url_for("billing.owner_billing_order_detail", order_id=order_id))
     try:
         provider_obj = _provider_for_credential(cred)
+        currency = _owner_currency(owner_id)[0].upper()
         intent = provider_obj.create_payment_intent(
-            amount=amount, currency=(_owner_currency(owner_id)[0].upper()),
-            metadata={"order_id": order_id, "owner_id": owner_id})
+            amount_minor=int(round(amount * 100)), currency=currency,
+            order_id=order_id, description=f"Order #{order_id}",
+            customer_email=order.customer_email or "",
+            customer_phone=order.customer_phone or "")
         op = OnlinePayment(
             order_id=order_id, owner_id=owner_id, provider=cred.provider,
-            intent_id=intent.id, amount=amount, currency=(_owner_currency(owner_id)[0].upper()),
+            intent_id=intent.intent_id, amount=amount, currency=intent.currency or currency,
             status="pending", raw=intent.raw or {})
         db.session.add(op)
         db.session.commit()
@@ -1527,9 +1530,9 @@ def billing_pay_page(order_id: int):
         order=order, payment=op, provider=op.provider,
         public_key=cred.public_key, mode=cred.mode,
         amount_minor=int(round(float(op.amount or 0) * 100)),
-        currency=op.currency or (_owner_currency(owner_id)[0].upper()),
+        currency=op.currency or (_owner_currency(op.owner_id)[0].upper()),
         checkout_url=raw.get("checkout_url") or "",
-        cashfree_session_id=(raw.get("extra") or {}).get("payment_session_id", "")
+        cashfree_session_id=raw.get("payment_session_id", "")
                             if op.provider == "cashfree" else "",
     )))
 

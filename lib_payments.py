@@ -389,16 +389,8 @@ class StripeProvider(PaymentProvider):
         )
 
     def parse_webhook(self, payload_bytes, signature_header):
-        """Parse + signature-verify a Stripe webhook.
-
-        Handles both the Checkout Session lifecycle (preferred since we
-        switched ``create_payment_intent`` to sessions) and bare
-        PaymentIntent events (still emitted for sessions but pointing
-        at the underlying intent — and used by legacy rows). We always
-        report the *session id* as ``intent_id`` when we recognise a
-        session-scoped event so the OnlinePayment lookup in the route
-        finds the row we created in ``create_payment_intent``.
-        """
+        """Parse + signature-verify a Stripe webhook using this provider's
+        own (owner-configured) webhook secret."""
         stripe = self._client()
         if not self.webhook_secret:
             raise PaymentProviderError("Webhook secret not configured for Stripe.")
@@ -408,53 +400,73 @@ class StripeProvider(PaymentProvider):
             )
         except Exception as exc:  # noqa: BLE001 — covers SignatureVerificationError
             raise PaymentProviderError(f"Stripe webhook signature invalid: {exc}") from exc
-        etype = event.get("type", "")
-        obj = event.get("data", {}).get("object", {}) or {}
+        return stripe_event_to_webhook_event(event)
 
-        # Checkout Session events come first because they're the primary
-        # lifecycle signal for hosted-checkout payments.
-        if etype.startswith("checkout.session."):
-            payment_status = (obj.get("payment_status") or "").lower()
-            session_status = (obj.get("status") or "").lower()
-            if etype == "checkout.session.completed":
-                # ``complete`` + payment_status=paid → success. For async
-                # payments (e.g. bank debit) payment_status is 'unpaid'
-                # initially and resolves via async_payment_succeeded.
-                status = "succeeded" if payment_status == "paid" else "pending"
-            elif etype == "checkout.session.async_payment_succeeded":
-                status = "succeeded"
-            elif etype == "checkout.session.async_payment_failed":
-                status = "failed"
-            elif etype == "checkout.session.expired":
-                status = "failed"
-            else:
-                status = "pending" if session_status != "complete" else "succeeded"
-            return WebhookEvent(
-                event_type=etype,
-                intent_id=obj.get("id", ""),  # cs_…
-                status=status,
-                amount_minor=int(obj.get("amount_total", 0) or 0),
-                currency=(obj.get("currency") or "inr").upper(),
-                raw=obj,
-            )
 
-        # PaymentIntent / charge events — legacy and refund flows.
-        intent_id = obj.get("id", "") or obj.get("payment_intent", "")
-        status_map = {
-            "payment_intent.succeeded": "succeeded",
-            "payment_intent.payment_failed": "failed",
-            "payment_intent.canceled": "cancelled",
-            "charge.refunded": "refunded",
-        }
-        status = status_map.get(etype, "pending")
+def stripe_event_to_webhook_event(event: dict) -> "WebhookEvent":
+    """Translate an already-verified Stripe ``Event`` dict into our
+    canonical ``WebhookEvent`` shape.
+
+    Handles both the Checkout Session lifecycle (preferred since we
+    switched ``create_payment_intent`` to sessions) and bare
+    PaymentIntent events (still emitted for sessions but pointing
+    at the underlying intent — and used by legacy rows). We always
+    report the *session id* as ``intent_id`` when we recognise a
+    session-scoped event so the OnlinePayment lookup finds the row
+    created in ``create_payment_intent``.
+
+    Shared by ``StripeProvider.parse_webhook`` (owner-configured
+    credentials, per-owner secret) and ``handle_stripe_webhook``
+    (platform-level Stripe used for subscription billing, verified by
+    the route against ``STRIPE_WEBHOOK_SECRET`` before this is called).
+    """
+    etype = event.get("type", "")
+    obj = event.get("data", {}).get("object", {}) or {}
+
+    # Checkout Session events come first because they're the primary
+    # lifecycle signal for hosted-checkout payments.
+    if etype.startswith("checkout.session."):
+        payment_status = (obj.get("payment_status") or "").lower()
+        session_status = (obj.get("status") or "").lower()
+        if etype == "checkout.session.completed":
+            # ``complete`` + payment_status=paid → success. For async
+            # payments (e.g. bank debit) payment_status is 'unpaid'
+            # initially and resolves via async_payment_succeeded.
+            status = "succeeded" if payment_status == "paid" else "pending"
+        elif etype == "checkout.session.async_payment_succeeded":
+            status = "succeeded"
+        elif etype == "checkout.session.async_payment_failed":
+            status = "failed"
+        elif etype == "checkout.session.expired":
+            status = "failed"
+        else:
+            status = "pending" if session_status != "complete" else "succeeded"
         return WebhookEvent(
             event_type=etype,
-            intent_id=intent_id,
+            intent_id=obj.get("id", ""),  # cs_…
             status=status,
-            amount_minor=int(obj.get("amount", 0) or 0),
+            amount_minor=int(obj.get("amount_total", 0) or 0),
             currency=(obj.get("currency") or "inr").upper(),
             raw=obj,
         )
+
+    # PaymentIntent / charge events — legacy and refund flows.
+    intent_id = obj.get("id", "") or obj.get("payment_intent", "")
+    status_map = {
+        "payment_intent.succeeded": "succeeded",
+        "payment_intent.payment_failed": "failed",
+        "payment_intent.canceled": "cancelled",
+        "charge.refunded": "refunded",
+    }
+    status = status_map.get(etype, "pending")
+    return WebhookEvent(
+        event_type=etype,
+        intent_id=intent_id,
+        status=status,
+        amount_minor=int(obj.get("amount", 0) or 0),
+        currency=(obj.get("currency") or "inr").upper(),
+        raw=obj,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -755,6 +767,178 @@ def build_provider(provider_name: str, *, public_key: str, secret_key: str,
         )
     return cls(public_key=public_key, secret_key=secret_key,
                webhook_secret=webhook_secret, mode=mode)
+
+
+def get_owner_provider(owner_id: int, provider_name: str) -> "PaymentProvider":
+    """Look up an owner's active, decrypted credential for ``provider_name``
+    and return a ready-to-use ``PaymentProvider`` instance.
+
+    Raises ``PaymentProviderError`` if the owner hasn't configured (or has
+    disabled) that provider — callers should surface this as a 4xx.
+    """
+    from app.models import PaymentProviderCredential
+
+    provider_name = (provider_name or "").strip().lower()
+    cred = PaymentProviderCredential.query.filter_by(
+        owner_id=owner_id, provider=provider_name, is_active=True,
+    ).first()
+    if not cred:
+        raise PaymentProviderError(
+            f"{provider_name.title()} is not configured for this cafe."
+        )
+    return build_provider(
+        provider_name,
+        public_key=cred.public_key or "",
+        secret_key=decrypt_secret(cred.secret_key_enc),
+        webhook_secret=decrypt_secret(cred.webhook_secret_enc) if cred.webhook_secret_enc else "",
+        mode=cred.mode or "test",
+    )
+
+
+def create_checkout_session(data: dict) -> dict:
+    """Create a hosted checkout / payment intent for an order.
+
+    Expects ``{"order_id": int, "payment_method": "stripe"|"razorpay", "return_url": str}``.
+    Returns a dict the client can use to launch the provider's checkout
+    (``checkout_url`` for Stripe, ``key_id``/``intent_id``/``amount`` for
+    Razorpay's Checkout.js). Raises ``PaymentProviderError`` on any
+    validation failure so the route can turn it into a 4xx JSON error.
+    """
+    from app.extensions import db
+    from app.models import Order, OnlinePayment
+
+    provider_name = (data.get("payment_method") or "").strip().lower()
+    if provider_name not in ("stripe", "razorpay"):
+        raise PaymentProviderError(
+            f"Unsupported payment_method: {provider_name!r}. Use 'stripe' or 'razorpay'."
+        )
+
+    order_id = data.get("order_id")
+    try:
+        order = db.session.get(Order, int(order_id))
+    except (TypeError, ValueError):
+        order = None
+    if order is None:
+        raise PaymentProviderError("Order not found.")
+    if (order.payment_status or "unpaid") == "paid":
+        raise PaymentProviderError("This order has already been paid.")
+
+    amount = float(order.total or 0)
+    if amount <= 0:
+        raise PaymentProviderError("Cannot create a payment session for a zero-amount order.")
+
+    provider_obj = get_owner_provider(order.owner_id, provider_name)
+    intent = provider_obj.create_payment_intent(
+        amount_minor=int(round(amount * 100)),
+        currency="INR",
+        order_id=order.id,
+        description=f"Order #{order.id}",
+        customer_email=order.customer_email or "",
+        customer_phone=order.customer_phone or "",
+        return_url=(data.get("return_url") or "").strip(),
+    )
+
+    op = OnlinePayment(
+        owner_id=order.owner_id,
+        order_id=order.id,
+        provider=provider_name,
+        intent_id=intent.intent_id,
+        amount=amount,
+        currency=intent.currency or "INR",
+        status="pending",
+        customer_email=order.customer_email or "",
+        customer_phone=order.customer_phone or "",
+        raw=intent.raw or {},
+    )
+    db.session.add(op)
+    db.session.commit()
+
+    result = {
+        "provider": provider_name,
+        "intent_id": intent.intent_id,
+        "order_id": order.id,
+        "currency": intent.currency,
+    }
+    if intent.checkout_url:
+        result["checkout_url"] = intent.checkout_url
+    if provider_name == "razorpay":
+        result["key_id"] = provider_obj.public_key
+        result["amount"] = intent.amount_minor
+    return result
+
+
+def _apply_payment_webhook_event(event: "WebhookEvent", provider_name: str) -> dict:
+    """Shared settlement logic for verified webhook events: locate the
+    ``OnlinePayment`` row by ``intent_id`` and mark the order paid on
+    success. Used by both ``handle_stripe_webhook`` and
+    ``handle_razorpay_webhook`` after route-level signature verification.
+    """
+    from datetime import datetime, timezone
+    from app.extensions import db
+    from app.models import OnlinePayment, Order
+
+    if not event.intent_id:
+        return {"handled": False, "reason": "missing intent_id", "event_type": event.event_type}
+
+    op = (
+        OnlinePayment.query
+        .filter_by(provider=provider_name, intent_id=event.intent_id)
+        .order_by(OnlinePayment.id.desc())
+        .first()
+    )
+    if op is None:
+        return {"handled": False, "reason": "unknown intent", "intent_id": event.intent_id}
+
+    if op.status == event.status:
+        return {"handled": True, "status": op.status, "order_id": op.order_id, "duplicate": True}
+
+    op.status = event.status
+    if event.raw:
+        op.raw = event.raw
+    db.session.add(op)
+
+    if event.status == "succeeded":
+        order = db.session.get(Order, op.order_id)
+        if order is not None and (order.payment_status or "unpaid") != "paid":
+            order.payment_status = "paid"
+            order.payment_method = provider_name
+            order.paid_at = datetime.now(timezone.utc)
+            db.session.add(order)
+
+    db.session.commit()
+    return {"handled": True, "status": op.status, "order_id": op.order_id}
+
+
+def handle_stripe_webhook(event: dict) -> dict:
+    """Handle an already signature-verified Stripe event dict (as parsed
+    by ``stripe.Webhook.construct_event`` at the route level)."""
+    wevent = stripe_event_to_webhook_event(event)
+    return _apply_payment_webhook_event(wevent, "stripe")
+
+
+def handle_razorpay_webhook(event_data: dict) -> dict:
+    """Handle an already signature-verified Razorpay webhook payload."""
+    etype = event_data.get("event", "")
+    payload = event_data.get("payload", {}) or {}
+    payment = (payload.get("payment", {}) or {}).get("entity", {}) or {}
+    rzp_order = (payload.get("order", {}) or {}).get("entity", {}) or {}
+    intent_id = payment.get("order_id") or rzp_order.get("id") or ""
+    status_map = {
+        "payment.captured": "succeeded",
+        "payment.authorized": "pending",
+        "payment.failed": "failed",
+        "refund.processed": "refunded",
+        "order.paid": "succeeded",
+    }
+    wevent = WebhookEvent(
+        event_type=etype,
+        intent_id=intent_id,
+        status=status_map.get(etype, "pending"),
+        amount_minor=int(payment.get("amount") or rzp_order.get("amount") or 0),
+        currency=(payment.get("currency") or rzp_order.get("currency") or "INR").upper(),
+        raw=event_data,
+    )
+    return _apply_payment_webhook_event(wevent, "razorpay")
 
 
 def detect_mode_from_key(provider_name: str, public_key: str, secret_key: str) -> str:
