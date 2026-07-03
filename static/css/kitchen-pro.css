@@ -1,0 +1,113 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Cafe 11:11 — Kitchen Pro
+   Production-grade micro-interaction layer for the live kitchen board
+   (kitchen.html). Loads after the page's inline <style> block.
+   Fully additive — no JS selectors, data attributes, form actions, or
+   Jinja2 variables are touched. Only visual refinement.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Filter pills — press feedback + smoother active swap ────────────── */
+.filter-pill {
+  transition: background .15s ease, border-color .15s ease, transform .08s ease, color .15s ease;
+}
+.filter-pill:active { transform: scale(.96); }
+
+/* ── Stat pills — subtle depth ─────────────────────────────────────────── */
+.stat-pill {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+  transition: border-color .15s ease;
+}
+
+/* ── Connection dot — live pulse when healthy ─────────────────────────── */
+@keyframes kpConnPulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(16, 185, 129, .2); }
+  50%      { box-shadow: 0 0 0 6px rgba(16, 185, 129, .08); }
+}
+.conn-dot:not(.off):not(.stale) { animation: kpConnPulse 2s ease-in-out infinite; }
+
+/* ── Kitchen cards — entrance animation + hover lift ──────────────────── */
+@keyframes kpCardIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.kitchen-card { animation: kpCardIn .25s ease both; }
+.kitchen-card:not(.late):hover {
+  box-shadow: 0 10px 28px -14px rgba(0, 0, 0, .5);
+  transform: translateY(-2px);
+  transition: box-shadow .2s ease, transform .2s ease, border-color .25s ease;
+}
+
+/* ── Status badges — dot prefix for quick scanning ────────────────────── */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+.status-badge::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .8;
+}
+
+/* ── Prep checkbox — subtle scale feedback ────────────────────────────── */
+.prep-check {
+  transition: transform .1s ease;
+}
+.prep-check:active { transform: scale(1.15); }
+
+/* ── Action buttons — gradient primary stage button + press feedback ──── */
+.card-actions .btn-stage {
+  transition: transform .08s ease, box-shadow .15s ease, opacity .15s ease;
+}
+.card-actions .btn-stage:not(:disabled):active { transform: scale(.96); }
+.card-actions .btn-stage.btn-success {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border: none;
+  box-shadow: 0 3px 10px -3px rgba(16, 185, 129, .5);
+}
+.card-actions .btn-stage.btn-success:hover:not(:disabled) {
+  box-shadow: 0 5px 14px -3px rgba(16, 185, 129, .6);
+}
+
+/* ── Table-call sidebar — hover + entrance ────────────────────────────── */
+.tc-item {
+  transition: border-color .15s ease, background .15s ease;
+}
+.tc-item:hover { background: var(--k-card-2); }
+.tc-act-btn {
+  transition: transform .08s ease, opacity .15s ease;
+}
+.tc-act-btn:not(:disabled):active { transform: scale(.95); }
+
+/* ── Empty state — icon tile treatment ────────────────────────────────── */
+.empty-state i {
+  display: inline-block;
+  padding: 1rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--k-border);
+}
+
+/* ── Toasts — deeper shadow ────────────────────────────────────────────── */
+.k-toast {
+  box-shadow: 0 12px 28px -10px rgba(0, 0, 0, .55);
+}
+
+/* ── Timer bar — smoother color transition ────────────────────────────── */
+.k-timer-bar {
+  transition: background .5s ease, width 1s linear;
+}
+
+/* ── Scrollbars ────────────────────────────────────────────────────────── */
+#orders-wrap, .card-items, #tc-sidebar-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--k-border) transparent;
+}
+#orders-wrap::-webkit-scrollbar, .card-items::-webkit-scrollbar, #tc-sidebar-list::-webkit-scrollbar {
+  width: 6px;
+}
+#orders-wrap::-webkit-scrollbar-thumb, .card-items::-webkit-scrollbar-thumb, #tc-sidebar-list::-webkit-scrollbar-thumb {
+  background: var(--k-border); border-radius: 6px;
+}

@@ -1,0 +1,129 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Cafe 11:11 — Order Pro
+   Production-grade micro-interaction layer for the customer ordering page
+   (table_order.html). Loads after order.css and enhancements.css.
+   Fully additive — no JS selectors, data attributes, form actions, CSRF
+   tokens, or Jinja2 variables are touched. Only visual refinement.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Search — focus glow ──────────────────────────────────────────────── */
+.o-search {
+  transition: box-shadow .15s ease, border-color .15s ease;
+}
+.o-search:focus-within {
+  box-shadow: 0 0 0 3px rgba(184, 134, 11, .14);
+}
+
+/* ── Category pills — smoother active state ───────────────────────────── */
+.o-cat {
+  transition: background .15s ease, color .15s ease, transform .1s ease, border-color .15s ease;
+}
+.o-cat:active { transform: scale(.96); }
+.o-cat--active {
+  box-shadow: 0 4px 12px -4px rgba(184, 134, 11, .45);
+}
+
+/* ── Menu items — lift + shadow on hover ──────────────────────────────── */
+.o-item {
+  transition: transform .18s ease, box-shadow .18s ease, border-color .15s ease;
+}
+.o-item:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-l, 0 8px 32px rgba(0,0,0,.14));
+}
+
+/* ── Dietary badges — subtle ring ──────────────────────────────────────── */
+.o-diet-badge {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .04);
+}
+
+/* ── Cart panel / drawer — deeper elevation + entrance ────────────────── */
+.o-cart {
+  transition: box-shadow .2s ease;
+}
+.o-cart-item {
+  will-change: transform;
+}
+.o-cart-item:hover {
+  transform: translateX(2px);
+}
+.o-cart__count-pill {
+  box-shadow: 0 2px 6px -2px rgba(184, 134, 11, .5);
+}
+
+/* ── Floating action button — pulse-in + hover lift ───────────────────── */
+.o-fab {
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.o-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-l, 0 8px 32px rgba(0,0,0,.18));
+}
+.o-fab:active { transform: translateY(0) scale(.98); }
+@keyframes opFabIn {
+  from { opacity: 0; transform: translateY(12px) scale(.92); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.o-fab--show { animation: opFabIn .22s ease both; }
+
+/* ── Tip selector — refined selected state ────────────────────────────── */
+.o-tip-btn {
+  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .08s ease;
+}
+.o-tip-btn:active { transform: scale(.95); }
+.o-tip-btn.is-selected {
+  box-shadow: 0 3px 10px -3px rgba(79, 70, 229, .5);
+}
+
+/* ── Favourites — reorder button micro-interaction ────────────────────── */
+.o-fav-item {
+  transition: background .15s ease;
+  border-radius: 6px;
+  padding-left: .4rem;
+  padding-right: .4rem;
+  margin: 0 -.4rem;
+}
+.o-fav-item:hover { background: var(--bg-alt, #f7f3ec); }
+.o-fav-reorder {
+  transition: background .15s ease, color .15s ease, transform .08s ease;
+}
+.o-fav-reorder:active { transform: scale(.95); }
+
+/* ── Modal — smoother entrance ─────────────────────────────────────────── */
+.o-modal {
+  animation: opModalIn .2s ease both;
+}
+.o-modal-bg {
+  animation: opBgIn .2s ease both;
+}
+@keyframes opModalIn {
+  from { opacity: 0; transform: translateY(10px) scale(.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes opBgIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.o-modal__submit {
+  transition: background .15s ease, transform .08s ease, box-shadow .15s ease;
+}
+.o-modal__submit:active { transform: scale(.97); }
+
+/* ── Reviews — star row + card polish ─────────────────────────────────── */
+.o-star-btn {
+  transition: transform .12s ease, color .12s ease;
+}
+.o-star-btn:hover { transform: scale(1.15); }
+
+/* ── Buttons — press feedback across the page ─────────────────────────── */
+.o-place-btn, .o-clear-btn, .ays-btn {
+  transition: transform .08s ease, box-shadow .15s ease, background .15s ease;
+}
+.o-place-btn:active, .o-clear-btn:active { transform: scale(.98); }
+
+/* ── Scrollbars — thin, consistent ────────────────────────────────────── */
+.o-cart__body, .o-menu { scrollbar-width: thin; }
+.o-cart__body::-webkit-scrollbar, .o-menu::-webkit-scrollbar { width: 6px; }
+.o-cart__body::-webkit-scrollbar-thumb, .o-menu::-webkit-scrollbar-thumb {
+  background: var(--border-dark, #c8bfb2); border-radius: 6px;
+}
