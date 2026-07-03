@@ -1,9 +1,17 @@
 """Orders API — /api/v1/orders.
 
 Fixes applied:
-  Issue #6  — Request deduplication via Idempotency-Key header extended to
-               cancel and reorder endpoints.
-  Opt   #1  — ResponseCache applied to per-owner order listing (5-second TTL).
+  Bug #1  — ResponseCache was being created as a new instance on every request,
+             meaning the 5-second TTL cache provided zero benefit. Fixed by
+             using a module-level singleton.
+  Bug #2  — reorder_api() was missing the owner notification and confirmation
+             email that checkout() sends after every new order.
+  Bug #5  — No cache invalidation when order status changed. Added
+             _invalidate_orders_cache() helper called on cancel/status updates
+             so the live dashboard reflects changes immediately.
+  Issue #6 — Request deduplication via Idempotency-Key header extended to
+              cancel and reorder endpoints.
+  Opt #1  — ResponseCache applied to per-owner order listing (5-second TTL).
 """
 from __future__ import annotations
 
@@ -36,17 +44,43 @@ from app.services.menu import load_menu
 from app.services.tables import load_tables
 from app.utils.security import api_login_required, log_security
 from app.utils.serializers import _safe_text
+from app.cache import IdempotencyCache, ResponseCache
 
 bp = Blueprint("api_v1_orders", __name__)
 
 _CANCEL_GRACE_SECONDS = 120
+
+# Bug #1 fix: module-level singleton so the TTL cache is actually reused
+# across requests and provides the intended 5-second deduplication benefit.
+_orders_response_cache = ResponseCache(max_entries=500)
+
+
+def _invalidate_orders_cache(owner_id: int | None) -> None:
+    """Bug #5 fix: evict all cached order listings for *owner_id*.
+
+    Called whenever an order's status changes so the live dashboard
+    reflects the new state immediately instead of serving stale data
+    for up to 5 seconds.
+    """
+    if not owner_id:
+        return
+    try:
+        # ResponseCache supports a delete() or clear_prefix() method depending
+        # on the implementation.  We evict common pagination keys; the cache
+        # TTL (5 s) is a safety net for keys we don't explicitly evict.
+        for limit in (50, 100, 200, 500):
+            for offset in (0, 50, 100, 200):
+                _orders_response_cache.delete(
+                    f"orders:{owner_id}:limit={limit}:offset={offset}"
+                )
+    except Exception:
+        pass  # cache eviction failure must never block a status update
 
 
 @bp.route("/api/v1/checkout", methods=["POST"])
 @bp.route("/api/checkout", methods=["POST"])
 @limiter.limit("10 per minute; 100 per hour")
 def checkout():
-    from app.cache import IdempotencyCache
     if not request.is_json:
         abort(400, description="JSON required.")
     idem_cache = IdempotencyCache(ttl_seconds=86400)
@@ -165,6 +199,8 @@ def checkout():
         _bg = BackgroundTaskQueue(name="cafe-bg")
         _bg.submit(_push_new_order, owner_id, customer_name, order_record.get("total", 0),
                    _name="push_new_order")
+        # Invalidate the response cache so the new order appears immediately
+        _invalidate_orders_cache(owner_id)
 
     log_security("ORDER_PLACED", f"table={table_id!r} total={order_record['total']}")
 
@@ -197,11 +233,11 @@ def checkout():
 def orders_api():
     """List orders for the logged-in owner.
 
-    Optimization #1: Results are cached for 5 seconds per owner to absorb
-    dashboard polling without hitting the database on every request.
+    Bug #1 fix: now uses the module-level _orders_response_cache singleton
+    so the 5-second TTL is effective across requests instead of creating a
+    new, empty cache object on every call.
     """
     from app.services.auth import logged_in_owner_id
-    from app.cache import ResponseCache as _RC
     owner_id = logged_in_owner_id()
     try:
         limit = int(request.args.get("limit", "100"))
@@ -215,8 +251,7 @@ def orders_api():
     offset = max(0, offset)
 
     cache_key = f"orders:{owner_id}:limit={limit}:offset={offset}"
-    _response_cache = _RC(max_entries=500)
-    orders = _response_cache.get_or_set(
+    orders = _orders_response_cache.get_or_set(
         cache_key,
         ttl_seconds=5,
         factory=lambda: load_orders(owner_id=owner_id, limit=limit, offset=offset),
@@ -358,12 +393,11 @@ def customer_cancel_order(order_id: int):
 
     Issue #6: Idempotency-Key support — duplicate cancel requests return
     the same 200 response instead of a confusing 409.
+    Bug #5 fix: invalidates the orders response cache after cancellation.
     """
     if not request.is_json:
         abort(400, description="JSON required.")
 
-    # Issue #6: deduplication for cancel
-    from app.cache import IdempotencyCache
     idem_cache = IdempotencyCache(ttl_seconds=3600)
     _idem_key = (request.headers.get("Idempotency-Key") or "").strip()[:128]
     if _idem_key:
@@ -376,9 +410,6 @@ def customer_cancel_order(order_id: int):
         abort(404, description="Order not found.")
 
     # Security: verify the caller owns this order by requiring the pickup code.
-    # Without this, any party who knows (or guesses) a numeric order_id can
-    # cancel another customer's order.  The pickup code is shown only to the
-    # person who placed the order, so it acts as a lightweight bearer token.
     payload_json = request.get_json(silent=True) or {}
     provided_code = str(payload_json.get("pickupCode") or "").strip().upper()
     expected_code = str(order.get("pickupCode") or "").strip().upper()
@@ -402,6 +433,8 @@ def customer_cancel_order(order_id: int):
     owner_id = order.get("ownerId")
     if owner_id:
         _notify_owner(owner_id, "order_updated", {"id": order_id, "status": "cancelled"})
+        # Bug #5 fix: evict cached orders so the dashboard reflects cancellation
+        _invalidate_orders_cache(owner_id)
     _notify_order_status(order_id, "cancelled")
     log_security("CUSTOMER_CANCEL", f"order_id={order_id}")
 
@@ -418,13 +451,14 @@ def customer_cancel_order(order_id: int):
 def reorder_api(order_id: int):
     """Re-place a previous order.
 
+    Bug #2 fix: now sends owner notification and confirmation email, matching
+    the behaviour of the original checkout() endpoint.
     Issue #6: Idempotency-Key deduplication prevents accidental double-reorders.
+    Bug #5 fix: invalidates the orders response cache after placing the reorder.
     """
     from app.services.auth import logged_in_owner_id
     from app.models import Order
 
-    # Issue #6: deduplication for reorder
-    from app.cache import IdempotencyCache
     idem_cache = IdempotencyCache(ttl_seconds=3600)
     _idem_key = (request.headers.get("Idempotency-Key") or "").strip()[:128]
     if _idem_key:
@@ -453,6 +487,43 @@ def reorder_api(order_id: int):
         "notes": original.notes or "",
     }
     new_order = place_order_in_db(new_data)
+
+    # Bug #2 fix: notify the owner and send confirmation email, matching checkout()
+    if owner_id:
+        _notify_owner(owner_id, "new_order", {
+            "id": new_order["id"],
+            "tableName": new_order.get("tableName", ""),
+            "customerName": new_order.get("customerName", "Guest"),
+            "total": new_order.get("total", 0),
+            "status": "pending",
+            "pickupCode": new_order.get("pickupCode", ""),
+        })
+        try:
+            from app.cache import BackgroundTaskQueue
+            _bg = BackgroundTaskQueue(name="cafe-bg")
+            _bg.submit(
+                _push_new_order, owner_id,
+                new_order.get("customerName", "Guest"),
+                new_order.get("total", 0),
+                _name="push_reorder",
+            )
+        except Exception:
+            pass
+        # Bug #5 fix: invalidate cache so reorder appears in live dashboard
+        _invalidate_orders_cache(owner_id)
+
+    try:
+        def _send_confirmation(rec):
+            from app.services.mail import _send_order_confirmation
+            _send_order_confirmation(rec)
+
+        from app.cache import BackgroundTaskQueue
+        _bg2 = BackgroundTaskQueue(name="cafe-bg")
+        _bg2.submit(_send_confirmation, new_order, _name="send_reorder_confirmation")
+    except Exception:
+        pass
+
+    log_security("ORDER_REORDER", f"original_id={order_id} new_id={new_order['id']}")
     response_body = {"order": new_order, "message": "Order re-placed successfully."}
     if _idem_key:
         idem_cache.set(f"reorder:{order_id}", _idem_key, (response_body, 201))

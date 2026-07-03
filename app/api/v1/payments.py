@@ -145,9 +145,16 @@ def _handle_subscription_event(event: "stripe.Event") -> None:  # type: ignore[n
         price_growth = cfg.get("STRIPE_PRICE_GROWTH", "")
         price_pro = cfg.get("STRIPE_PRICE_PRO", "")
 
+        # Bug #6 fix: _PLAN_META was out of sync with PLAN_DETAILS in
+        # billing_subscription.py.  The Stripe webhook was applying different
+        # table/order limits than what the subscription UI advertised.
+        # Values now match PLAN_DETAILS exactly:
+        #   starter → 10 tables / 500 orders
+        #   growth  → 30 tables / 2000 orders
+        #   pro     → unlimited
         _PLAN_META: dict[str, dict] = {
-            "starter": {"max_tables": 5,  "monthly_order_limit": 500},
-            "growth":  {"max_tables": 20, "monthly_order_limit": 3000},
+            "starter": {"max_tables": 10, "monthly_order_limit": 500},
+            "growth":  {"max_tables": 30, "monthly_order_limit": 2000},
             "pro":     {"max_tables": None, "monthly_order_limit": None},
             "free":    {"max_tables": 2,  "monthly_order_limit": 50},
         }

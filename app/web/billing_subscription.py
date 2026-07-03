@@ -119,11 +119,20 @@ def subscribe():
             owner.stripe_customer_id = customer_id
             db.session.commit()
 
-        # Create subscription with 14-day trial
+        # Bug #9 fix: added payment_behavior='default_incomplete' and
+        # payment_settings so Stripe requires a card before the trial ends
+        # instead of silently failing the first invoice.
+        # expand=['latest_invoice.payment_intent'] lets the frontend
+        # redirect to 3DS confirmation if needed.
         subscription = stripe.Subscription.create(
             customer=customer_id,
             items=[{"price": price_id}],
             trial_period_days=14,
+            payment_behavior="default_incomplete",
+            payment_settings={
+                "save_default_payment_method": "on_subscription",
+            },
+            expand=["latest_invoice.payment_intent"],
             metadata={"owner_id": str(owner.id), "plan": plan_key},
         )
         owner.stripe_subscription_id = subscription["id"]

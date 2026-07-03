@@ -1,5 +1,20 @@
 """Order service: placement, status transitions, inventory, feedback.
 
+Fixes applied:
+  Bug #3  — _check_stock_available() used with_for_update() (a write lock)
+             on a read-only availability check.  Under load this caused
+             unnecessary row-level contention and potential deadlocks when
+             multiple customers simultaneously checked stock for the same
+             items.  The lock has been removed; optimistic pre-flight checks
+             do not need a write lock.
+  Bug #4  — _db_update_order_status() incomplete transition guard: the
+             previous invalid_transitions set only blocked moving from
+             completed/cancelled/voided back to pending/preparing.  It did
+             NOT prevent cancelled → ready, voided → completed, etc.
+             Now the guard is a proper terminal-state whitelist: once an
+             order reaches completed, cancelled, or voided it cannot
+             transition to any other status.
+
 Optimizations applied:
   Opt #2 — Lazy-loaded relationships and selective column fetches in
             load_orders() to cut the query result set by ~50%.
@@ -134,12 +149,12 @@ def _deduct_inventory(owner_id: int | None, items: list) -> None:
         return
     from app.models import Ingredient
     try:
-        # Gather all needed item IDs to fetch in one query (Opt #2)
         item_ids = [item.get("id") for item in items if item.get("id")]
         if not item_ids:
             return
 
         # Optimization #3: single query with IN clause + row-level lock
+        # (write lock is correct here because we are about to mutate stock)
         ingredients = (
             Ingredient.query
             .filter(
@@ -152,12 +167,10 @@ def _deduct_inventory(owner_id: int | None, items: list) -> None:
         if not ingredients:
             return
 
-        # Build a lookup: menu_item_id → list[Ingredient]
         ing_map: dict[str, list] = {}
         for ing in ingredients:
             ing_map.setdefault(ing.menu_item_id, []).append(ing)
 
-        # Optimization #3: mutate all objects in-memory; one flush below
         updated: list = []
         for item in items:
             item_id = item.get("id")
@@ -227,6 +240,12 @@ def _restore_inventory(order: dict) -> None:
 def _check_stock_available(owner_id: int | None, items: list) -> tuple[bool, str]:
     """Check stock availability using a single batched query.
 
+    Bug #3 fix: removed with_for_update() — this is a read-only pre-flight
+    check and a write lock here caused unnecessary row-level contention and
+    potential deadlocks when concurrent customers checked the same items.
+    The actual stock deduction in _deduct_inventory() still uses
+    with_for_update() where the write lock is legitimately required.
+
     Optimization #2/#3: fetches all relevant Ingredient rows in one query.
     """
     from app.models import Ingredient
@@ -237,13 +256,13 @@ def _check_stock_available(owner_id: int | None, items: list) -> tuple[bool, str
         if not item_ids:
             return True, ""
 
+        # Bug #3 fix: no with_for_update() on a read-only availability check
         ingredients = (
             Ingredient.query
             .filter(
                 Ingredient.owner_id == owner_id,
                 Ingredient.menu_item_id.in_(item_ids),
             )
-            .with_for_update()
             .all()
         )
         ing_map: dict[str, list] = {}
@@ -267,20 +286,33 @@ def _check_stock_available(owner_id: int | None, items: list) -> tuple[bool, str
     return True, ""
 
 
+# ── Terminal statuses: once reached, no further transitions are allowed ────────
+_TERMINAL_STATUSES = frozenset({"completed", "cancelled", "voided"})
+
+_VALID_STATUSES = frozenset({"pending", "preparing", "ready", "completed", "cancelled", "voided"})
+
+
 def _db_update_order_status(order_id: int, new_status: str) -> bool:
+    """Update order status with a complete terminal-state guard.
+
+    Bug #4 fix: the previous implementation used an allowlist of specific
+    forbidden (from, to) pairs which was incomplete — e.g. cancelled → ready
+    was not blocked.  The new guard uses a simpler and more correct rule:
+    if the current status is any terminal status (completed, cancelled, voided)
+    no further transitions are permitted, regardless of the requested target.
+    """
     from app.models import Order
-    valid_statuses = {"pending", "preparing", "ready", "completed", "cancelled", "voided"}
-    if new_status not in valid_statuses:
+    if new_status not in _VALID_STATUSES:
         return False
     order = db.session.get(Order, order_id)
     if not order:
         return False
-    invalid_transitions = {
-        ("completed", "pending"), ("cancelled", "pending"), ("voided", "pending"),
-        ("completed", "preparing"), ("cancelled", "preparing"), ("voided", "preparing"),
-    }
-    if (order.status, new_status) in invalid_transitions:
+
+    # Bug #4 fix: terminal-status whitelist — once an order is finished,
+    # no status change is allowed (the old code only blocked some pairs).
+    if order.status in _TERMINAL_STATUSES:
         return False
+
     order.status = new_status
     order.updated_at = datetime.now(timezone.utc)
     db.session.commit()

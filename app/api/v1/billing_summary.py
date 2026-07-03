@@ -3,6 +3,16 @@
 Routes
 ------
 GET /api/v1/billing/summary  — today + 7-day billing summary with currency
+
+Fixes applied:
+  Bug #7  — today_rows query filtered on paid_at >= today_start, which
+             silently excluded paid orders where paid_at IS NULL (e.g. orders
+             settled via a method that didn't record the timestamp).  Revenue
+             figures were under-counted.  Fix: treat created_at as the
+             fallback date so no paid order is ever dropped.
+  Bug #8  — 7-day breakdown grouped by date(paid_at) which also dropped
+             orders where paid_at IS NULL.  Fix: use COALESCE(paid_at,
+             created_at) so every settled order appears in the correct day.
 """
 from __future__ import annotations
 
@@ -10,6 +20,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify
+from sqlalchemy import func, case
 
 from app.extensions import db, limiter
 from app.models import Order, Owner
@@ -31,6 +42,12 @@ def _owner_currency(owner_id: int) -> tuple[str, str]:
     owner = db.session.get(Owner, owner_id)
     code = (getattr(owner, "currency", None) or "gbp").lower()
     return code, _CURRENCY_SYMBOLS.get(code, code.upper())
+
+
+def _effective_date_col():
+    """Bug #7/#8 fix: COALESCE(paid_at, created_at) so orders without a
+    paid_at timestamp still appear under the correct calendar day."""
+    return func.coalesce(Order.paid_at, Order.created_at)
 
 
 @bp.route("/api/v1/billing/summary")
@@ -74,13 +91,17 @@ def billing_summary():
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = now - timedelta(days=7)
 
+    # Bug #7 fix: use COALESCE(paid_at, created_at) so orders where paid_at
+    # IS NULL are still included, anchored to their creation date instead.
+    effective_date = _effective_date_col()
+
     # ── Today ─────────────────────────────────────────────────────────────────
     today_rows = (
         db.session.query(Order.total, Order.refund_amount, Order.payment_status, Order.tip)
         .filter(
             Order.owner_id == owner_id,
             Order.payment_status.in_(("paid", "refunded")),
-            Order.paid_at >= today_start,
+            effective_date >= today_start,
         )
         .all()
     )
@@ -111,17 +132,19 @@ def billing_summary():
     )
 
     # ── 7-day trend ───────────────────────────────────────────────────────────
+    # Bug #8 fix: group by COALESCE(paid_at, created_at) date so orders
+    # without a recorded paid_at still appear in the day breakdown.
     week_rows = (
         db.session.query(
-            db.func.date(Order.paid_at).label("d"),
-            db.func.coalesce(db.func.sum(Order.total), 0).label("gross"),
-            db.func.coalesce(db.func.sum(Order.refund_amount), 0).label("refunds"),
-            db.func.count(Order.id).label("cnt"),
+            func.date(effective_date).label("d"),
+            func.coalesce(func.sum(Order.total), 0).label("gross"),
+            func.coalesce(func.sum(Order.refund_amount), 0).label("refunds"),
+            func.count(Order.id).label("cnt"),
         )
         .filter(
             Order.owner_id == owner_id,
             Order.payment_status.in_(("paid", "refunded")),
-            Order.paid_at >= week_start,
+            effective_date >= week_start,
         )
         .group_by("d")
         .order_by("d")
