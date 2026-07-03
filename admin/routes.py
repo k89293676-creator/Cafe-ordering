@@ -831,6 +831,28 @@ def devops_export_orders():
 # DevOps: git info (deployment version panel)
 # ---------------------------------------------------------------------------
 
+@admin_bp.route("/runtime")
+@admin_required
+def admin_runtime():
+    """Return a JSON snapshot of the current Python runtime environment.
+
+    Includes Python version, PID, memory usage (via psutil when available),
+    load average, uptime, and platform info — useful for DevOps dashboards
+    without navigating to the full /admin/devops page.
+    """
+    import time as _t
+    try:
+        from app import config as _cfg
+        app_start = getattr(_cfg, "APP_START_TIME", None) or _t.time()
+    except Exception:
+        app_start = _t.time()
+
+    metrics = _system_metrics()
+    metrics["appUptimeSeconds"] = int(_t.time() - app_start)
+    metrics["serverTime"] = datetime.now(timezone.utc).isoformat()
+    return jsonify(metrics), 200
+
+
 @admin_bp.route("/devops/git-info.json")
 @admin_required
 def devops_git_info():

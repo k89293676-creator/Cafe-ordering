@@ -75,6 +75,7 @@ def healthz():
 
 @bp.route("/api/v1/ready")
 @bp.route("/readyz")
+@bp.route("/ready")
 @limiter.exempt
 def readiness_check():
     """Readiness probe — returns 503 until all critical dependencies are up.
@@ -255,6 +256,7 @@ def version_endpoint():
 # ── Ops health (bearer-token-protected, full dependency matrix) ───────────────
 
 @bp.route("/api/ops/health")
+@bp.route("/health/full")
 @limiter.exempt
 def ops_health():
     """Deep per-section health check — requires OPS_HEALTH_TOKEN when configured."""
@@ -446,6 +448,7 @@ def api_metrics_json():
 
 
 @bp.route("/metrics")
+@bp.route("/metrics/prom")
 @limiter.exempt
 def prometheus_metrics():
     accept = request.headers.get("Accept", "")

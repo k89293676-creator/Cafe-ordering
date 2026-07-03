@@ -603,6 +603,62 @@ def superadmin_admin_keys():
     )
 
 
+@bp.route("/superadmin/admin-keys/generate", methods=["POST"])
+@superadmin_required
+def superadmin_admin_keys_generate():
+    """Generate (or rotate) an admin key for an owner.
+
+    Accepts JSON ``{"owner_id": <int>}`` or form field ``owner_id``.
+    Returns ``{"ok": true, "key": "<raw-key>", "owner_id": <int>}`` on
+    success.  The raw key is shown exactly once; store it securely.
+    """
+    from app.models import Owner
+    from app.services.auth import generate_admin_key_for_owner
+
+    data = request.get_json(silent=True) or {}
+    owner_id_raw = data.get("owner_id") or request.form.get("owner_id")
+    try:
+        owner_id = int(owner_id_raw)
+    except (TypeError, ValueError):
+        return jsonify(ok=False, error="owner_id is required and must be an integer"), 400
+
+    owner = db.session.get(Owner, owner_id)
+    if not owner:
+        return jsonify(ok=False, error=f"Owner {owner_id} not found"), 404
+
+    raw = generate_admin_key_for_owner(owner_id, owner.username)
+    log_security("SUPERADMIN_GENERATED_ADMIN_KEY_API", f"owner_id={owner_id}")
+    return jsonify(ok=True, key=raw, owner_id=owner_id), 201
+
+
+@bp.route("/superadmin/admin-keys/revoke", methods=["POST"])
+@superadmin_required
+def superadmin_admin_keys_revoke():
+    """Revoke the admin key for an owner.
+
+    Accepts JSON ``{"owner_id": <int>}`` or form field ``owner_id``.
+    Returns ``{"ok": true, "revoked": true}`` if a key existed and was
+    removed, or ``{"ok": true, "revoked": false}`` if no key was found.
+    """
+    from app.models import Owner
+    from app.services.auth import revoke_admin_key_for_owner
+
+    data = request.get_json(silent=True) or {}
+    owner_id_raw = data.get("owner_id") or request.form.get("owner_id")
+    try:
+        owner_id = int(owner_id_raw)
+    except (TypeError, ValueError):
+        return jsonify(ok=False, error="owner_id is required and must be an integer"), 400
+
+    owner = db.session.get(Owner, owner_id)
+    if not owner:
+        return jsonify(ok=False, error=f"Owner {owner_id} not found"), 404
+
+    revoked = revoke_admin_key_for_owner(owner_id)
+    log_security("SUPERADMIN_REVOKED_ADMIN_KEY_API", f"owner_id={owner_id} revoked={revoked}")
+    return jsonify(ok=True, revoked=revoked), 200
+
+
 @bp.route("/superadmin/analytics")
 @superadmin_required
 def superadmin_analytics():

@@ -27,6 +27,7 @@ def owner_menu():
 
 
 @bp.route("/owner/menu/add-category", methods=["POST"])
+@bp.route("/owner/menu/category", methods=["POST"])
 @login_required
 @limiter.limit("30 per hour")
 def owner_add_category():

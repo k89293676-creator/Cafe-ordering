@@ -303,6 +303,7 @@ def owner_tables():
 
 
 @bp.route("/owner/tables/add", methods=["POST"])
+@bp.route("/owner/table", methods=["POST"])
 @login_required
 @limiter.limit("30 per hour")
 def owner_add_table():
@@ -588,6 +589,7 @@ def download_all_table_qr_posters():
     )
 
 @bp.route("/owner/tables/<table_id>/qr.png")
+@bp.route("/owner/table/<table_id>/qr")
 @login_required
 def table_qr(table_id: str):
     """Generate and return QR code PNG for a single table."""
@@ -775,6 +777,66 @@ def delete_order(order_id: int):
     log_security("ORDER_DELETE", f"order_id={order_id}")
     flash("Order deleted.", "success")
     return redirect(request.referrer or url_for("web_owner.owner_dashboard") + "#orders")
+
+
+# ---------------------------------------------------------------------------
+# Analytics: day-orders — per-hour order counts and revenue for today
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/owner/analytics/day-orders")
+@login_required
+def owner_analytics_day_orders():
+    """Return per-hour order counts and revenue for today (owner scope).
+
+    Response::
+
+        {
+          "date": "2024-07-03",
+          "hours": [
+            {"hour": 0, "orders": 2, "revenue": 45.50},
+            ...
+          ],
+          "totals": {"orders": 12, "revenue": 340.00}
+        }
+    """
+    import datetime as _dt
+    from flask import jsonify as _jsonify
+    from app.models import Order
+
+    owner_id = logged_in_owner_id()
+    today = _dt.date.today()
+    day_start = _dt.datetime.combine(today, _dt.time.min, tzinfo=_dt.timezone.utc)
+    day_end = day_start + _dt.timedelta(days=1)
+
+    orders = (
+        Order.query
+        .filter(
+            Order.owner_id == owner_id,
+            Order.created_at >= day_start,
+            Order.created_at < day_end,
+            Order.status.notin_(["cancelled", "voided"]),
+        )
+        .all()
+    )
+
+    hours: list[dict] = [{"hour": h, "orders": 0, "revenue": 0.0} for h in range(24)]
+    for o in orders:
+        if o.created_at:
+            h = o.created_at.astimezone(_dt.timezone.utc).hour
+            hours[h]["orders"] += 1
+            hours[h]["revenue"] += float(o.total or 0)
+
+    for slot in hours:
+        slot["revenue"] = round(slot["revenue"], 2)
+
+    total_orders = sum(s["orders"] for s in hours)
+    total_revenue = round(sum(s["revenue"] for s in hours), 2)
+
+    return _jsonify(
+        date=today.isoformat(),
+        hours=hours,
+        totals={"orders": total_orders, "revenue": total_revenue},
+    ), 200
 
 
 # ---------------------------------------------------------------------------
