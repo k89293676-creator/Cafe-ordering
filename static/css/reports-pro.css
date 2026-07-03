@@ -3,69 +3,90 @@
    Production-grade visual layer for the owner extensions/reports suite
    (Employees, LTV, Menu Engineering, Sales Dashboard, Superadmin Panels).
    Loads after styles.css and enhancements.css, and after the page's inline
-   <style> block. Fully additive — no JS selectors, data attributes, form
-   actions, or Jinja2 variables are touched. Only visual refinement.
+   <style> design-token block in _base_owner.html. Fully additive — no JS
+   selectors, data attributes, form actions, or Jinja2 variables are
+   touched. Visual layer only.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Header — subtle divider + refined back link ──────────────────────── */
 .ext-header {
   padding-bottom: 1rem;
-  border-bottom: 1px solid #eef0f5;
+  border-bottom: 1px solid var(--line);
 }
 .ext-header h1 { letter-spacing: -.02em; }
 .ext-header a.back {
   display: inline-flex;
   align-items: center;
   padding: .4rem .75rem;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   transition: background .15s ease, transform .1s ease;
 }
 .ext-header a.back:hover {
-  background: #eef2ff;
+  background: var(--primary-soft);
   transform: translateX(-2px);
 }
 
-/* ── Filter bar — cleaner grouping ─────────────────────────────────────── */
+/* ── Filter bar — cleaner grouping, glow on focus-within ──────────────── */
 .ext-filter {
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
-  transition: box-shadow .15s ease;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow .15s ease, border-color .15s ease;
 }
-.ext-filter:focus-within { box-shadow: 0 0 0 3px rgba(79, 70, 229, .12); }
+.ext-filter:focus-within { box-shadow: var(--ring); border-color: var(--primary); }
 .ext-filter input:focus, .ext-filter select:focus {
   outline: none;
-  border-color: #4f46e5;
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, .12);
+  border-color: var(--primary);
+  box-shadow: var(--ring);
 }
 .ext-filter button {
-  transition: background .15s ease, transform .08s ease;
+  transition: background .15s ease, transform .08s ease, box-shadow .15s ease;
+  box-shadow: 0 6px 16px -8px rgba(15, 23, 42, .35);
 }
-.ext-filter button:hover { background: #1e293b; }
-.ext-filter button:active { transform: translateY(1px); }
+.ext-filter button:hover { background: var(--ink-2); }
+.ext-filter button:active { transform: translateY(1px) scale(.98); }
 
-/* ── KPI cards — gradient top accent + hover lift ─────────────────────── */
+/* ── KPI cards — gradient top accent, icon glow corner, hover lift ────── */
 .kpi {
   position: relative;
   overflow: hidden;
-  transition: transform .18s ease, box-shadow .18s ease;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
 .kpi::before {
   content: "";
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 3px;
-  background: linear-gradient(90deg, #4f46e5, #7c3aed);
+  background: linear-gradient(90deg, var(--primary), var(--primary-2));
+}
+.kpi::after {
+  content: "";
+  position: absolute;
+  top: -35%; right: -18%;
+  width: 100px; height: 100px;
+  background: radial-gradient(circle, var(--primary) 0%, transparent 70%);
+  opacity: .06;
+  pointer-events: none;
 }
 .kpi:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 28px -16px rgba(15, 23, 42, .22);
+  transform: translateY(-3px);
+  border-color: var(--line-2);
+  box-shadow: var(--shadow-md);
 }
-.kpi-value { font-variant-numeric: tabular-nums; }
+.kpi-value { font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 
-/* ── Cards — softer elevation on hover ────────────────────────────────── */
+/* Color-coded KPI variants for menu engineering quadrant counts, applied
+   by position so no template markup needs to change. */
+#c-star.kpi-value, .kpi:has(#c-star)::before { }
+.kpi:has(#c-star)::before  { background: linear-gradient(90deg, var(--ok), #16a34a); }
+.kpi:has(#c-plowhorse)::before { background: linear-gradient(90deg, var(--warn), #d97706); }
+.kpi:has(#c-puzzle)::before { background: linear-gradient(90deg, var(--info), #2563eb); }
+.kpi:has(#c-dog)::before { background: linear-gradient(90deg, var(--danger), #dc2626); }
+.kpi:has(#k-risk)::before { background: linear-gradient(90deg, var(--warn), #d97706); }
+
+/* ── Cards — softer elevation on hover, accented headings ─────────────── */
 .card {
-  transition: box-shadow .18s ease, transform .18s ease;
+  transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease;
 }
-.card:hover { box-shadow: 0 8px 24px -14px rgba(15, 23, 42, .18); }
+.card:hover { box-shadow: var(--shadow-md); border-color: var(--line-2); }
 .card h3 {
   display: flex;
   align-items: center;
@@ -76,10 +97,11 @@
   width: 4px;
   height: 1rem;
   border-radius: 2px;
-  background: linear-gradient(180deg, #4f46e5, #7c3aed);
+  background: linear-gradient(180deg, var(--primary), var(--primary-2));
+  flex-shrink: 0;
 }
 
-/* ── Tables — sticky header, tabular numbers, row hover ───────────────── */
+/* ── Tables — sticky header, zebra rows, tabular numbers, row hover ────── */
 table.dt thead th {
   position: sticky;
   top: 0;
@@ -88,34 +110,90 @@ table.dt thead th {
 table.dt tbody tr {
   transition: background .12s ease;
 }
-table.dt tbody tr:hover { background: #f8fafc; }
+table.dt tbody tr:nth-child(even) { background: rgba(15, 23, 42, .012); }
+table.dt tbody tr:hover { background: var(--primary-soft) !important; }
 table.dt td { font-variant-numeric: tabular-nums; }
+.card:has(table.dt) { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
-/* ── Badges — refined weight and shadow ───────────────────────────────── */
+/* ── Badges — refined weight, shadow, dot accent ──────────────────────── */
 .badge {
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .04);
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .05);
   letter-spacing: .03em;
 }
-
-/* ── Empty states ──────────────────────────────────────────────────────── */
-.empty {
-  border: 1px dashed #e2e8f0;
-  border-radius: 12px;
-  background: #fafbfd;
+.badge::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
 }
 
-/* ── Motion — gentle entrance for grid + cards ────────────────────────── */
+/* ── Empty states — friendlier, dashed border ──────────────────────────── */
+.empty {
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+/* ── Chart container — subtle frame ───────────────────────────────────── */
+.chart-wrap {
+  scrollbar-width: thin;
+}
+canvas { max-width: 100%; }
+
+/* ── Skeleton loading shimmer (opt-in via .skel class, additive only) ─── */
+.skel {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  color: transparent !important;
+}
+.skel::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(15, 23, 42, .05), transparent);
+  animation: rpShimmer 1.4s ease-in-out infinite;
+}
+@keyframes rpShimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* ── Scrollbars — consistent thin styling ─────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--muted-2); }
+
+/* ── Motion — gentle staggered entrance for grid + cards ──────────────── */
 @keyframes rpFadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.ext-grid, .card { animation: rpFadeIn .28s ease both; }
-
-/* ── Scrollbars ────────────────────────────────────────────────────────── */
-.chart-wrap { scrollbar-width: thin; }
+.ext-grid, .card { animation: rpFadeIn .3s ease both; }
+.ext-grid .kpi:nth-child(1) { animation-delay: .02s; }
+.ext-grid .kpi:nth-child(2) { animation-delay: .05s; }
+.ext-grid .kpi:nth-child(3) { animation-delay: .08s; }
+.ext-grid .kpi:nth-child(4) { animation-delay: .11s; }
+.ext-grid .kpi:nth-child(5) { animation-delay: .14s; }
+.ext-grid .kpi:nth-child(6) { animation-delay: .17s; }
+@media (prefers-reduced-motion: reduce) {
+  .ext-grid, .card, .skel::after { animation: none; }
+}
 
 /* ── Mobile refinements ────────────────────────────────────────────────── */
 @media (max-width: 640px) {
   .ext-grid { grid-template-columns: repeat(2, 1fr); }
   .kpi-value { font-size: 1.4rem; }
+  .card { padding: 1.1rem !important; }
+}
+
+/* ── Print ─────────────────────────────────────────────────────────────── */
+@media print {
+  .ext-header a.back, .ext-filter { display: none !important; }
 }
