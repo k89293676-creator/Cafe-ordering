@@ -125,7 +125,16 @@ def _derive_fernet_key(secret: str) -> bytes:
 
 def _fernet():
     from cryptography.fernet import Fernet  # local import keeps boot fast
-    secret = os.environ.get("BILLING_ENCRYPTION_KEY") or os.environ.get("SECRET_KEY") or ""
+    dedicated_key = os.environ.get("BILLING_ENCRYPTION_KEY")
+    if not dedicated_key:
+        log.warning(
+            "BILLING_ENCRYPTION_KEY is not set; falling back to SECRET_KEY to "
+            "encrypt payment credentials. This makes it impossible to rotate "
+            "the app's session secret without also breaking stored payment "
+            "credentials. Set a dedicated BILLING_ENCRYPTION_KEY before going "
+            "to production (see ENV_CONFIG.md)."
+        )
+    secret = dedicated_key or os.environ.get("SECRET_KEY") or ""
     return Fernet(_derive_fernet_key(secret))
 
 
@@ -616,6 +625,15 @@ class CashfreeProvider(PaymentProvider):
         import requests
         # Cashfree expects amounts in major units, not paise.
         amount_major = round(int(amount_minor) / 100.0, 2)
+        if not customer_phone or not customer_email:
+            log.warning(
+                "Cashfree order %s created without a real customer phone/email; "
+                "falling back to placeholder contact details. Refunds and "
+                "customer notifications from Cashfree may not reach the "
+                "actual customer.",
+                order_id,
+            )
+        notify_url = os.environ.get("CASHFREE_NOTIFY_URL", "").strip()
         payload = {
             "order_id": f"order_{order_id}_{int(amount_minor)}",
             "order_amount": amount_major,
@@ -628,7 +646,7 @@ class CashfreeProvider(PaymentProvider):
             },
             "order_meta": {
                 "return_url": return_url,
-                "notify_url": "",
+                "notify_url": notify_url,
             },
         }
         try:

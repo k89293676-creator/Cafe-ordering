@@ -98,7 +98,14 @@ _DB_CONNECT_TIMEOUT_S = int(os.environ.get("DB_CONNECT_TIMEOUT_S", "10"))
 # lower to 50 ms in staging to surface N+1 queries early.
 SLOW_QUERY_MS: int = int(os.environ.get("SLOW_QUERY_MS", "200") or "200")
 
-if _RAW_DB_URL:
+_IS_POSTGRES_URL = SQLALCHEMY_DATABASE_URI.startswith("postgresql")
+
+if _RAW_DB_URL and _IS_POSTGRES_URL:
+    # Postgres-only connect_args (application_name, statement_timeout, etc.)
+    # must never be sent to a non-Postgres DBAPI (e.g. sqlite3, used in tests
+    # and local dev without DATABASE_URL) — sqlite3.connect() raises
+    # TypeError on unknown kwargs, which previously broke every test/dev run
+    # that didn't set DATABASE_URL to a Postgres URL.
     SQLALCHEMY_ENGINE_OPTIONS: dict = {
         "pool_pre_ping": True,
         "pool_recycle": 1800,

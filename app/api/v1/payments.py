@@ -260,9 +260,12 @@ def aggregator_webhook():
 
     aggregator = request.headers.get("X-Aggregator-Name", "unknown").strip()[:64]
 
-    # Issue #8: verify aggregator webhook signature when secret is configured
+    # Issue #8: verify aggregator webhook signature when secret is configured.
+    # Secure by default: once AGGREGATOR_WEBHOOK_SECRET is set, unsigned
+    # requests are rejected unless an operator explicitly opts out (useful
+    # only for local testing against aggregators that can't sign yet).
     agg_secret = os.getenv("AGGREGATOR_WEBHOOK_SECRET", "").strip()
-    strict_mode = os.getenv("AGGREGATOR_STRICT_SIGNATURE", "").lower() in {"1", "true", "yes"}
+    strict_mode = os.getenv("AGGREGATOR_STRICT_SIGNATURE", "1").lower() not in {"0", "false", "no"}
     if agg_secret:
         sig_header = request.headers.get("X-Aggregator-Signature", "").strip()
         if not sig_header:

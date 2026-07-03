@@ -111,7 +111,10 @@ verification.
 | `TWILIO_AUTH_TOKEN` | Twilio auth token. Paired with the SID. | Treat as sensitive. |
 | `TWILIO_FROM_NUMBER` | E.164 sender number registered on your Twilio account. | Example: `+15551234567`. |
 | `IS_PRODUCTION` | Forces the production-readiness checker into "production mode" even when not on Railway. | Set to `1` / `true` to make blocker checks active in any environment. Otherwise auto-detected from `FLASK_ENV=production` or `RAILWAY_ENVIRONMENT`. |
-| `BILLING_ENCRYPTION_KEY` | Independent Fernet key for the encrypted-at-rest payment + aggregator credentials. | Optional. Defaults to a key derived from `SECRET_KEY`. Set this if you want to rotate session secrets without re-encrypting every credential. |
+| `BILLING_ENCRYPTION_KEY` | Independent Fernet key for the encrypted-at-rest payment + aggregator credentials. | Strongly recommended in production. Falls back to a key derived from `SECRET_KEY` (with a warning logged) if unset — set this explicitly so session-secret rotation never breaks stored payment credentials. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. |
+| `AGGREGATOR_WEBHOOK_SECRET` | Shared secret used to verify `X-Aggregator-Signature` on `/api/aggregator/webhook` (Swiggy/Zomato/etc). | Optional, but required for any aggregator you actually use in production. |
+| `AGGREGATOR_STRICT_SIGNATURE` | Whether unsigned aggregator webhooks are rejected once `AGGREGATOR_WEBHOOK_SECRET` is set. | Defaults to strict (`1`) — unsigned requests are rejected. Set to `0`/`false` only for local testing against an aggregator sandbox that can't sign requests yet. |
+| `CASHFREE_NOTIFY_URL` | Public HTTPS URL Cashfree should POST payment status updates to. | Optional but recommended — without it Cashfree relies solely on your dashboard-level webhook config and the client-side return flow to learn about payment completion. |
 
 The "Email me the setup link" button reuses the existing `MAIL_*` /
 `SENDGRID_API_KEY` envs above — no extra config is needed for the email
