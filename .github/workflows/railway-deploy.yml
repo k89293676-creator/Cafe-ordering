@@ -81,7 +81,7 @@ jobs:
       # ── 1. Checkout the exact commit that CI tested ─────────────────────
       - name: Checkout
         if: env.RAILWAY_TOKEN != ''
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.DEPLOY_SHA }}
           fetch-depth: 1
@@ -90,7 +90,7 @@ jobs:
       - name: Create GitHub Deployment
         if: env.RAILWAY_TOKEN != ''
         id: gh_deploy
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const { data } = await github.rest.repos.createDeployment({
@@ -255,7 +255,7 @@ jobs:
       # ── 9. Mark GitHub Deployment as success or failure ───────────────────
       - name: Update GitHub Deployment status
         if: env.RAILWAY_TOKEN != '' && always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const id = '${{ steps.gh_deploy.outputs.deployment_id }}';
