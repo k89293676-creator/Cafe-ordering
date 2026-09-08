@@ -248,7 +248,19 @@ def owner_integrations_hub():
     for c in cards:
         cards_by_category.setdefault(c.category, []).append(c)
     readiness = _ih_readiness_check(owner_id)
-    verdict = _ih_readiness_summary(readiness)
+    raw_verdict = _ih_readiness_summary(readiness)
+    # FIX: template expects verdict as object with .verdict and .counts (was string → 500)
+    verdict_map = {"ready": "production_ready", "partially_ready": "needs_attention", "not_ready": "blocker"}
+    counts = {"blocker": 0, "warn": 0, "info": 0, "ok": 0}
+    for it in readiness:
+        sev = getattr(it, "severity", "info")
+        if sev in counts:
+            counts[sev] += 1
+        elif sev == "alert":
+            counts["blocker"] += 1
+        else:
+            counts["info"] += 1
+    verdict = {"verdict": verdict_map.get(raw_verdict, raw_verdict), "counts": counts, "raw": raw_verdict}
     return _no_store(make_response(render_template(
         "owner_integrations/index.html",
         owner=owner,

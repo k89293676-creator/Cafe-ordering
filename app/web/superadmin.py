@@ -295,8 +295,23 @@ def superadmin_security_log():
 @superadmin_required
 def superadmin_leads():
     from app.models import OwnerLead
-    leads = OwnerLead.query.order_by(OwnerLead.created_at.desc()).limit(200).all()
-    return render_template("superadmin/leads.html", leads=leads)
+    status_filter = (request.args.get("status") or "pending").strip().lower()
+    if status_filter not in {"pending", "approved", "rejected", "all"}:
+        status_filter = "pending"
+    q = OwnerLead.query
+    if status_filter != "all":
+        q = q.filter_by(status=status_filter)
+    leads = q.order_by(OwnerLead.created_at.desc()).limit(200).all()
+    # FIX: template expects counts dict and status_filter (was 500)
+    try:
+        from sqlalchemy import func as _f
+        pending = db.session.query(_f.count(OwnerLead.id)).filter_by(status="pending").scalar() or 0
+        approved = db.session.query(_f.count(OwnerLead.id)).filter_by(status="approved").scalar() or 0
+        rejected = db.session.query(_f.count(OwnerLead.id)).filter_by(status="rejected").scalar() or 0
+    except Exception:
+        pending = approved = rejected = 0
+    counts = {"pending": int(pending), "approved": int(approved), "rejected": int(rejected)}
+    return render_template("superadmin/leads.html", leads=leads, counts=counts, status_filter=status_filter)
 
 
 @bp.route("/superadmin/last-error")

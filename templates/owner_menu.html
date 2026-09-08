@@ -148,7 +148,7 @@
 
     <div class="page-header">
       <h1 class="page-title">Menu</h1>
-      {% set total_items = menu.categories | sum(attribute='items') | list | length if menu.categories else 0 %}
+      {% set _ns = namespace(total=0) %}{% for _cat in menu.categories %}{% set _ns.total = _ns.total + (_cat['items']|length if _cat['items'] is defined else 0) %}{% endfor %}{% set total_items = _ns.total if menu.categories else 0 %}
       <span class="count-badge">{{ menu.categories | length if menu.categories else 0 }} categories</span>
       <div style="margin-left:auto;display:flex;gap:.5rem;flex-wrap:wrap;">
         <a href="{{ url_for('export_menu_csv') }}" class="btn-outline">
@@ -180,7 +180,7 @@
         <div class="category-header">
           <div>
             <span class="category-name">{{ category.name }}</span>
-            <span class="category-count" style="margin-left:.6rem;">{{ category.items | length if category.items else 0 }} items</span>
+            <span class="category-count" style="margin-left:.6rem;">{{ category['items'] | length if category['items'] is defined and category['items'] else 0 }} items</span>
           </div>
           <form method="post" action="{{ url_for('delete_menu_category', category_id=category.id) }}" onsubmit="return confirm('Delete category \'{{ category.name }}\' and all its items?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
@@ -201,8 +201,8 @@
             </tr>
           </thead>
           <tbody>
-            {% if category.items %}
-              {% for item in category.items %}
+            {% if category['items'] is defined and category['items'] %}
+              {% for item in category['items'] %}
               <tr>
                 <td>
                   <div class="item-name">{{ item.name }}</div>

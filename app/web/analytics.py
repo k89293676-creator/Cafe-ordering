@@ -83,6 +83,45 @@ def owner_analytics():
     avg_rating = round(sum(f.rating for f in feedback) / len(feedback), 1) if feedback else 0.0
 
     settings = load_settings(owner_id)
+    # FIX: template expects `analytics` dict with specific keys (was passing individual vars → 500)
+    # Build structure matching owner_analytics.html JS expectations
+    from collections import Counter as _Counter
+    # Peak hours
+    hour_counts = _Counter()
+    for o in orders:
+        if o.created_at:
+            try:
+                hour_counts[o.created_at.astimezone(timezone.utc).hour] += 1
+            except Exception:
+                pass
+    peak_hours = [{"hour": f"{h:02d}:00", "count": hour_counts.get(h, 0)} for h in range(24)]
+    # Dates for filter bar
+    date_from = request.args.get("from", "") or (now - timedelta(days=days)).date().isoformat()
+    date_to = request.args.get("to", "") or now.date().isoformat()
+    # Revenue/orders by day for charts (list of dicts)
+    rev_list = [{"date": d, "revenue": round(v, 2), "fullDate": d} for d, v in sorted(revenue_by_day.items())]
+    # Orders by day
+    orders_by_day_map: dict[str, int] = {}
+    for o in orders:
+        d = (o.created_at.date() if o.created_at else now.date()).isoformat()
+        orders_by_day_map[d] = orders_by_day_map.get(d, 0) + 1
+    orders_by_day = [{"date": d, "count": c, "fullDate": d} for d, c in sorted(orders_by_day_map.items())]
+    # Total all orders (including cancelled) for KPI
+    total_all_orders = Order.query.filter(Order.owner_id == owner_id, Order.created_at >= cutoff).count()
+    analytics = {
+        "dateFrom": date_from,
+        "dateTo": date_to,
+        "totalRevenue": total_revenue,
+        "totalOrders": order_count,
+        "totalAllOrders": total_all_orders,
+        "avgOrderValue": avg_order_value,
+        "avgRating": avg_rating,
+        "feedbackCount": len(feedback),
+        "revenueByDay": rev_list,
+        "ordersByDay": orders_by_day,
+        "peakHours": peak_hours,
+        "topItems": [{"name": x["name"], "count": x["qty"], "revenue": x["revenue"]} for x in top_items[:5]],
+    }
     return render_template(
         "owner_analytics.html",
         owner=owner,
@@ -96,6 +135,7 @@ def owner_analytics():
         top_items=top_items,
         avg_rating=avg_rating,
         feedback_count=len(feedback),
+        analytics=analytics,
     )
 
 
