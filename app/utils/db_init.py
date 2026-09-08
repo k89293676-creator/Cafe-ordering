@@ -213,34 +213,94 @@ def _init_db() -> None:
 
 
 def _make_superadmin_if_missing() -> None:
-    """Bootstrap a superadmin owner from env vars if none exist yet."""
+    """Bootstrap a superadmin owner from env vars if none exist yet.
+
+    FIX for Render: previously required SUPERADMIN_PASSWORD to be set, but
+    render.yaml didn't expose it, so deploys never got a superadmin and
+    /superadmin + /admin both returned 403. Now:
+      - If SUPERADMIN_PASSWORD is set, ensure a superadmin exists with that
+        password (create or update).
+      - If no superadmin exists at all and no password is set, auto-generate
+        a random password, create the account, and LOG the credentials once
+        so the operator can copy it from Render logs/Dashboard.
+    """
     from app.models import Owner
     from app.extensions import db
     from app.services.auth import _make_password_hash
+    import secrets as _secrets
 
     superadmin_username = os.environ.get("SUPERADMIN_USERNAME", "superadmin")
     superadmin_email = os.environ.get("SUPERADMIN_EMAIL", "")
     superadmin_password = os.environ.get("SUPERADMIN_PASSWORD", "")
 
-    if not superadmin_password:
-        return  # Don't bootstrap without an explicit password set
+    existing_sa = Owner.query.filter_by(is_superadmin=True).first()
 
-    existing = Owner.query.filter_by(is_superadmin=True).first()
-    if existing:
+    # Case 1: password supplied via env → ensure account exists and password matches
+    if superadmin_password:
+        if existing_sa:
+            # If password differs from stored hash, update it (allows rotation)
+            from app.services.auth import _password_matches
+            try:
+                if not _password_matches(existing_sa.password_hash, superadmin_password):
+                    existing_sa.password_hash = _make_password_hash(superadmin_password)
+                    existing_sa.is_active = True
+                    db.session.commit()
+                    log.info("Superadmin password rotated from env: %s", superadmin_username)
+            except Exception:
+                pass
+            return
+        # No superadmin yet — create with supplied password
+        if Owner.query.filter_by(username=superadmin_username).first():
+            # Username collision with non-superadmin: promote instead
+            owner = Owner.query.filter_by(username=superadmin_username).first()
+            if owner:
+                owner.is_superadmin = True
+                owner.is_active = True
+                owner.password_hash = _make_password_hash(superadmin_password)
+                db.session.commit()
+                log.info("Promoted existing user to superadmin: %s", superadmin_username)
+                return
+            return
+        owner = Owner(
+            username=superadmin_username,
+            email=superadmin_email or None,
+            password_hash=_make_password_hash(superadmin_password),
+            cafe_name="Admin",
+            is_active=True,
+            is_superadmin=True,
+            onboarding_complete=True,
+        )
+        db.session.add(owner)
+        db.session.commit()
+        log.info("Superadmin bootstrapped from env: %s", superadmin_username)
+        # Also print to stdout so Render logs surface it without log-level filtering
+        print(f"[bootstrap] superadmin created: {superadmin_username} (password from SUPERADMIN_PASSWORD)", flush=True)
         return
 
-    # Also skip if the username already exists as a non-superadmin (avoid conflict).
-    if Owner.query.filter_by(username=superadmin_username).first():
-        return
-
-    owner = Owner(
-        username=superadmin_username,
-        email=superadmin_email or None,
-        password_hash=_make_password_hash(superadmin_password),
-        cafe_name="Admin",
-        is_active=True,
-        is_superadmin=True,
-    )
-    db.session.add(owner)
-    db.session.commit()
-    log.info("Superadmin bootstrapped: %s", superadmin_username)
+    # Case 2: no password env, but no superadmin exists → auto-generate
+    if not existing_sa:
+        # Only auto-generate in production (Render) or when explicitly opted in;
+        # local dev without env should not create unexpected accounts.
+        is_render = os.environ.get("RENDER") is not None
+        is_prod = os.environ.get("FLASK_ENV") == "production" or os.environ.get("IS_PRODUCTION","").lower() in {"1","true","yes"}
+        if not (is_render or is_prod):
+            log.info("No SUPERADMIN_PASSWORD set and not in production — skip auto-bootstrap.")
+            return
+        auto_pw = _secrets.token_urlsafe(16)
+        if Owner.query.filter_by(username=superadmin_username).first():
+            return
+        owner = Owner(
+            username=superadmin_username,
+            email=superadmin_email or None,
+            password_hash=_make_password_hash(auto_pw),
+            cafe_name="Admin",
+            is_active=True,
+            is_superadmin=True,
+            onboarding_complete=True,
+        )
+        db.session.add(owner)
+        db.session.commit()
+        # CRITICAL: log credentials exactly once for operator retrieval
+        log.warning("AUTO-GENERATED SUPERADMIN — username=%s password=%s — copy this now, it is not stored in plaintext", superadmin_username, auto_pw)
+        print(f"[bootstrap] AUTO-GENERATED SUPERADMIN username={superadmin_username} password={auto_pw}", flush=True)
+        print(f"[bootstrap] Log in at /owner/login then visit /superadmin", flush=True)

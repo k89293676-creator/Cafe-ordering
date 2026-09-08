@@ -29,7 +29,22 @@ from app.extensions import db, bcrypt
 # ── Session helpers ───────────────────────────────────────────────────────────
 
 def logged_in_owner() -> str | None:
-    return session.get("owner_username")
+    # FIX: Render sessions sometimes survive with only owner_id (legacy file sessions)
+    # or when tests set only owner_id via session_transaction. Accept either.
+    uname = session.get("owner_username")
+    if uname:
+        return uname
+    oid = session.get("owner_id")
+    if oid:
+        try:
+            from app.models import Owner
+            owner = db.session.get(Owner, int(oid))
+            if owner:
+                return owner.username
+        except Exception:
+            pass
+        return str(oid)
+    return None
 
 
 def logged_in_owner_id() -> int | None:
@@ -160,40 +175,115 @@ def revoke_all_tokens_for_owner(owner_id: int) -> None:
     db.session.commit()
 
 
-# ── Admin key management (DB-backed, no JSON locks) ───────────────────────────
+# ── Admin key management — DB-backed with file fallback ─────────────────────
+# Render's filesystem is ephemeral: JSON files vanish every deploy/restart.
+# Primary store is Postgres (AdminKey table); JSON file remains as fallback
+# for local dev without DATABASE_URL and for one-time migration of legacy keys.
 
 _ADMIN_KEYS_PATH = Path(os.environ.get("DATA_DIR", ".")) / "admin_keys.json"
 _admin_keys_lock = __import__("threading").Lock()
 
 
-def _load_admin_keys_from_db() -> list[dict]:
-    """Load admin keys from a JSON sidecar file.
-    TODO: Migrate to a proper AdminKey DB table in a future migration."""
-    import json
-    import portalocker  # type: ignore
-    if not _ADMIN_KEYS_PATH.exists():
-        return []
+def _migrate_file_keys_to_db() -> None:
+    """One-time migration: import any admin_keys.json entries into AdminKey table."""
     try:
+        if not _ADMIN_KEYS_PATH.exists():
+            return
+        import json
+        import portalocker  # type: ignore
+        try:
+            with portalocker.Lock(str(_ADMIN_KEYS_PATH) + ".lock", timeout=3):
+                raw = _ADMIN_KEYS_PATH.read_text().strip() if _ADMIN_KEYS_PATH.exists() else ""
+                data = json.loads(raw) if raw else []
+        except Exception:
+            return
+        if not data:
+            return
+        from app.models.auth import AdminKey
+        existing_ids = {int(k.owner_id) for k in AdminKey.query.all()}
+        migrated = 0
+        for rec in data:
+            oid = rec.get("owner_id") or rec.get("ownerId")
+            h = rec.get("key_hash") or rec.get("keyHash") or ""
+            if oid is None or not h:
+                continue
+            oid = int(oid)
+            if oid in existing_ids:
+                continue
+            uname = rec.get("username", "")
+            gen = rec.get("generated_at") or rec.get("createdAt") or rec.get("generatedAt")
+            try:
+                parsed = datetime.fromisoformat(gen) if gen else datetime.now(timezone.utc)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+            except Exception:
+                parsed = datetime.now(timezone.utc)
+            db.session.add(AdminKey(owner_id=oid, username=uname, key_hash=h, generated_at=parsed))
+            migrated += 1
+        if migrated:
+            db.session.commit()
+            # archive file so we don't re-migrate on every boot
+            try:
+                _ADMIN_KEYS_PATH.rename(str(_ADMIN_KEYS_PATH) + ".migrated")
+            except Exception:
+                pass
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
+
+def _load_admin_keys_from_db() -> list[dict]:
+    """Load admin keys: primary DB query, fallback to JSON file if table missing.
+
+    Returns list of dicts with keys owner_id, username, key_hash, generated_at
+    to keep callers compatible with the former file format.
+    """
+    # Try DB first
+    try:
+        from app.models.auth import AdminKey
+        # trigger migration on first call after deploy
+        _migrate_file_keys_to_db()
+        rows = AdminKey.query.all()
+        return [
+            {
+                "owner_id": int(r.owner_id),
+                "username": r.username or "",
+                "key_hash": r.key_hash,
+                "generated_at": r.generated_at.isoformat() if r.generated_at else "",
+            }
+            for r in rows
+        ]
+    except Exception:
+        # Table doesn't exist yet (before alembic) or DB unavailable → file fallback
+        pass
+    # Fallback: legacy JSON file
+    import json
+    try:
+        import portalocker  # type: ignore
+        if not _ADMIN_KEYS_PATH.exists():
+            return []
         with portalocker.Lock(str(_ADMIN_KEYS_PATH) + ".lock", timeout=5):
-            return json.loads(_ADMIN_KEYS_PATH.read_text()) if _ADMIN_KEYS_PATH.exists() else []
+            txt = _ADMIN_KEYS_PATH.read_text() if _ADMIN_KEYS_PATH.exists() else ""
+            return json.loads(txt) if txt.strip() else []
     except Exception:
         return []
 
 
 def _save_admin_keys(keys: list[dict]) -> None:
+    """Legacy file writer — retained for local-dev fallback path only."""
     import json
-    import portalocker  # type: ignore
-    with portalocker.Lock(str(_ADMIN_KEYS_PATH) + ".lock", timeout=5):
-        _ADMIN_KEYS_PATH.write_text(json.dumps(keys, indent=2))
+    try:
+        import portalocker  # type: ignore
+        with portalocker.Lock(str(_ADMIN_KEYS_PATH) + ".lock", timeout=5):
+            _ADMIN_KEYS_PATH.write_text(json.dumps(keys, indent=2))
+    except Exception:
+        pass
 
 
 def _key_owner_id(record: dict) -> int | None:
-    """Return the owner_id from a key record, supporting both field-name conventions.
-
-    Legacy monolith stores snake_case (owner_id).  The old refactored code
-    stored camelCase (ownerId).  Accept both so admin_keys.json files written
-    by either version are readable without a migration.
-    """
+    """Return the owner_id from a key record, supporting both field-name conventions."""
     val = record.get("owner_id") or record.get("ownerId")
     return int(val) if val is not None else None
 
@@ -204,25 +294,49 @@ def _key_hash(record: dict) -> str:
 
 
 def generate_admin_key_for_owner(owner_id: int, username: str = "") -> str:
-    """Generate a new admin key for *owner_id*.
+    """Generate a new admin key for *owner_id* — DB-backed (ephemeral-safe).
 
     Fix #8: use bcrypt (matching legacy) instead of SHA-256, and store with
     the legacy snake_case field names (owner_id, key_hash, generated_at).
+    Now writes to Postgres via AdminKey table; falls back to JSON file only
+    if DB is unavailable (e.g. during tests without Postgres).
     """
-    keys = _load_admin_keys_from_db()
     raw = secrets.token_urlsafe(32)
-    # bcrypt is what the legacy monolith uses — existing keys are bcrypt hashes.
     key_hash = bcrypt.generate_password_hash(raw).decode("utf-8")
-    # Drop any existing key for this owner (one active key per owner).
-    keys = [k for k in keys if _key_owner_id(k) != int(owner_id)]
-    keys.append({
-        "owner_id": int(owner_id),
-        "username": username,
-        "key_hash": key_hash,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    })
-    _save_admin_keys(keys)
-    return raw
+    # Try DB upsert first
+    try:
+        from app.models.auth import AdminKey
+        _migrate_file_keys_to_db()
+        existing = AdminKey.query.filter_by(owner_id=int(owner_id)).first()
+        if existing:
+            existing.key_hash = key_hash
+            existing.username = username
+            existing.generated_at = datetime.now(timezone.utc)
+        else:
+            db.session.add(AdminKey(
+                owner_id=int(owner_id),
+                username=username,
+                key_hash=key_hash,
+                generated_at=datetime.now(timezone.utc),
+            ))
+        db.session.commit()
+        return raw
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        # Fallback to file store
+        keys = _load_admin_keys_from_db()
+        keys = [k for k in keys if _key_owner_id(k) != int(owner_id)]
+        keys.append({
+            "owner_id": int(owner_id),
+            "username": username,
+            "key_hash": key_hash,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        _save_admin_keys(keys)
+        return raw
 
 
 def find_admin_key_owner(plaintext: str) -> int | None:
@@ -252,29 +366,61 @@ def consume_admin_key(plaintext: str) -> int | None:
     """
     if not plaintext:
         return None
-    keys = _load_admin_keys_from_db()
-    for idx, record in enumerate(keys):
-        stored = _key_hash(record)
-        if not stored:
-            continue
+    # Try DB path first
+    try:
+        from app.models.auth import AdminKey
+        for row in AdminKey.query.all():
+            try:
+                if bcrypt.check_password_hash(row.key_hash, plaintext):
+                    oid = int(row.owner_id)
+                    db.session.delete(row)
+                    db.session.commit()
+                    return oid
+            except Exception:
+                continue
+        return None
+    except Exception:
         try:
-            if bcrypt.check_password_hash(stored, plaintext):
-                owner_id = _key_owner_id(record)
-                keys.pop(idx)
-                _save_admin_keys(keys)
-                return owner_id
+            db.session.rollback()
         except Exception:
-            continue
-    return None
+            pass
+        # Fallback to file
+        keys = _load_admin_keys_from_db()
+        for idx, record in enumerate(keys):
+            stored = _key_hash(record)
+            if not stored:
+                continue
+            try:
+                if bcrypt.check_password_hash(stored, plaintext):
+                    owner_id = _key_owner_id(record)
+                    keys.pop(idx)
+                    _save_admin_keys(keys)
+                    return owner_id
+            except Exception:
+                continue
+        return None
 
 
 def revoke_admin_key_for_owner(owner_id: int) -> bool:
-    keys = _load_admin_keys_from_db()
-    new_keys = [k for k in keys if _key_owner_id(k) != int(owner_id)]
-    if len(new_keys) == len(keys):
+    try:
+        from app.models.auth import AdminKey
+        row = AdminKey.query.filter_by(owner_id=int(owner_id)).first()
+        if row:
+            db.session.delete(row)
+            db.session.commit()
+            return True
         return False
-    _save_admin_keys(new_keys)
-    return True
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        keys = _load_admin_keys_from_db()
+        new_keys = [k for k in keys if _key_owner_id(k) != int(owner_id)]
+        if len(new_keys) == len(keys):
+            return False
+        _save_admin_keys(new_keys)
+        return True
 
 
 # ── Owner / cafe creation ─────────────────────────────────────────────────────

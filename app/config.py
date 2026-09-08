@@ -181,15 +181,27 @@ class FlaskConfig:
     SESSION_COOKIE_NAME = "cafe_session"
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
-    SESSION_COOKIE_SECURE = IS_PRODUCTION
+    # FIX: Secure cookies require HTTPS. Render terminates TLS at edge and forwards
+    # via X-Forwarded-Proto; ProxyFix correctly marks request.is_secure. Keep
+    # secure in production but allow override for debugging.
+    SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "1" if IS_PRODUCTION else "0").lower() in {"1","true","yes","on"}
     REMEMBER_COOKIE_HTTPONLY = True
     REMEMBER_COOKIE_SAMESITE = "Lax"
-    REMEMBER_COOKIE_SECURE = IS_PRODUCTION
+    REMEMBER_COOKIE_SECURE = os.environ.get("REMEMBER_COOKIE_SECURE", "1" if IS_PRODUCTION else "0").lower() in {"1","true","yes","on"}
     REMEMBER_COOKIE_DURATION = timedelta(days=30)
     PERMANENT_SESSION_LIFETIME = timedelta(days=30)
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024
     WTF_CSRF_TIME_LIMIT = 3600
-    WTF_CSRF_SSL_STRICT = IS_PRODUCTION
+    # FIX: Strict SSL CSRF checks behind a proxy often break POSTs (e.g. /owner/login)
+    # when ProxyFix isn't trusted or referrer scheme mismatches. Make it opt-in
+    # via env; defaults to False so Render logins work out of the box.
+    _csrf_strict_env = os.environ.get("WTF_CSRF_SSL_STRICT", "").lower()
+    if _csrf_strict_env in {"1","true","yes","on"}:
+        WTF_CSRF_SSL_STRICT = True
+    elif _csrf_strict_env in {"0","false","no","off"}:
+        WTF_CSRF_SSL_STRICT = False
+    else:
+        WTF_CSRF_SSL_STRICT = False  # was IS_PRODUCTION — too strict for edge TLS
     SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_URI
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = SQLALCHEMY_ENGINE_OPTIONS

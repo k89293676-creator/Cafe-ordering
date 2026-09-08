@@ -15,7 +15,7 @@ from app.models.billing import (
     WebhookEventLog,
 )
 from app.models.aggregator import AggregatorOrder, AggregatorPlatformCredential
-from app.models.auth import AuditLog, Invitation, OwnerLead, RememberToken, SystemFlag
+from app.models.auth import AdminKey, AuditLog, Invitation, OwnerLead, RememberToken, SystemFlag
 from app.models.staff import Customer, Employee, OrderEmployeeAssignment, TableCall
 
 __all__ = [
@@ -39,6 +39,7 @@ __all__ = [
     "SystemFlag",
     "Invitation",
     "AuditLog",
+    "AdminKey",
     "Customer",
     "Employee",
     "OrderEmployeeAssignment",

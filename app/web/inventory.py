@@ -14,16 +14,23 @@ bp = Blueprint("web_inventory", __name__)
 
 
 def _ingredient_dict(ing: Ingredient) -> dict:
-    return {
+    # Provide both snake_case (template) and camelCase (JSON API) keys for compatibility.
+    d = {
         "id": ing.id,
         "name": ing.name,
         "unit": ing.unit or "unit",
         "stock": float(ing.stock or 0),
+        "low_stock_threshold": float(ing.low_stock_threshold or 5),
+        "menu_item_id": ing.menu_item_id,
+        "qty_per_order": float(ing.qty_per_order or 1),
+        "cost_per_unit": float(ing.cost_per_unit or 0),
+        # camelCase aliases for legacy JSON consumers
         "lowStockThreshold": float(ing.low_stock_threshold or 5),
         "menuItemId": ing.menu_item_id,
         "qtyPerOrder": float(ing.qty_per_order or 1),
         "costPerUnit": float(ing.cost_per_unit or 0),
     }
+    return d
 
 
 @bp.route("/owner/inventory")
@@ -34,6 +41,17 @@ def owner_inventory():
     ingredients = Ingredient.query.filter_by(owner_id=owner_id).order_by(Ingredient.name).all()
     settings = load_settings(owner_id)
     low_stock = [i for i in ingredients if float(i.stock or 0) <= float(i.low_stock_threshold or 5)]
+    # Load menu items for link dropdown (best-effort)
+    try:
+        from app.models import Menu
+        menu_row = db.session.get(Menu, owner_id)
+        _cats = (menu_row.data or {}).get("categories", []) if menu_row and isinstance(getattr(menu_row, "data", None), dict) else []
+        menu_items = []
+        for cat in _cats:
+            for item in cat.get("items", []):
+                menu_items.append({"id": item.get("id", ""), "name": item.get("name", "")})
+    except Exception:
+        menu_items = []
     return render_template(
         "inventory.html",
         owner=owner,
@@ -41,6 +59,8 @@ def owner_inventory():
         ingredients=[_ingredient_dict(i) for i in ingredients],
         low_stock_count=len(low_stock),
         settings=settings,
+        menu_items=menu_items,
+        currency_symbol=owner.currencySymbol if owner else "£",
     )
 
 
@@ -255,6 +275,38 @@ def export_inventory_csv():
 # ---------------------------------------------------------------------------
 # Restock ingredient (add/subtract delta)
 # ---------------------------------------------------------------------------
+
+@bp.route("/owner/inventory/reorder-suggestions")
+@login_required
+def reorder_suggestions():
+    """Reorder suggestions — aggregated low-stock ingredients.
+
+    FIX: Test suite expects this route; original implementation lived in
+    an extension blueprint that isn't always registered. Provide a stable
+    JSON endpoint here so /owner/inventory always has a suggestions API
+    even on Render free tier without extensions.
+    """
+    from flask import jsonify
+    owner_id = logged_in_owner_id()
+    ings = Ingredient.query.filter_by(owner_id=owner_id).all()
+    total = len(ings)
+    low = [i for i in ings if float(i.stock or 0) <= float(i.low_stock_threshold or 5)]
+    suggestions = [
+        {
+            "id": i.id,
+            "name": i.name,
+            "stock": float(i.stock or 0),
+            "threshold": float(i.low_stock_threshold or 5),
+            "unit": i.unit or "unit",
+            "qty_per_order": float(i.qty_per_order or 1),
+            "cost_per_unit": float(i.cost_per_unit or 0),
+            "recommended_qty": max(0, float(i.low_stock_threshold or 5) * 2 - float(i.stock or 0)),
+        }
+        for i in low
+    ]
+    estimated = round(sum(s["recommended_qty"] * s["cost_per_unit"] for s in suggestions), 2)
+    return jsonify(totalIngredients=total, suggestions=suggestions, estimatedReorderCost=estimated)
+
 
 @bp.route("/owner/inventory/<int:ing_id>/restock", methods=["POST"])
 @login_required

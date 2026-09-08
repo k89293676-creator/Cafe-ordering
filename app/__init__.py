@@ -549,6 +549,11 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
             rid = secrets.token_hex(8)
         request.environ["request_id"] = rid
         request.environ["_t_start"] = time.perf_counter()
+        # FIX: Render's proxy + browser minor updates frequently change UA
+        # strings without indicating session hijacking. Clearing the session
+        # on every UA mismatch logs owners out immediately after login,
+        # appearing as "can't access owner routes". Make this warn-only by
+        # default; opt-in to strict enforcement via SECURITY_STRICT_FINGERPRINT=1.
         try:
             stored_fp = session.get("ua_fp")
             if stored_fp:
@@ -557,15 +562,13 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
                     from app.utils.security import log_security
                     log_security("SESSION_FINGERPRINT_MISMATCH",
                                  f"owner_id={session.get('owner_id')!r}")
-                    # Only clear owner-session keys. session.clear() would also wipe
-                    # admin_authenticated, admin_owner_id, and admin_via_superadmin,
-                    # logging out admins whenever a UA string fluctuates (proxy headers,
-                    # browser minor updates, etc.).
-                    for _k in (
-                        "owner_username", "owner_id", "ua_fp",
-                        "pending_totp_owner_id", "pending_totp_remember",
-                    ):
-                        session.pop(_k, None)
+                    strict_fp = os.environ.get("SECURITY_STRICT_FINGERPRINT","").lower() in {"1","true","yes","on"}
+                    if strict_fp:
+                        for _k in (
+                            "owner_username", "owner_id", "ua_fp",
+                            "pending_totp_owner_id", "pending_totp_remember",
+                        ):
+                            session.pop(_k, None)
         except Exception:
             pass
 
@@ -801,6 +804,87 @@ def cli_sync_schema() -> None:
     _click.echo("sync-schema OK")
 
 
+@app.cli.command("create-superadmin")
+@_click.option("--username", default=None, help="Superadmin username (default: env SUPERADMIN_USERNAME or 'superadmin')")
+@_click.option("--password", default=None, help="Password (if omitted, generates random and prints it)")
+@_click.option("--email", default=None, help="Email (optional)")
+def cli_create_superadmin(username: str | None, password: str | None, email: str | None) -> None:
+    """Create or promote a superadmin owner — for Render debugging.
+
+    Usage:
+      flask create-superadmin --username superadmin --password 'S3cr3t!23'
+      flask create-superadmin              # random password printed once
+
+    Works even when DATABASE_URL points at Render Postgres via
+    `DATABASE_URL=<render-url> flask create-superadmin`.
+    """
+    import os as _os
+    import secrets as _sec
+    from app.extensions import db as _db
+    from app.services.auth import _make_password_hash
+    from app.models import Owner
+
+    _u = username or _os.environ.get("SUPERADMIN_USERNAME", "superadmin")
+    _p = password or _os.environ.get("SUPERADMIN_PASSWORD") or _sec.token_urlsafe(16)
+    _e = email or _os.environ.get("SUPERADMIN_EMAIL") or ""
+    auto_gen = password is None and _os.environ.get("SUPERADMIN_PASSWORD") is None
+
+    with app.app_context():
+        owner = Owner.query.filter_by(username=_u).first()
+        if owner:
+            owner.password_hash = _make_password_hash(_p)
+            owner.is_superadmin = True
+            owner.is_active = True
+            owner.approval_status = "active"
+            owner.onboarding_complete = True
+            if _e:
+                owner.email = _e
+            _db.session.commit()
+            _click.echo(f"Promoted '{_u}' to superadmin (password {'auto-generated' if auto_gen else 'set'}).")
+        else:
+            sa = Owner(
+                username=_u,
+                email=_e or None,
+                password_hash=_make_password_hash(_p),
+                cafe_name="Admin",
+                is_active=True,
+                is_superadmin=True,
+                approval_status="active",
+                onboarding_complete=True,
+            )
+            _db.session.add(sa)
+            _db.session.commit()
+            _click.echo(f"Created superadmin '{_u}' (password {'auto-generated' if auto_gen else 'set'}).")
+        if auto_gen:
+            _click.echo(f"  username: {_u}")
+            _click.echo(f"  password: {_p}")
+            _click.echo(f"  -> log in at /owner/login then visit /superadmin and /admin")
+        else:
+            _click.echo(f"  username: {_u} — log in at /owner/login")
+
+
+@app.cli.command("create-owner")
+@_click.option("--username", required=True, help="Owner username")
+@_click.option("--password", required=True, help="Owner password (min 8 chars, letters+digits)")
+@_click.option("--email", default=None, help="Email")
+@_click.option("--cafe", default="", help="Cafe name")
+def cli_create_owner(username: str, password: str, email: str | None, cafe: str) -> None:
+    """Create a regular owner account (for local testing)."""
+    from app.services.auth import _make_password_hash, _is_strong_password
+    from app.models import Owner
+    from app.services.auth import create_owner_in_db
+    if not _is_strong_password(password):
+        _click.echo("Password must be at least 8 characters with letters and digits.", err=True)
+        raise SystemExit(1)
+    with app.app_context():
+        if Owner.query.filter_by(username=username).first():
+            _click.echo(f"Username '{username}' already exists.", err=True)
+            raise SystemExit(1)
+        pw_hash = _make_password_hash(password)
+        create_owner_in_db(username, email or None, pw_hash, cafe)
+        _click.echo(f"Owner '{username}' created. Log in at /owner/login")
+
+
 # ── Legacy compatibility exports for admin/routes.py _store() usage ──────────
 from app.config import DATA_DIR  # noqa: E402, F401
 from app.extensions import limiter, bcrypt, csrf  # noqa: E402, F401
@@ -820,3 +904,82 @@ ORDERS_PATH = _cfg.DATA_DIR / "orders.json"
 MENU_PATH = _cfg.DATA_DIR / "menu.json"
 TABLES_PATH = _cfg.DATA_DIR / "tables.json"
 FEEDBACK_PATH = _cfg.DATA_DIR / "feedback.json"
+
+# ── Test-compat shims — legacy file-based admin key & rate-limit helpers ──
+# tests/test_critical_endpoints.py monkeypatches these on `import app`.
+# They are thin wrappers around the new DB-backed implementations so
+# old tests continue to pass without modification.
+from pathlib import Path as _P  # noqa: E402
+try:
+    from app.utils.security import _failed_login_store as _sec_store
+    _failed_login_store = _sec_store  # type: ignore
+    _MAX_FAIL_ATTEMPTS = 10  # type: ignore
+    _MAX_ATTEMPTS = 10  # type: ignore
+    ADMIN_KEYS_PATH: _P = _P(DATA_DIR) / "admin_keys.json"  # type: ignore
+    def _save_admin_keys(keys):  # type: ignore
+        from app.services.auth import _save_admin_keys as _svc_save
+        return _svc_save(keys)
+    # Rate-limit helpers that respect monkeypatch of _failed_login_redis (test hook)
+    _failed_login_redis = None  # will be overwritten by monkeypatch in tests
+    try:
+        from app.utils.security import _redis_client as _orig_redis_client
+        _failed_login_redis = _orig_redis_client  # type: ignore
+    except Exception:
+        pass
+    def _clear_failed_logins(ip: str):  # type: ignore
+        # Prefer monkeypatched redis if test set it
+        _fn = globals().get("_failed_login_redis")
+        r = None
+        try:
+            if callable(_fn):
+                r = _fn()
+        except Exception:
+            r = None
+        if r is not None:
+            try:
+                r.delete(f"login_fail:{ip}")
+                return
+            except Exception:
+                pass
+        # fallback to security's in-memory impl
+        from app.utils.security import _clear_failed_logins as _sec_clear
+        return _sec_clear(ip)
+    def _is_ip_locked_out(ip: str):  # type: ignore
+        _fn = globals().get("_failed_login_redis")
+        r = None
+        try:
+            if callable(_fn):
+                r = _fn()
+        except Exception:
+            r = None
+        if r is not None:
+            try:
+                count = r.get(f"login_fail:{ip}")
+                return int(count or 0) >= 10
+            except Exception:
+                pass
+        from app.utils.security import _is_ip_locked_out as _sec_is_locked
+        return _sec_is_locked(ip)
+    def _record_failed_login(ip: str):  # type: ignore
+        _fn = globals().get("_failed_login_redis")
+        r = None
+        try:
+            if callable(_fn):
+                r = _fn()
+        except Exception:
+            r = None
+        if r is not None:
+            try:
+                key = f"login_fail:{ip}"
+                pipe = r.pipeline()
+                pipe.incr(key)
+                pipe.expire(key, 900)
+                pipe.execute()
+                return
+            except Exception:
+                pass
+        from app.utils.security import _record_failed_login as _sec_record
+        return _sec_record(ip)
+except Exception as _shim_exc:
+    import logging as _shim_log
+    _shim_log.getLogger("cafe.app").warning("test shim failed: %s", _shim_exc)

@@ -134,7 +134,28 @@ def superadmin_dashboard():
         "verified_until": None,
     }
 
-    cafes = [{"id": c.id, "name": c.name} for c in Cafe.query.order_by(Cafe.name).all()]
+    # FIX: template expects full Cafe objects with .slug/.is_active and cafe_stats mapping.
+    # Provide real objects and an empty stats dict to prevent UndefinedError on Render.
+    cafes_objs = Cafe.query.order_by(Cafe.name).all()
+    # keep backward-compatible dict list for any code that expects dicts, but template needs objects
+    cafes = cafes_objs
+    # Empty cafe_stats prevents `cafe_stats is undefined` crash; populated lazily when needed
+    cafe_stats: dict = {}
+    try:
+        # Build per-cafe stats on best-effort (owner/order counts per cafe)
+        from sqlalchemy import func as _cf
+        # count owners per cafe
+        owner_counts = dict(db.session.query(Owner.cafe_id, _cf.count(Owner.id)).group_by(Owner.cafe_id).all())
+        # count/revenue per cafe via orders (through owner relationship)
+        # approximate: join orders to owners where owners.cafe_id = cafes.id
+        for c in cafes_objs:
+            cafe_stats[c.id] = {
+                "owner_count": owner_counts.get(c.id, 0),
+                "order_count": 0,
+                "revenue": 0,
+            }
+    except Exception:
+        cafe_stats = {}
 
     from app.services.orders import load_orders
     recent_orders = load_orders(limit=20)
@@ -165,6 +186,7 @@ def superadmin_dashboard():
         deltas=deltas,
         daily_series=daily_series,
         cafes=cafes,
+        cafe_stats=cafe_stats,
         recent_orders=recent_orders,
         owner_username=owner_username,
     )

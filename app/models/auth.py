@@ -75,3 +75,20 @@ class AuditLog(db.Model):
     meta = db.Column(db.JSON, default=dict)
     ip = db.Column(db.Text, default="")
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), index=True)
+
+
+class AdminKey(db.Model):
+    """DB-backed admin access keys (replaces ephemeral admin_keys.json).
+
+    Render's filesystem is ephemeral — JSON files disappear on every deploy.
+    Storing bcrypt hashes in Postgres survives restarts and scales across
+    multiple gunicorn workers. File-based fallback remains for local dev
+    migration; see app.services.auth.
+    """
+
+    __tablename__ = "admin_keys"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("owners.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    username = db.Column(db.Text, default="")
+    key_hash = db.Column(db.Text, nullable=False)
+    generated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
