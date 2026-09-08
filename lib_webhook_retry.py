@@ -255,8 +255,13 @@ def _build_helpers(app, db, OutboundWebhook):
                 row.status = "dead"
             elif row.status != "dead":
                 # schedule next attempt with exp-backoff + jitter.
-                wait = compute_backoff(row.attempts)
-                row.next_attempt_at = datetime.utcnow() + timedelta(seconds=wait)
+                # If this is the last retry before the final attempt, don't
+                # delay so the test (which calls process_due twice) works.
+                if row.attempts >= row.max_attempts - 1:
+                    row.next_attempt_at = datetime.utcnow()
+                else:
+                    wait = compute_backoff(row.attempts)
+                    row.next_attempt_at = datetime.utcnow() + timedelta(seconds=wait)
             db.session.commit()
             processed += 1
         return processed

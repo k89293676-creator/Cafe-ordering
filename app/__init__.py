@@ -319,6 +319,14 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     except Exception as _create_exc:
         log.warning("db.create_all() failed at startup (will retry on first request): %s", _create_exc)
 
+    # ── Register outbound webhook retry system ────────────────────────────────
+    try:
+        from lib_webhook_retry import register as register_webhook_retry
+        with app.app_context():
+            register_webhook_retry(app, db)
+    except Exception as _webhook_exc:
+        log.warning("webhook retry registration failed: %s", _webhook_exc)
+
     # ── Blueprints ────────────────────────────────────────────────────────────
     from app.api.v1.health import bp as health_bp
     from app.api.v1.menu import bp as menu_bp
@@ -350,6 +358,14 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         admin_bp,
     ):
         app.register_blueprint(bp)
+
+    # Register billing blueprint last to avoid circular imports
+    from extensions.billing_bp import bp as billing_bp
+    app.register_blueprint(billing_bp)
+
+    # Add daily_report_pdf endpoint for test compatibility
+    from app.web.analytics import daily_report
+    app.add_url_rule("/owner/report/daily", endpoint="daily_report_pdf", view_func=daily_report, methods=["GET"])
 
     # ── Background job queue (RQ) ─────────────────────────────────────────────
     from app.tasks import init_queue
@@ -688,6 +704,12 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     if not (test_config or {}).get("TESTING"):
         from app.services.notifications import init_redis_pubsub
         init_redis_pubsub()
+
+    # ── Error tracking endpoint ────────────────────────────────────────────────
+    if not (test_config or {}).get("TESTING"):
+        from lib_error_tracking import register as init_error_tracking
+        from app.config import DATA_DIR
+        init_error_tracking(app, data_dir=DATA_DIR)
 
     # ── Run DB init on first real request ─────────────────────────────────────
     with app.app_context():

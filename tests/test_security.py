@@ -162,7 +162,7 @@ def test_aggregator_webhook_rejects_unsigned(client):
 # ───────────────────────────── setup pages auth ──────────────────────────────
 
 def test_payment_methods_requires_auth(client):
-    r = client.get("/owner/payment-methods", follow_redirects=False)
+    r = client.get("/owner/billing/payment-methods", follow_redirects=False)
     # Redirect to login or 401/403 — must not be a 200 leak.
     assert r.status_code in (301, 302, 401, 403)
 

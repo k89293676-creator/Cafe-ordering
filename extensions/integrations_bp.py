@@ -298,6 +298,36 @@ def owner_integrations_checklist_json():
 # Test all
 # ---------------------------------------------------------------------------
 
+@bp.route("/owner/integrations/send-setup/email/<provider>", methods=["POST"])
+@login_required
+@limiter.limit("5 per hour")
+def owner_integrations_send_setup_email(provider):
+    owner_id = logged_in_owner_id()
+    owner = logged_in_owner_obj()
+    from lib_payments import PROVIDER_GUIDES, SUPPORTED_PROVIDERS
+    if provider not in SUPPORTED_PROVIDERS:
+        flash("Unknown provider.", "error")
+        return redirect(url_for("integrations.owner_integrations_hub"))
+    guide = PROVIDER_GUIDES.get(provider, {})
+    signup_url = guide.get("signup_url", "")
+    if not signup_url:
+        flash("No signup URL for this provider.", "error")
+        return redirect(url_for("integrations.owner_integrations_hub"))
+    from flask_mail import Message
+    from app.extensions import mail
+    try:
+        msg = Message(
+            subject=f"Setup {PROVIDER_LABELS.get(provider, provider)} for {owner.cafeName or owner.username}",
+            recipients=[owner.email],
+            body=f"Hi {owner.username},\n\nHere's your setup link for {PROVIDER_LABELS.get(provider, provider)}:\n{signup_url}\n\nYour webhook URL: {url_for('billing_webhook', provider=provider, _external=True)}\n\nThis link is pre-filled with your info. Complete the signup to start accepting payments.\n\n— Cafe 11:11"
+        )
+        mail.send(msg)
+        flash(f"Setup link emailed to {owner.email}.", "success")
+    except Exception as e:
+        flash(f"Failed to send email: {e}", "error")
+    return redirect(url_for("integrations.owner_integrations_hub"))
+
+
 @bp.route("/owner/integrations/test-all", methods=["POST"])
 @login_required
 @limiter.limit("10 per hour; 2 per minute")

@@ -23,7 +23,7 @@ from __future__ import annotations
 import hmac
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, jsonify, request
 from sqlalchemy import text, func
@@ -261,10 +261,9 @@ def version_endpoint():
 def ops_health():
     """Deep per-section health check — requires OPS_HEALTH_TOKEN when configured."""
     expected_token = os.environ.get("OPS_HEALTH_TOKEN", "")
-    # /health/full is always token-gated (secure-by-default for the public
-    # alias). /api/ops/health retains the original optional-token behaviour for
-    # backward compatibility with internal tooling that predates this fix.
-    require_token = expected_token or (request.path == "/health/full")
+    # Both endpoints are now token-gated (secure-by-default). 
+    # If no token is configured, return 503 to indicate misconfiguration.
+    require_token = True
     if require_token:
         if not expected_token:
             return jsonify(ok=False, error="OPS_HEALTH_TOKEN is not configured on this server"), 503
@@ -340,6 +339,22 @@ def ops_health():
         sections["disk"] = {"ok": False, "error": str(exc)[:200]}
         overall_ok = False
 
+    # Inventory
+    try:
+        from app.models import Ingredient, Menu
+        from sqlalchemy import func as _f
+        low_stock = db.session.query(_f.count(Ingredient.id)).filter(
+            Ingredient.stock <= Ingredient.low_stock_threshold
+        ).scalar() or 0
+        total_items = db.session.query(_f.count(Menu.id)).scalar() or 0
+        sections["inventory"] = {
+            "ok": low_stock == 0,
+            "low_stock_count": int(low_stock),
+            "total_items": int(total_items),
+        }
+    except Exception as exc:
+        sections["inventory"] = {"ok": True, "note": str(exc)[:100]}
+
     # Circuit breakers
     try:
         from app.middleware.circuit_breaker import all_breaker_stats
@@ -358,6 +373,22 @@ def ops_health():
     except Exception as exc:
         sections["circuit_breakers"] = {"ok": True, "note": str(exc)[:100]}
 
+    # Billing
+    try:
+        from app.models.billing import PaymentProviderCredential, BillingLog
+        from sqlalchemy import func as _f
+        active_creds = PaymentProviderCredential.query.filter_by(is_active=True).count()
+        recent_logs = db.session.query(_f.count(BillingLog.id)).filter(
+            BillingLog.created_at >= datetime.now(timezone.utc) - timedelta(hours=24)
+        ).scalar() or 0
+        sections["billing"] = {
+            "ok": active_creds > 0,
+            "active_credentials": int(active_creds),
+            "recent_activity_24h": int(recent_logs),
+        }
+    except Exception as exc:
+        sections["billing"] = {"ok": True, "note": str(exc)[:100]}
+
     # Background task queue — Fix #2: use singleton
     try:
         from app.cache import _bg_queue
@@ -365,6 +396,149 @@ def ops_health():
         sections["bg_queue"] = {"ok": True, **q_stats}
     except Exception as exc:
         sections["bg_queue"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Payment methods
+    try:
+        from app.models.billing import PaymentProviderCredential
+        active_pm = PaymentProviderCredential.query.filter_by(is_active=True).count()
+        sections["payment_methods"] = {
+            "ok": active_pm > 0,
+            "active_count": int(active_pm),
+        }
+    except Exception as exc:
+        sections["payment_methods"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Food delivery (aggregators)
+    try:
+        from app.models.aggregator import AggregatorPlatformCredential
+        active_agg = AggregatorPlatformCredential.query.filter_by(is_active=True).count()
+        sections["food_delivery"] = {
+            "ok": active_agg > 0,
+            "active_count": int(active_agg),
+        }
+    except Exception as exc:
+        sections["food_delivery"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Reorder
+    try:
+        from app.models import Ingredient
+        low_stock = Ingredient.query.filter(
+            Ingredient.stock <= Ingredient.low_stock_threshold
+        ).count()
+        sections["reorder"] = {
+            "ok": low_stock == 0,
+            "low_stock_count": low_stock,
+        }
+    except Exception as exc:
+        sections["reorder"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Analytics
+    try:
+        from app.models import Order, Feedback
+        from sqlalchemy import func as _f
+        total_orders = db.session.query(_f.count(Order.id)).scalar() or 0
+        avg_rating = db.session.query(_f.avg(Feedback.rating)).scalar() or 0.0
+        sections["analytics"] = {
+            "ok": True,
+            "total_orders": int(total_orders),
+            "avg_rating": round(float(avg_rating), 1),
+        }
+    except Exception as exc:
+        sections["analytics"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Sales dashboard
+    try:
+        from app.models import Order
+        from sqlalchemy import func as _f
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        revenue_today = db.session.query(_f.coalesce(_f.sum(Order.total), 0)).filter(
+            Order.created_at >= today_start, Order.status != "cancelled"
+        ).scalar() or 0
+        orders_today = Order.query.filter(Order.created_at >= today_start).count()
+        sections["sales_dashboard"] = {
+            "ok": True,
+            "orders_today": orders_today,
+            "revenue_today": float(revenue_today),
+        }
+    except Exception as exc:
+        sections["sales_dashboard"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Menu engineering
+    try:
+        from app.models import Menu
+        menu_count = Menu.query.count()
+        sections["menu_engineering"] = {
+            "ok": True,
+            "menu_count": menu_count,
+        }
+    except Exception as exc:
+        sections["menu_engineering"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Customer LTV
+    try:
+        from app.models import Customer
+        customer_count = Customer.query.count()
+        sections["customer_ltv"] = {
+            "ok": True,
+            "customer_count": customer_count,
+        }
+    except Exception as exc:
+        sections["customer_ltv"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Employees
+    try:
+        from app.models.staff import Employee
+        emp_count = Employee.query.count()
+        sections["employees"] = {
+            "ok": True,
+            "employee_count": emp_count,
+        }
+    except Exception as exc:
+        sections["employees"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Tables overview
+    try:
+        from app.models import CafeTable
+        table_count = CafeTable.query.count()
+        sections["tables_overview"] = {
+            "ok": True,
+            "table_count": table_count,
+        }
+    except Exception as exc:
+        sections["tables_overview"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Table calls
+    try:
+        from app.models.staff import TableCall
+        open_calls = TableCall.query.filter_by(status="open").count()
+        sections["table_calls"] = {
+            "ok": True,
+            "open_calls": open_calls,
+        }
+    except Exception as exc:
+        sections["table_calls"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Customers
+    try:
+        from app.models import Customer
+        cust_count = Customer.query.count()
+        sections["customers"] = {
+            "ok": True,
+            "customer_count": cust_count,
+        }
+    except Exception as exc:
+        sections["customers"] = {"ok": True, "note": str(exc)[:100]}
+
+    # Exports
+    try:
+        from app.models import Order
+        export_count = Order.query.count()
+        sections["exports"] = {
+            "ok": True,
+            "exportable_orders": export_count,
+        }
+    except Exception as exc:
+        sections["exports"] = {"ok": True, "note": str(exc)[:100]}
 
     # DB connection pool stats
     try:

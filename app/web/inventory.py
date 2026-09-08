@@ -279,32 +279,56 @@ def export_inventory_csv():
 @bp.route("/owner/inventory/reorder-suggestions")
 @login_required
 def reorder_suggestions():
-    """Reorder suggestions — aggregated low-stock ingredients.
+    """Reorder suggestions — all ingredients with priority levels.
 
     FIX: Test suite expects this route; original implementation lived in
     an extension blueprint that isn't always registered. Provide a stable
     JSON endpoint here so /owner/inventory always has a suggestions API
     even on Render free tier without extensions.
     """
-    from flask import jsonify
+    from flask import jsonify, request, Response
     owner_id = logged_in_owner_id()
     ings = Ingredient.query.filter_by(owner_id=owner_id).all()
     total = len(ings)
-    low = [i for i in ings if float(i.stock or 0) <= float(i.low_stock_threshold or 5)]
-    suggestions = [
-        {
+    suggestions = []
+    for i in ings:
+        stock = float(i.stock or 0)
+        threshold = float(i.low_stock_threshold or 5)
+        recommended = max(0, threshold * 2 - float(i.stock or 0))
+        if stock <= 0:
+            priority = "critical"
+        elif stock <= threshold * 0.5:
+            priority = "high"
+        elif stock <= threshold:
+            priority = "medium"
+        else:
+            priority = "ok"
+        recommended = max(0, threshold * 2 - stock)
+        suggestions.append({
             "id": i.id,
             "name": i.name,
-            "stock": float(i.stock or 0),
-            "threshold": float(i.low_stock_threshold or 5),
+            "stock": stock,
+            "threshold": threshold,
             "unit": i.unit or "unit",
             "qty_per_order": float(i.qty_per_order or 1),
             "cost_per_unit": float(i.cost_per_unit or 0),
-            "recommended_qty": max(0, float(i.low_stock_threshold or 5) * 2 - float(i.stock or 0)),
-        }
-        for i in low
-    ]
+            "recommended_qty": recommended,
+            "suggestOrderQty": recommended,
+            "priority": priority,
+        })
     estimated = round(sum(s["recommended_qty"] * s["cost_per_unit"] for s in suggestions), 2)
+
+    # CSV format support
+    if request.args.get("format") == "csv":
+        import csv, io
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["id", "name", "stock", "threshold", "unit", "qty_per_order", "cost_per_unit", "recommended_qty", "suggest_order_qty", "priority"])
+        for s in suggestions:
+            w.writerow([s["id"], s["name"], s["stock"], s["threshold"], s["unit"], s["qty_per_order"], s["cost_per_unit"], s["recommended_qty"], s["suggestOrderQty"], s["priority"]])
+        out.seek(0)
+        return Response(out.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=reorder_suggestions.csv", "Cache-Control": "no-store"})
+
     return jsonify(totalIngredients=total, suggestions=suggestions, estimatedReorderCost=estimated)
 
 

@@ -16,7 +16,7 @@ from app.utils.security import login_required
 bp = Blueprint("web_analytics", __name__)
 
 
-@bp.route("/owner/report/daily")
+@bp.route("/owner/report/daily", endpoint="daily_report_pdf")
 @login_required
 @limiter.limit("20 per hour")
 def daily_report():
@@ -152,20 +152,28 @@ def export_orders_csv():
     ])
     writer.writeheader()
     for o in orders:
+        def _sanitize(val):
+            s = str(val or "")
+            if s and s[0] in ("=", "+", "-", "@"):
+                return "'" + s
+            return s
         writer.writerow({
             "id": o.get("id"),
             "createdAt": o.get("createdAt", ""),
             "status": o.get("status", ""),
-            "tableName": o.get("tableName", ""),
-            "customerName": o.get("customerName", ""),
-            "customerEmail": o.get("customerEmail", ""),
-            "customerPhone": o.get("customerPhone", ""),
+            "tableName": _sanitize(o.get("tableName", "")),
+            "customerName": _sanitize(o.get("customerName", "")),
+            "customerEmail": _sanitize(o.get("customerEmail", "")),
+            "customerPhone": _sanitize(o.get("customerPhone", "")),
             "total": o.get("total", 0),
             "paymentStatus": o.get("paymentStatus", ""),
-            "origin": o.get("origin", ""),
+            "origin": _sanitize(o.get("origin", "")),
         })
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=orders.csv"},
+        headers={
+            "Content-Disposition": "attachment; filename=orders.csv",
+            "Cache-Control": "no-store",
+        },
     )
