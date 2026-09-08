@@ -338,6 +338,7 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     from app.web.superadmin import bp as superadmin_bp
     from app.web.billing_subscription import bp as billing_subscription_bp
     from app.web.onboarding import bp as onboarding_bp
+    from app.web.pos import bp as pos_bp
     from admin.routes import admin_bp
 
     for bp in (
@@ -345,7 +346,7 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         payments_bp, webhooks_bp, stats_bp, billing_summary_bp,
         public_bp, auth_bp, owner_bp, owner_menu_bp,
         analytics_bp, inventory_bp, superadmin_bp,
-        billing_subscription_bp, onboarding_bp,
+        billing_subscription_bp, onboarding_bp, pos_bp,
         admin_bp,
     ):
         app.register_blueprint(bp)

@@ -125,12 +125,15 @@
       <a class="nav-link" href="{{ url_for('billing.owner_billing_payment_methods') }}"><i class="bi bi-credit-card"></i> Payments</a>
       <div class="nav-label">Growth</div>
       <a class="nav-link" href="{{ url_for('web_owner.owner_customers') }}"><i class="bi bi-people"></i> Customers</a>
+      <a class="nav-link" href="{{ url_for('pos.loyalty_dashboard') }}"><i class="bi bi-award"></i> Loyalty <span class="pill" style="background:#fef3c7;color:#92400e;">NEW</span></a>
       <a class="nav-link" href="{{ url_for('web_owner.reorder_view') }}"><i class="bi bi-arrow-repeat"></i> Reorder</a>
       <a class="nav-link" href="{{ url_for('aggregators.owner_aggregators') }}"><i class="bi bi-truck"></i> Delivery</a>
       <a class="nav-link" href="{{ url_for('integrations.owner_integrations_hub') }}"><i class="bi bi-puzzle"></i> Integrations</a>
-      <div class="nav-label">Team</div>
+      <div class="nav-label">Team & Ops</div>
+      <a class="nav-link" href="{{ url_for('pos.kds_view') }}"><i class="bi bi-fire"></i> KDS <span class="pill live">Live</span></a>
       <a class="nav-link" href="{{ url_for('employees.view') }}"><i class="bi bi-person-badge"></i> Staff</a>
       <a class="nav-link" href="{{ url_for('tables_overview.view') }}"><i class="bi bi-columns-gap"></i> Floor Map</a>
+      <a class="nav-link" href="{{ url_for('pos.purchasing_dashboard') }}"><i class="bi bi-truck"></i> Purchasing</a>
       <a class="nav-link" href="{{ url_for('web_owner.owner_profile') }}"><i class="bi bi-gear"></i> Profile</a>
       {% if _owner and _owner.isSuperadmin %}<a class="nav-link" href="{{ url_for('web_superadmin.superadmin_dashboard') }}" style="color:#f87171;"><i class="bi bi-shield-lock"></i> Superadmin</a>{% endif %}
     </nav>
@@ -457,6 +460,24 @@
     es.onmessage = (e)=>{ if(e.data){ loadToday(); } };
     es.onerror = ()=>{ try{es.close();}catch(_){} };
   }catch(_){}
+  // PWA offline support (Toast offline parity)
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('/static/sw.js').catch(()=>{});
+  }
+  // Tab switching for enhanced panels
+  document.querySelectorAll('[data-tab]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const tab=btn.dataset.tab;
+      const map={tables:'panel-tables',menu:'panel-menu',orders:'panel-orders',reviews:'panel-reviews'};
+      const target=map[tab];
+      if(!target) return;
+      document.querySelectorAll('.tab-pane').forEach(p=>p.style.display='none');
+      const el=document.getElementById(target);
+      if(el) el.style.display='block';
+      document.querySelectorAll('[data-tab]').forEach(b=>{b.classList.remove('active','btn-primary'); b.classList.add('btn-secondary');});
+      btn.classList.add('active','btn-primary'); btn.classList.remove('btn-secondary');
+    });
+  });
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

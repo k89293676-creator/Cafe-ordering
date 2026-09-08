@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Loyalty — {{ owner.cafeName if owner else 'Cafe' }}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<style>
+:root{--bg:#f8fafc;--surface:#fff;--border:#e2e8f0;--primary:#4f46e5;--success:#16a34a;--warn:#f59e0b}
+body{background:var(--bg);font-family:Inter,system-ui,sans-serif}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 4px 20px rgba(15,23,42,.06)}
+.tier-bronze{background:#f1f5f9;color:#475569} .tier-silver{background:#e2e8f0;color:#334155} .tier-gold{background:#fef3c7;color:#92400e} .tier-platinum{background:#ede9fe;color:#5b21b6}
+</style>
+</head>
+<body>
+<nav class="navbar navbar-light bg-white border-bottom">
+  <div class="container-fluid">
+    <a href="{{ url_for('web_owner.owner_dashboard') }}" class="navbar-brand"><i class="bi bi-arrow-left"></i> Dashboard</a>
+    <span class="navbar-text"><i class="bi bi-award"></i> Loyalty • {{ owner_username }}</span>
+  </div>
+</nav>
+<div class="container py-4">
+  {% with msgs = get_flashed_messages(with_categories=true) %}{% if msgs %}{% for cat, msg in msgs %}<div class="alert alert-{{ 'success' if cat=='success' else 'warning' }}">{{ msg }}</div>{% endfor %}{% endif %}{% endwith %}
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3"><div class="card p-3 text-center"><div style="font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b;">Members</div><div style="font-size:1.8rem;font-weight:800;">{{ total_members }}</div></div></div>
+    <div class="col-md-3"><div class="card p-3 text-center"><div style="font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b;">Points Issued</div><div style="font-size:1.8rem;font-weight:800;">{{ total_points }}</div></div></div>
+    <div class="col-md-6"><div class="card p-3"><div style="font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b;">Tiers</div><div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap;">
+      <span class="badge tier-bronze">Bronze {{ tiers.bronze }}</span>
+      <span class="badge tier-silver">Silver {{ tiers.silver }}</span>
+      <span class="badge tier-gold">Gold {{ tiers.gold }}</span>
+      <span class="badge tier-platinum">Platinum {{ tiers.platinum }}</span>
+    </div><div style="font-size:.75rem;color:#64748b;margin-top:.4rem;">1 point per ₹1 • 100 pts = ₹10 • Bronze 0 • Silver 500 • Gold 2000 • Platinum 5000</div></div></div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <form method="post" action="{{ url_for('pos.loyalty_adjust') }}" class="row g-2 align-items-end">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <div class="col-md-3"><label class="form-label" style="font-size:.82rem;font-weight:600;">Customer Phone *</label><input name="phone" class="form-control" placeholder="10-digit" required maxlength="30"/></div>
+        <div class="col-md-2"><label class="form-label" style="font-size:.82rem;font-weight:600;">Points (+/-)</label><input name="delta" type="number" class="form-control" placeholder="+100" required/></div>
+        <div class="col-md-4"><label class="form-label" style="font-size:.82rem;font-weight:600;">Reason</label><input name="reason" class="form-control" placeholder="Birthday bonus / correction" maxlength="200"/></div>
+        <div class="col-md-2"><button class="btn btn-primary w-100">Adjust</button></div>
+      </form>
+      <div class="mt-2" style="font-size:.78rem;color:#64748b;">Tip: Points auto-earn on completed orders (1 pt/₹1). Use adjust to redeem: -100 = ₹10 off next bill.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Members ({{ accounts|length }})</strong>
+      <form method="get" class="d-flex gap-2"><input name="q" value="{{ q }}" placeholder="Search phone/name" class="form-control form-control-sm" style="width:200px;"/><button class="btn btn-sm btn-secondary">Search</button></form>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0" style="font-size:.88rem;">
+        <thead class="table-light"><tr><th>Phone</th><th>Name</th><th>Points</th><th>Tier</th><th>Visits</th><th>Spent</th><th>Updated</th></tr></thead>
+        <tbody>
+          {% for a in accounts %}
+          <tr>
+            <td class="fw-600 font-monospace">{{ a.customer_phone }}</td>
+            <td>{{ a.customer_name or '—' }}</td>
+            <td><span class="badge bg-primary rounded-pill">{{ a.points }}</span></td>
+            <td><span class="badge tier-{{ a.tier }}">{{ a.tier }}</span></td>
+            <td>{{ a.visit_count }}</td>
+            <td>₹{{ '%.0f'|format(a.total_spent or 0) }}</td>
+            <td class="text-muted" style="font-size:.78rem;">{{ a.updated_at.strftime('%Y-%m-%d') if a.updated_at else '' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="text-center text-muted py-4">No members yet. Points auto-create on first completed order with phone.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

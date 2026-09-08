@@ -17,6 +17,7 @@ from app.models.billing import (
 from app.models.aggregator import AggregatorOrder, AggregatorPlatformCredential
 from app.models.auth import AdminKey, AuditLog, Invitation, OwnerLead, RememberToken, SystemFlag
 from app.models.staff import Customer, Employee, OrderEmployeeAssignment, TableCall
+from app.models.pos import LoyaltyAccount, LoyaltyTransaction, PurchaseOrder, PurchaseOrderItem, Supplier
 
 __all__ = [
     "Cafe",
@@ -44,4 +45,9 @@ __all__ = [
     "Employee",
     "OrderEmployeeAssignment",
     "TableCall",
+    "LoyaltyAccount",
+    "LoyaltyTransaction",
+    "Supplier",
+    "PurchaseOrder",
+    "PurchaseOrderItem",
 ]
