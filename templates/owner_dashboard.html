@@ -303,6 +303,120 @@
         </div>
       </div>
 
+      <!-- Full tab panels for ease + power -->
+      <div class="card" style="margin-top:1rem;">
+        <div style="display:flex;gap:.4rem;padding:.7rem 1rem;border-bottom:1px solid var(--border);overflow-x:auto;">
+          <button class="btn btn-primary active" data-tab="tables" style="white-space:nowrap;">Tables</button>
+          <button class="btn btn-secondary" data-tab="menu" style="white-space:nowrap;">Menu Editor</button>
+          <button class="btn btn-secondary" data-tab="orders" style="white-space:nowrap;">Orders <span class="pill" style="margin-left:.3rem;">{{ _pending|length }}</span></button>
+          <button class="btn btn-secondary" data-tab="reviews" style="white-space:nowrap;">Reviews</button>
+        </div>
+        <!-- Tables -->
+        <div id="panel-tables" class="tab-pane" style="padding:1rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem;">
+            <h4 style="margin:0;font-size:.95rem;font-weight:800;">Tables • {{ _tables|length }}</h4>
+            <a href="{{ url_for('web_owner.download_all_table_qr_posters') }}" class="btn btn-secondary" style="font-size:.78rem;">Download QR ZIP</a>
+          </div>
+          {% if _tables %}
+            <div class="table-grid">
+              {% for t in _tables %}
+              <div class="table-card">
+                <h4>{{ t.name if t.name is defined else t.id }}</h4>
+                <div style="font-size:.75rem;color:var(--muted);font-family:monospace;">{{ t.id }}</div>
+                <img src="{{ url_for('web_owner.table_qr', table_id=t.id) }}" alt="QR {{ t.name }}" style="width:100%;max-width:160px;margin:.5rem auto;display:block;border:1px solid var(--border);border-radius:8px;padding:.4rem;background:#fff;" onerror="this.style.display='none'"/>
+                <div style="display:flex;gap:.4rem;">
+                  <a class="btn btn-secondary" style="flex:1;" href="{{ url_for('web_public.table_order', table_id=t.id) }}" target="_blank">Open Menu</a>
+                  <form method="post" action="{{ url_for('web_owner.owner_delete_table', table_id=t.id) }}" onsubmit="return confirm('Delete {{ t.name|default(t.id) }}?')" style="flex:1;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><button class="btn btn-ghost" style="width:100%;color:var(--danger);">Delete</button></form>
+                </div>
+                <form method="post" action="{{ url_for('web_owner.owner_rename_table', table_id=t.id) }}" style="display:flex;gap:.4rem;margin-top:.4rem;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><input name="name" placeholder="Rename" value="{{ t.name if t.name is defined else '' }}" style="flex:1;border:1px solid var(--border);border-radius:8px;padding:.35rem .5rem;font-size:.82rem;"/><button class="btn btn-secondary" style="padding:.35rem .6rem;">Save</button></form>
+              </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="empty"><i class="bi bi-layout-wtf"></i><div>No tables yet.</div></div>
+          {% endif %}
+          <form method="post" action="{{ url_for('web_owner.owner_add_table') }}" style="margin-top:1rem;display:flex;gap:.5rem;max-width:400px;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><input name="name" placeholder="New table name (e.g. Patio 3)" class="form-control" style="flex:1;border:1px solid var(--border);border-radius:10px;padding:.45rem .7rem;"/><button class="btn btn-primary">Add Table</button></form>
+        </div>
+        <!-- Menu -->
+        <div id="panel-menu" class="tab-pane" style="display:none;padding:1rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem;">
+            <h4 style="margin:0;font-size:.95rem;font-weight:800;">Menu • {{ _total_items }} items, {{ _menu_cats|length }} categories</h4>
+            <a class="btn btn-secondary" href="{{ url_for('web_owner_menu.owner_menu') }}">Full Editor</a>
+          </div>
+          <form method="post" action="{{ url_for('web_owner_menu.owner_add_category') }}" style="display:flex;gap:.5rem;margin-bottom:1rem;max-width:400px;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><input name="name" placeholder="New category (e.g. Desserts)" required style="flex:1;border:1px solid var(--border);border-radius:10px;padding:.45rem .7rem;"/><button class="btn btn-primary">Add Category</button></form>
+          {% if _menu_cats %}
+            {% for cat in _menu_cats %}
+            <div class="cat-card" style="margin-bottom:1rem;">
+              <div class="cat-head"><strong>{{ cat.name if cat.name is defined else cat['name'] }}</strong><span class="pill">{{ (cat['items']|length if cat['items'] is defined else 0) }} items</span><form method="post" action="{{ url_for('web_owner_menu.owner_delete_category', category_id=cat.id if cat.id is defined else cat['id']) }}" onsubmit="return confirm('Delete category?')" style="margin-left:auto;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><button class="btn btn-ghost" style="color:var(--danger);font-size:.78rem;">Delete</button></form></div>
+              {% set _items = cat['items'] if cat['items'] is defined else [] %}
+              {% if _items %}
+                {% for it in _items %}
+                <div class="item-row"><span>{{ it.name if it.name is defined else it['name'] }} — {{ _sym }}{{ '%.2f'|format((it.price if it.price is defined else it['price']|default(0))|float) }} {% if not (it.available if it.available is defined else it['available']|default(true)) %}<span class="pill" style="background:#fee2e2;color:#991b1b;">Hidden</span>{% endif %}</span><span style="display:flex;gap:.3rem;"><form method="post" action="{{ url_for('web_owner_menu.owner_toggle_item', item_id=it.id if it.id is defined else it['id']) }}" style="margin:0;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><button class="btn btn-ghost" style="font-size:.75rem;padding:.2rem .4rem;">Toggle</button></form><form method="post" action="{{ url_for('web_owner_menu.owner_delete_item', item_id=it.id if it.id is defined else it['id']) }}" onsubmit="return confirm('Delete item?')" style="margin:0;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><button class="btn btn-ghost" style="color:var(--danger);font-size:.75rem;padding:.2rem .4rem;">Delete</button></form></span></div>
+                {% endfor %}
+              {% else %}<div style="padding:.75rem 1rem;color:var(--muted);font-size:.85rem;">No items. Add one below.</div>{% endif %}
+              <form method="post" action="{{ url_for('web_owner_menu.owner_add_item', category_id=cat.id if cat.id is defined else cat['id']) }}" style="display:flex;gap:.4rem;padding:.6rem 1rem;background:#f8fafc;border-top:1px solid var(--border);"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><input name="name" placeholder="Item name" required style="flex:1;border:1px solid var(--border);border-radius:8px;padding:.35rem .5rem;font-size:.85rem;"/><input name="price" placeholder="Price" type="number" step="0.01" required style="width:90px;border:1px solid var(--border);border-radius:8px;padding:.35rem .5rem;"/><button class="btn btn-primary" style="padding:.35rem .6rem;">Add</button></form>
+            </div>
+            {% endfor %}
+          {% else %}<div class="empty"><i class="bi bi-journal-text"></i><div>No categories yet.</div></div>{% endif %}
+        </div>
+        <!-- Orders -->
+        <div id="panel-orders" class="tab-pane" style="display:none;padding:1rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem;">
+            <h4 style="margin:0;font-size:.95rem;font-weight:800;">Orders • {{ _recent|length }} recent</h4>
+            <div style="display:flex;gap:.4rem;"><a class="btn btn-secondary" href="{{ url_for('web_owner.owner_tables') }}">Walk-in</a><a class="btn btn-ghost" href="{{ url_for('web_analytics.owner_analytics') }}">Analytics</a></div>
+          </div>
+          {% if _recent %}
+            <div style="overflow-x:auto;">
+              <table class="table" style="width:100%;border-collapse:collapse;font-size:.88rem;">
+                <thead><tr style="text-align:left;border-bottom:1px solid var(--border);color:var(--muted);"><th style="padding:.4rem;">ID</th><th>Table</th><th>Customer</th><th>Status</th><th>Total</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {% for o in _recent[:10] %}
+                  <tr style="border-bottom:1px solid #f1f5f9;">
+                    <td style="padding:.5rem;">#{{ o.id }}</td>
+                    <td>{{ o.tableName|default(o.tableId)|default('—') }}</td>
+                    <td>{{ o.customerName|default('Guest') }}</td>
+                    <td><span class="badge {{ o.status }}">{{ o.status }}</span></td>
+                    <td>{{ _sym }}{{ '%.2f'|format(o.total|default(0)|float) }}</td>
+                    <td style="display:flex;gap:.3rem;">
+                      <a class="btn btn-ghost" style="font-size:.75rem;padding:.2rem .4rem;" href="{{ url_for('web_owner.order_receipt', order_id=o.id) }}">Receipt</a>
+                      <form method="post" action="{{ url_for('web_owner.update_order_status', order_id=o.id) }}" style="margin:0;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><select name="status" onchange="this.form.submit()" style="font-size:.75rem;border:1px solid var(--border);border-radius:6px;padding:.2rem;"><option value="pending" {% if o.status=='pending' %}selected{% endif %}>Pending</option><option value="preparing" {% if o.status=='preparing' %}selected{% endif %}>Preparing</option><option value="ready" {% if o.status=='ready' %}selected{% endif %}>Ready</option><option value="completed">Completed</option></select></form>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}<div class="empty"><i class="bi bi-bag"></i><div>No orders yet.</div><div style="font-size:.85rem;color:var(--muted);">Share a table QR to start.</div></div>{% endif %}
+        </div>
+        <!-- Reviews -->
+        <div id="panel-reviews" class="tab-pane" style="display:none;padding:1rem;">
+          <h4 style="margin:0 0 .5rem;font-size:.95rem;font-weight:800;">Reviews • {{ total_feedback if total_feedback is defined else 0 }} total</h4>
+          {% set _fb = owner_feedback if owner_feedback is defined and owner_feedback else [] %}
+          {% if _fb %}
+            {% for fb in _fb[:6] %}
+            <div class="order-row"><div><strong>{{ fb.customerName|default('Guest') }} <span style="color:var(--warn);">{{ '★'* (fb.rating|int) if fb.rating is defined else '' }}</span></strong><div style="font-size:.82rem;color:var(--muted);">{{ fb.comment|default('')|truncate(120) }}</div></div><div style="font-size:.72rem;color:var(--muted);">{{ (fb.createdAt or '')[:10] if fb.createdAt is defined else '' }}</div></div>
+            {% endfor %}
+          {% else %}<div class="empty"><i class="bi bi-chat"></i><div>No reviews yet.</div></div>{% endif %}
+        </div>
+      </div>
+      <script>
+      (function(){
+        const btns = document.querySelectorAll('[data-tab]');
+        const panels = {tables: document.getElementById('panel-tables'), menu: document.getElementById('panel-menu'), orders: document.getElementById('panel-orders'), reviews: document.getElementById('panel-reviews')};
+        // Hide all except tables initially? Show tables by default as first enhanced tab
+        function show(tab){
+          Object.values(panels).forEach(p=>{ if(p) p.style.display='none'; });
+          if(panels[tab]) panels[tab].style.display='block';
+          btns.forEach(b=>{ b.classList.remove('active'); b.classList.remove('btn-primary'); b.classList.add('btn-secondary'); });
+          const active = document.querySelector(`[data-tab="${tab}"]`);
+          if(active){ active.classList.add('active'); active.classList.remove('btn-secondary'); active.classList.add('btn-primary'); }
+        }
+        btns.forEach(b=> b.addEventListener('click', ()=> show(b.dataset.tab)));
+        // Default show tables
+        // show('tables');
+      })();
+      </script>
+
       <div style="text-align:center;color:var(--muted);font-size:.75rem;margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border);">Cafe 11:11 Owner Console • {{ owner_username }} • <a href="{{ url_for('web_owner.owner_profile') }}">Profile</a> • <a href="{{ url_for('web_auth.owner_logout') }}">Sign out</a></div>
     </div>
   </main>

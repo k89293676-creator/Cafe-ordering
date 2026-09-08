@@ -176,6 +176,13 @@ def _order_dict(o: Order) -> dict:
         "total": float(o.total or 0), "status": o.status or "pending",
         "createdAt": o.created_at.isoformat() if o.created_at else None,
         "pickupCode": o.pickup_code or "",
+        # FIX: billing order_detail.html expects tip/notes/origin etc — was 500
+        "tip": float(getattr(o, "tip", 0) or 0),
+        "notes": getattr(o, "notes", "") or "",
+        "origin": getattr(o, "origin", "table") or "table",
+        "discount": float(getattr(o, "discount", 0) or 0),
+        "tax": float(getattr(o, "tax", 0) or 0),
+        "serviceCharge": float(getattr(o, "service_charge", 0) or 0),
     }
 
 
@@ -190,6 +197,7 @@ def _bill_dict(o: Order) -> dict:
         "discount": float(o.discount or 0),
         "tax": float(o.tax or 0),
         "serviceCharge": float(o.service_charge or 0),
+        "tip": float(getattr(o, "tip", 0) or base.get("tip", 0)),
         "invoiceNumber": o.invoice_number or "",
         "paidAt": o.paid_at.isoformat() if o.paid_at else None,
         "paymentsBreakdown": payments,
@@ -1060,10 +1068,43 @@ def owner_billing_refunds():
         "stepup_threshold": stepup_refund_threshold(),
         "daily_cap_pct": refund_daily_cap_pct(),
     }
+    # FIX: new refunds.html expects stats.* + window_days/events etc (was summary/rows → 500)
+    gross_today = _gross_revenue_today(owner_id)
+    refund_rate_pct = round((total_refunded / gross_today * 100) if gross_today else 0, 1)
+    cap_today = round(gross_today * (refund_daily_cap_pct() / 100.0), 2) if gross_today else 0
+    cap_remaining = round(max(0.0, cap_today - summary["todays_refunds"]), 2)
+    q = (request.args.get("q") or "").strip()[:64]
+    # Filter rows by q if provided (reason contains)
+    filtered_events = logs
+    if q:
+        ql = q.lower()
+        filtered_events = [lg for lg in logs if ql in (lg.reason or "").lower() or ql in (lg.invoice_number or "").lower()]
+        # recompute rows for filtered?
+        rows = [r for r in rows if ql in r.get("reason","").lower() or ql in r.get("invoice_number","").lower()]
+        total_refunded = sum(float(r["amount"]) for r in rows)
+    stats = {
+        "refund_total": summary["total_refunded"],
+        "refund_count": summary["count"],
+        "refund_rate_pct": refund_rate_pct,
+        "cap_today": cap_today,
+        "cap_pct": summary["daily_cap_pct"],
+        "used_today": summary["todays_refunds"],
+        "cap_remaining": cap_remaining,
+        "velocity_per_hour": summary["hourly_limit"],
+    }
+    window_days = max(1, (rng_to - rng_from).days)
+    # Pagination simple: page 1, per_page 50
+    page = max(1, int(request.args.get("page", "1") or "1"))
+    per_page = 50
+    total = len(filtered_events)
+    start = (page-1)*per_page
+    paged_events = filtered_events[start:start+per_page]
     return _no_store(make_response(render_template(
         "owner_billing/refunds.html",
-        summary=summary, rows=rows, blocked=[],
+        summary=summary, stats=stats, rows=rows, blocked=[],
         owner_username=logged_in_owner(),
+        window_days=window_days, from_str=summary["from"], to_str=summary["to"], q=q,
+        events=paged_events, total=total, per_page=per_page, page=page,
     )))
 
 
@@ -1092,7 +1133,11 @@ def owner_billing_aging():
             age_labels[o.id] = "?"
             age_classes[o.id] = "pill-unpaid"
             continue
-        secs = max(0.0, (now - o.created_at).total_seconds())
+        # FIX: SQLite stores naive datetimes, Postgres stores aware — normalize
+        created = o.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        secs = max(0.0, (now - created).total_seconds())
         hours = secs / 3600.0
         label = f"{int(secs/60)}m" if hours < 1 else (f"{hours:.1f}h" if hours < 24
                                                        else f"{int(hours/24)}d {int(hours%24)}h")
