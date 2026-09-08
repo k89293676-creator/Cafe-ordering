@@ -72,6 +72,13 @@ services:
         value: "1"
       - key: OWNER_SIGNUP_MODE
         value: "open"
+      # FIX: Render free Postgres = 5-10 max connections; default pool 25 would exhaust
+      - key: DB_POOL_SIZE
+        value: "5"
+      - key: DB_MAX_OVERFLOW
+        value: "2"
+      - key: DB_POOL_TIMEOUT
+        value: "10"
       # Auto-wired from managed services
       - key: DATABASE_URL
         fromDatabase:

@@ -257,6 +257,14 @@ def _load_admin_keys_from_db() -> list[dict]:
         ]
     except Exception:
         # Table doesn't exist yet (before alembic) or DB unavailable → file fallback
+        # FIX: Postgres leaves transaction aborted after ProgrammingError (relation does not exist).
+        # Without rollback, every subsequent query in this request (e.g. owner dashboard counts)
+        # fails with "current transaction is aborted, commands ignored until end of transaction block"
+        # → appears as 500 on Render even though route logic is correct.
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         pass
     # Fallback: legacy JSON file
     import json

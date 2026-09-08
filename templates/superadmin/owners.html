@@ -113,7 +113,7 @@
                       <span class="text-muted">—</span>
                     {% endif %}
                   </td>
-                  <td class="text-muted small">{{ (owner.created_at or '')[:10] or '—' }}</td>
+                  <td class="text-muted small">{{ owner.created_at.strftime('%Y-%m-%d') if owner.created_at else '—' }}</td>
                   <td class="text-end pe-3">
                     {% if not owner.is_superadmin %}
                     <div class="d-flex gap-1 justify-content-end">
