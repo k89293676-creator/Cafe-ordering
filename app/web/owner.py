@@ -30,7 +30,13 @@ from app.services.notifications import _notify_owner, _notify_order_status
 
 from app.utils.security import login_required, log_security, _client_ip
 
-from app.utils.serializers import _safe_text, _feedback_dict
+from app.utils.serializers import (
+    _as_naive,
+    _feedback_dict,
+    _local_day_start_naive,
+    _order_dict,
+    _safe_text,
+)
 
 
 
@@ -76,19 +82,18 @@ def owner_dashboard():
 
         _active_statuses = {"pending", "preparing", "ready"}
 
-        pending_orders = [o for o in recent_orders if o["status"] in _active_statuses]
+        pending_orders = [o for o in recent_orders if o.get("status") in _active_statuses]
 
-        preparing_count = sum(1 for o in recent_orders if o["status"] == "preparing")
+        preparing_count = sum(1 for o in recent_orders if o.get("status") == "preparing")
 
         # Bug #11 fix: query today's revenue directly from the DB so the result is
 
         # not capped to the last 50 orders loaded for the dashboard display list.
 
-        _rev_today_start = _dt.datetime.combine(
+        # Unified with /api/v1/stats/today: naive local-day start, and
+        # cancelled/voided orders excluded from revenue on both sides.
 
-            _dt.date.today(), _dt.time.min, tzinfo=_dt.timezone.utc
-
-        )
+        _rev_today_start = _local_day_start_naive()
 
         revenue_today = float(
 
@@ -404,9 +409,9 @@ def owner_dashboard():
 
         # Billing snapshot for dashboard widgets
 
-        _today_utc_start = _dt.datetime.combine(
-
-            _dt.date.today(), _dt.time.min, tzinfo=_dt.timezone.utc)
+        # Billing snapshot for dashboard widgets (naive local-day start, same
+        # "today" definition as revenue_today and /api/v1/stats/today).
+        _today_start = _local_day_start_naive()
 
         billing_open_count = int(
 
@@ -426,9 +431,9 @@ def owner_dashboard():
 
         _paid_today_filter = _or(
 
-            Order.paid_at >= _today_utc_start,
+            Order.paid_at >= _today_start,
 
-            _and(Order.paid_at.is_(None), Order.created_at >= _today_utc_start),
+            _and(Order.paid_at.is_(None), Order.created_at >= _today_start),
 
         )
 
@@ -466,7 +471,7 @@ def owner_dashboard():
 
             completed_orders=[o for o in recent_orders if o.get("status") in _COMPLETED_STATUSES],
 
-            pending_count=sum(1 for o in pending_orders if o["status"] == "pending"),
+            pending_count=sum(1 for o in pending_orders if o.get("status") == "pending"),
 
             preparing_count=preparing_count,
 
@@ -620,6 +625,12 @@ def owner_profile():
 
     owner = logged_in_owner_obj()
 
+    if not owner:
+
+        flash("Please log in to view your profile.", "warning")
+
+        return redirect(url_for("web_auth.owner_login"))
+
     if request.method == "POST":
 
         action = request.form.get("action", "update")
@@ -755,6 +766,18 @@ def owner_add_table():
     owner_id = logged_in_owner_id()
 
     owner = logged_in_owner_obj()
+
+    if not owner:
+
+        flash("Please log in to manage tables.", "warning")
+
+        return redirect(url_for("web_auth.owner_login"))
+
+    if not owner.cafe_id:
+
+        flash("Please complete onboarding before adding tables.", "warning")
+
+        return redirect(url_for("web_onboarding.onboarding"))
 
 
 
@@ -1236,19 +1259,17 @@ def download_all_table_qr_posters():
 
 
 
-    # Try PIL / qrcode for branded posters; fall back to raw QR bytes if unavailable
-
+    # QR posters need both qrcode and Pillow. Fail loudly with 503 when either
+    # is missing instead of shipping 0-byte PNGs that look like success.
     try:
 
         import qrcode as _qr
 
         from PIL import Image as _Image, ImageDraw as _Draw, ImageFont as _Font
 
-        _have_pil = True
-
     except ImportError:
 
-        _have_pil = False
+        abort(503, "QR generation unavailable")
 
 
 
@@ -1262,33 +1283,23 @@ def download_all_table_qr_posters():
 
             png_buf = _io.BytesIO()
 
-            if _have_pil:
+            try:
 
                 qr = _qr.make(table_url)
 
                 qr.save(png_buf, format="PNG")
 
-            else:
+            except Exception as _qr_err:
 
-                try:
+                import logging as _lg
 
-                    import qrcode as _qr
+                _lg.getLogger("cafe.owner").warning("QR generation failed: %s", _qr_err)
 
-                    qr = _qr.QRCode(error_correction=_qr.constants.ERROR_CORRECT_H)
+                abort(503, "QR generation unavailable")
 
-                    qr.add_data(table_url)
+            if not png_buf.getvalue():
 
-                    qr.make(fit=True)
-
-                    qr.make_image(fill_color="black", back_color="white").save(png_buf, format="PNG")
-
-                except Exception as _qr_err:
-
-                    import logging as _lg
-
-                    _lg.getLogger("cafe.owner").warning("QR fallback failed: %s", _qr_err)
-
-                    png_buf = __import__("io").BytesIO()
+                abort(503, "QR generation unavailable")
 
             safe_name = _re.sub(r"[^a-zA-Z0-9_\-]+", "_",
 
@@ -1732,28 +1743,26 @@ def delete_order(order_id: int):
 
 def owner_analytics_day_orders():
 
-    """Return per-hour order counts and revenue for today (owner scope).
+    """Return the requested day's orders plus per-hour aggregates (owner scope).
 
-
+    Query param ``date=YYYY-MM-DD`` selects the day (default: today, local
+    calendar day). The dashboard drill-down renders ``orders``; ``hours`` and
+    ``totals`` are kept for backwards compatibility.
 
     Response::
 
-
-
         {
-
           "date": "2024-07-03",
-
-          "hours": [
-
-            {"hour": 0, "orders": 2, "revenue": 45.50},
-
-            ...
-
+          "orders": [
+            {"id": 1, "tableName": "T1", "table": "T1", "items": [...],
+             "total": 45.50, "status": "completed",
+             "created_at": "2024-07-03T12:30:00", "createdAt": "..."}
           ],
-
+          "hours": [
+            {"hour": 0, "orders": 2, "revenue": 45.50},
+            ...
+          ],
           "totals": {"orders": 12, "revenue": 340.00}
-
         }
 
     """
@@ -1768,15 +1777,29 @@ def owner_analytics_day_orders():
 
     owner_id = logged_in_owner_id()
 
-    today = _dt.date.today()
+    date_param = (request.args.get("date") or "").strip()
 
-    day_start = _dt.datetime.combine(today, _dt.time.min, tzinfo=_dt.timezone.utc)
+    if date_param:
+
+        try:
+
+            target_day = _dt.date.fromisoformat(date_param)
+
+        except ValueError:
+
+            return _jsonify({"error": "Invalid date, expected YYYY-MM-DD."}), 400
+
+    else:
+
+        target_day = _dt.date.today()
+
+    day_start = _local_day_start_naive(target_day)
 
     day_end = day_start + _dt.timedelta(days=1)
 
 
 
-    orders = (
+    candidates = (
 
         Order.query
 
@@ -1788,27 +1811,56 @@ def owner_analytics_day_orders():
 
             Order.created_at < day_end,
 
-            Order.status.notin_(["cancelled", "voided"]),
-
         )
+
+        .order_by(Order.created_at.asc())
 
         .all()
 
     )
 
+    # Naive-safe day filter (SQLite stores naive datetimes; Postgres returns
+    # tz-aware ones) + exclude cancelled/voided, matching the revenue charts.
+    day_orders = []
+
+    for o in candidates:
+
+        created = _as_naive(o.created_at)
+
+        if created is None or not (day_start <= created < day_end):
+
+            continue
+
+        if (o.status or "") in ("cancelled", "voided"):
+
+            continue
+
+        day_orders.append(o)
+
 
 
     hours: list[dict] = [{"hour": h, "orders": 0, "revenue": 0.0} for h in range(24)]
 
-    for o in orders:
+    order_dicts: list[dict] = []
 
-        if o.created_at:
+    for o in day_orders:
 
-            h = o.created_at.astimezone(_dt.timezone.utc).hour
+        created = _as_naive(o.created_at)
 
-            hours[h]["orders"] += 1
+        if created is not None:
 
-            hours[h]["revenue"] += float(o.total or 0)
+            hours[created.hour]["orders"] += 1
+
+            hours[created.hour]["revenue"] += float(o.total or 0)
+
+        d = _order_dict(o)
+
+        # snake_case aliases for the drill-down contract.
+        d["table"] = d.get("tableName") or d.get("tableId") or ""
+
+        d["created_at"] = d.get("createdAt")
+
+        order_dicts.append(d)
 
 
 
@@ -1826,7 +1878,9 @@ def owner_analytics_day_orders():
 
     return _jsonify(
 
-        date=today.isoformat(),
+        date=target_day.isoformat(),
+
+        orders=order_dicts,
 
         hours=hours,
 

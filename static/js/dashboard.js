@@ -1,3 +1,13 @@
+/**
+ * DEPRECATED legacy bundle — do NOT include in templates.
+ *
+ * This file targets selectors (.tab-panel, .tab-btn, #topbar-title,
+ * #sidebar-toggle, [data-kanban-col], #new-order-banner) that no longer exist
+ * in templates/owner_dashboard.html. The inline <script> in that template is
+ * canonical (tabs via .tab-pane + [data-tab], sidebar via #sidebarToggle,
+ * SSE with exponential-backoff reconnect). This file is kept only for
+ * reference until the legacy kanban layout is retired.
+ */
 "use strict";
 
 // ---------------------------------------------------------------------------

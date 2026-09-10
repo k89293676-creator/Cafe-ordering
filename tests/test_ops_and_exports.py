@@ -204,5 +204,10 @@ def test_reorder_suggestions_csv_format(app, client):
 def test_daily_pdf_rate_limit_decorated(app):
     """A regression guard: the limiter decorator must remain attached."""
     import app as flask_app
+    # The duplicate top-level add_url_rule was removed; the canonical route
+    # lives on the analytics blueprint (alias "daily_report_pdf" still
+    # resolves via _ENDPOINT_ALIASES for templates).
     rule = flask_app.app.view_functions.get("daily_report_pdf")
+    if rule is None:
+        rule = flask_app.app.view_functions.get("web_analytics.daily_report_pdf")
     assert rule is not None, "daily_report_pdf route missing"

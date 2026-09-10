@@ -7,12 +7,12 @@ GET /api/v1/stats/today   — today's order counts, revenue, pending, avg-order 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify
 
 from app.extensions import db, limiter
 from app.utils.security import api_login_required
+from app.utils.serializers import _as_naive, _local_day_start_naive
 from app.services.auth import logged_in_owner_id
 
 log = logging.getLogger("cafe.api.stats")
@@ -39,8 +39,10 @@ def stats_today():
     from sqlalchemy import func
 
     owner_id = logged_in_owner_id()
-    now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Same "today" definition as the owner dashboard revenue widgets: naive
+    # local-day start (SQLite stores naive datetimes; strip tzinfo before
+    # comparing so tz-aware values can't slip through or crash).
+    today_start = _local_day_start_naive()
 
     _CANCELLED = {"cancelled", "voided"}
 
@@ -56,6 +58,9 @@ def stats_today():
     completed_count = 0
 
     for created_at, total, status in rows:
+        created_naive = _as_naive(created_at)
+        if created_naive is None or created_naive < today_start:
+            continue
         orders += 1
         if status not in _CANCELLED:
             revenue += float(total or 0)

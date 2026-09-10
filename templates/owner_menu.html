@@ -245,9 +245,7 @@
             <!-- Add item row -->
             <tr class="add-item-row">
               <td colspan="4">
-                <form method="post" action="{{ url_for('create_menu_category') | replace('add-category', '') }}{{ url_for('save_menu_item') }}" class="add-item-form">
-                  {# We use the correct route for adding items to a category #}
-                </form>
+                {# Add-item posts to the per-category route below. #}
                 <form method="post" action="/owner/menu/category/{{ category.id }}/add-item" class="add-item-form">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                   <input class="w-name" type="text" name="name" placeholder="Item name" maxlength="100" required />

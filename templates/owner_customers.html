@@ -135,7 +135,7 @@
                 {% if c.orderCount > 1 %}<span class="badge-repeat">Repeat</span>{% endif %}
                 {% if c.totalSpend >= 1000 %}<span class="badge-vip">VIP</span>{% endif %}
                 {% if c.phone %}
-                <a href="{{ url_for('reorder_view', q=c.phone) }}" style="margin-left:.4rem;color:#4f46e5;font-size:.78rem;text-decoration:none;font-weight:600;">Reorder →</a>
+                <a href="{{ url_for('reorder_view', phone=c.phone) }}" style="margin-left:.4rem;color:#4f46e5;font-size:.78rem;text-decoration:none;font-weight:600;">Reorder →</a>
                 {% endif %}
               </td>
             </tr>

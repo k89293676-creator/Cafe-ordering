@@ -328,6 +328,23 @@ def owner_integrations_send_setup_email(provider):
     return redirect(url_for("integrations.owner_integrations_hub"))
 
 
+@bp.route("/owner/integrations/send-setup/<channel>/<provider_key>", methods=["POST"])
+@login_required
+@limiter.limit("5 per hour")
+def owner_integrations_send_setup(channel, provider_key):
+    """Legacy compat route for templates using the flat endpoint name.
+
+    owner_integrations/index.html posts channel/provider_key pairs via
+    url_for("owner_integrations_send_setup", ...) (aliased in
+    app/__init__.py). The email channel delegates to the provider-specific
+    sender; other channels flash an informational message.
+    """
+    if (channel or "").lower() == "email":
+        return owner_integrations_send_setup_email(provider_key)
+    flash("That setup-link channel is not configured. Use email instead.", "warning")
+    return redirect(url_for("integrations.owner_integrations_hub"))
+
+
 @bp.route("/owner/integrations/test-all", methods=["POST"])
 @login_required
 @limiter.limit("10 per hour; 2 per minute")

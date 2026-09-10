@@ -9,8 +9,11 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/static/css/styles.css" />
   <link rel="stylesheet" href="/static/css/enhancements.css" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
-  var currSym = "{{ currency_symbol if currency_symbol is defined else "₹" }}";</script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script>
+  // currSym MUST live in its own <script> tag — browsers silently discard
+  // inline content when the <script> element also has a src attribute.
+  var currSym = "{{ currency_symbol }}";</script>
   <style>
     .analytics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
     @media (max-width: 900px) { .analytics-grid { grid-template-columns: 1fr; } }

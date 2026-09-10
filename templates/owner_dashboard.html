@@ -90,7 +90,7 @@
 {% set _low = low_stock_alerts if low_stock_alerts is defined and low_stock_alerts else [] %}
 {% set _menu = menu if menu is defined and menu else {'categories':[]} %}
 {% set _menu_cats = _menu.categories if _menu and _menu.categories is defined and _menu.categories else [] %}
-{% set _sym = currency_symbol if currency_symbol is defined and currency_symbol else ('₹' if _owner and _owner.currencySymbol is defined else '£') %}
+{% set _sym = currency_symbol %}
 {% set _rev_today = revenue_today if revenue_today is defined else 0 %}
 {% set _total_rev = total_revenue if total_revenue is defined else 0 %}
 {% set _total_comp = total_completed if total_completed is defined else (_completed|length) %}
@@ -213,7 +213,7 @@
             {% if _pending %}
               {% for o in _pending[:6] %}
               <div class="order-row">
-                <div><div style="font-weight:700;">#{{ o.id }} — {{ o.customerName|default('Guest') }}</div><div style="font-size:.78rem;color:var(--muted);">{{ o.tableName|default('Counter') }} • {{ (o.createdAt or '')[:16]|replace('T',' ') }} • {{ o.status }}</div><div style="margin-top:.35rem;display:flex;flex-wrap:wrap;gap:.25rem;">{% for it in o['items'][:3] if o['items'] is defined and o['items'] %}<span class="pill">{{ it.quantity|default(1) }}× {{ it.name }}</span>{% endfor %}{% if o['items'] is defined and o['items']|length>3 %}<span class="pill">+{{ o['items']|length-3 }}</span>{% endif %}</div></div>
+                <div><div style="font-weight:700;">#{{ o.id }} — {{ o.customerName|default('Guest') }}</div><div style="font-size:.78rem;color:var(--muted);">{{ o.tableName|default('Counter') }} • {{ (o.createdAt or '')[:16]|replace('T',' ') }} • {{ o.status }}</div><div style="margin-top:.35rem;display:flex;flex-wrap:wrap;gap:.25rem;">{% for it in (o['items'][:3] if o['items'] is defined and o['items'] else []) %}<span class="pill">{{ it.quantity|default(1) }}× {{ it.name }}</span>{% endfor %}{% if o['items'] is defined and o['items'] and o['items']|length>3 %}<span class="pill">+{{ o['items']|length-3 }}</span>{% endif %}</div></div>
                 <div style="text-align:right;"><div style="font-weight:800;">{{ _sym }}{{ '%.2f'|format(o.total|default(0)|float) }}</div><form action="{{ url_for('web_owner.update_order_status', order_id=o.id) }}" method="post" style="margin-top:.4rem;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/><select name="status" onchange="this.form.submit()" class="btn btn-secondary" style="padding:.25rem .4rem;font-size:.78rem;"><option value="pending" {% if o.status=='pending' %}selected{% endif %}>Pending</option><option value="preparing" {% if o.status=='preparing' %}selected{% endif %}>Preparing</option><option value="ready" {% if o.status=='ready' %}selected{% endif %}>Ready</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></form></div>
               </div>
               {% endfor %}
@@ -454,12 +454,38 @@
   const mq = window.matchMedia('(max-width:768px)');
   function onResize(){ if(!mq.matches){ sb.classList.remove('open'); ov.classList.remove('show'); } if(mq.matches){ if(btn) btn.style.display='inline-flex'; } else { if(btn) btn.style.display='none'; } }
   mq.addEventListener('change', onResize); onResize();
-  // Auto-refresh live orders via SSE if available
-  try{
-    const es = new EventSource('/api/orders/stream');
-    es.onmessage = (e)=>{ if(e.data){ loadToday(); } };
-    es.onerror = ()=>{ try{es.close();}catch(_){} };
-  }catch(_){}
+  // Live orders via SSE with exponential-backoff reconnect.
+  // NOTE: static/js/dashboard.js is a deprecated legacy bundle — its selectors
+  // (.tab-panel, .tab-btn, #topbar-title, [data-kanban-col], #sidebar-toggle)
+  // do not exist in this template, so it must NOT be included here.
+  // The inline script in this file is the canonical dashboard behaviour.
+  (function connectLive(attempt){
+    attempt = attempt || 0;
+    var es = null;
+    try {
+      es = new EventSource('/api/orders/stream');
+    } catch(_) {
+      scheduleLiveRetry(attempt);
+      return;
+    }
+    es.onopen = function(){
+      var liveDot = document.getElementById('liveDot');
+      if (liveDot) liveDot.style.opacity = '1';
+    };
+    es.onmessage = function(e){
+      if (e && e.data) { try { loadToday(); } catch(_) {} }
+    };
+    es.onerror = function(){
+      try { es.close(); } catch(_) {}
+      var liveDot = document.getElementById('liveDot');
+      if (liveDot) liveDot.style.opacity = '.45';
+      scheduleLiveRetry(attempt);
+    };
+    function scheduleLiveRetry(n){
+      var delay = Math.min(1000 * Math.pow(2, n || 0), 30000);
+      setTimeout(function(){ connectLive((n || 0) + 1); }, delay);
+    }
+  })(0);
   // PWA offline support (Toast offline parity)
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('/static/sw.js').catch(()=>{});

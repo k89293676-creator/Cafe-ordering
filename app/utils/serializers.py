@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import date as _date
+from datetime import datetime, time as _time
+from datetime import timezone
 from typing import Any
 
 
@@ -23,6 +25,31 @@ def _parse_dt(value: Any) -> datetime | None:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
+
+
+def _as_naive(dt: datetime | None) -> datetime | None:
+    """Return *dt* without tzinfo.
+
+    SQLite stores datetimes naive while Postgres returns tz-aware ones;
+    stripping tzinfo before comparison keeps day-boundary filters correct
+    (and crash-free) on both backends.
+    """
+    try:
+        if dt is not None and getattr(dt, "tzinfo", None) is not None:
+            return dt.replace(tzinfo=None)
+    except Exception:
+        pass
+    return dt
+
+
+def _local_day_start_naive(day: _date | None = None) -> datetime:
+    """Naive local-midnight datetime for *day* (default: today).
+
+    Owner dashboard revenue and /api/v1/stats/today both use this so the
+    "today" boundary matches: local calendar day, compared against naive
+    datetimes (see _as_naive).
+    """
+    return datetime.combine(day or _date.today(), _time.min)
 
 
 def _safe_text(value: Any, max_len: int = 500, default: str = "") -> str:

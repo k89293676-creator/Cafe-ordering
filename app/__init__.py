@@ -363,9 +363,9 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
     from extensions.billing_bp import bp as billing_bp
     app.register_blueprint(billing_bp)
 
-    # Add daily_report_pdf endpoint for test compatibility
-    from app.web.analytics import daily_report
-    app.add_url_rule("/owner/report/daily", endpoint="daily_report_pdf", view_func=daily_report, methods=["GET"])
+    # NOTE: the legacy top-level "daily_report_pdf" add_url_rule was removed —
+    # web_analytics.daily_report_pdf already serves /owner/report/daily and
+    # url_for("daily_report_pdf") resolves via the _ENDPOINT_ALIASES entry.
 
     # ── Background job queue (RQ) ─────────────────────────────────────────────
     from app.tasks import init_queue
@@ -501,6 +501,25 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         "owner_upload_item_image":                 "web_owner_menu.owner_upload_item_image",
         # ── Daily report PDF ──────────────────────────────────────────────
         "daily_report_pdf":                        "billing.owner_billing_eod",
+        # ── Legacy flat names referenced by owner templates ───────────────
+        # (receipt.html, owner_2fa_setup.html, owner_profile.html,
+        # owner_integrations/index.html). Without these, _safe_url_for
+        # renders "#" for the link/form action.
+        "mark_order_paid":                         "web_owner.mark_order_paid",
+        "totp_setup":                              "web_owner.owner_2fa_setup",
+        "totp_disable":                            "web_owner.owner_2fa_disable",
+        "owner_integrations_send_setup":           "integrations.owner_integrations_send_setup",
+        # Native dotted endpoint — listed explicitly so dashboard audits can
+        # see it resolves (used by superadmin_panels.html).
+        "superadmin_extras.insights_view":         "superadmin_extras.insights_view",
+        # ── Legacy superadmin flat names with real blueprint targets ───
+        "superadmin_admin_keys":                   "web_superadmin.superadmin_admin_keys",
+        "superadmin_audit":                        "web_superadmin.superadmin_audit",
+        "superadmin_audit_csv":                    "web_superadmin.superadmin_audit_csv",
+        "superadmin_audit_json":                   "web_superadmin.superadmin_audit_json",
+        "superadmin_devops_aggregators":           "web_superadmin.superadmin_devops_aggregators",
+        "superadmin_devops_schema":                "web_superadmin.superadmin_devops_schema",
+        "superadmin_devops_schema_json":           "web_superadmin.superadmin_devops_schema_json",
     }
 
     from werkzeug.routing import BuildError as _BuildError
