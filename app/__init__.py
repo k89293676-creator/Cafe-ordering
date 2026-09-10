@@ -435,7 +435,6 @@ def _create_app_impl(test_config: dict | None = None) -> Flask:
         "owner_menu":                     "web_owner_menu.owner_menu",
         "create_menu_category":           "web_owner_menu.owner_add_category",
         "delete_menu_category":           "web_owner_menu.owner_delete_category",
-        "save_menu_item":                 "web_owner_menu.owner_add_item",
         "delete_menu_item":               "web_owner_menu.owner_delete_item",
         "toggle_menu_item_availability":  "web_owner_menu.owner_toggle_item",
         "update_menu":                    "web_owner_menu.owner_import_menu",

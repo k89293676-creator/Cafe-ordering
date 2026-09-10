@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import math
 import uuid
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
@@ -13,7 +15,113 @@ from app.services.tables import load_settings
 from app.utils.security import login_required, validate_uploaded_file
 from app.utils.serializers import _safe_text
 
+log = logging.getLogger(__name__)
+
 bp = Blueprint("web_owner_menu", __name__)
+
+# ── Import validation caps ───────────────────────────────────────────────────
+MAX_CATEGORIES = 200
+MAX_ITEMS_PER_CATEGORY = 500
+MAX_NAME_LEN = 100
+MAX_DESC_LEN = 500
+MAX_PRICE = 99999.99
+
+# Cells beginning with these chars can execute as formulas in Excel.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _sanitize_csv_cell(value) -> str:
+    """Stringify *value* and neutralise CSV-injection vectors (mirrors extensions/exports_bp)."""
+    if value is None:
+        return ""
+    s = str(value)
+    if s and s[0] in _FORMULA_PREFIXES:
+        s = "'" + s
+    return s
+
+
+def _reject_json_constant(value: str):
+    """json.parse_constant hook — reject NaN/Infinity (strict JSON)."""
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+
+def _validate_imported_menu(menu: dict) -> dict:
+    """Validate an imported menu blob. Raises ValueError with a user-facing message."""
+    if not isinstance(menu, dict):
+        raise ValueError("Expected a JSON object with 'categories' key.")
+    if "categories" not in menu:
+        raise ValueError("Expected a JSON object with 'categories' key.")
+    categories = menu.get("categories")
+    if not isinstance(categories, list):
+        raise ValueError("Expected 'categories' to be a list.")
+    if len(categories) > MAX_CATEGORIES:
+        raise ValueError(f"Too many categories (max {MAX_CATEGORIES}).")
+    for idx, cat in enumerate(categories):
+        if not isinstance(cat, dict):
+            raise ValueError(f"Category #{idx + 1} must be an object.")
+        if "items" not in cat or cat.get("items") is None:
+            cat["items"] = []
+        items = cat.get("items")
+        if not isinstance(items, list):
+            raise ValueError(
+                f"Category '{cat.get('name', '?')}' items must be a list."
+            )
+        if len(items) > MAX_ITEMS_PER_CATEGORY:
+            raise ValueError(
+                f"Too many items in category '{cat.get('name', '?')}' "
+                f"(max {MAX_ITEMS_PER_CATEGORY})."
+            )
+        raw_cat_name = cat.get("name", "")
+        if not isinstance(raw_cat_name, str):
+            raise ValueError(f"Category #{idx + 1} name must be a string.")
+        if len(raw_cat_name) > MAX_NAME_LEN:
+            raise ValueError(
+                f"Category name too long (max {MAX_NAME_LEN} chars)."
+            )
+        for j, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Item #{j + 1} in category '{raw_cat_name}' must be an object."
+                )
+            iname = item.get("name", "")
+            if not isinstance(iname, str):
+                raise ValueError(f"Item #{j + 1} name must be a string.")
+            if len(iname) > MAX_NAME_LEN:
+                raise ValueError(
+                    f"Item name too long (max {MAX_NAME_LEN} chars)."
+                )
+            desc = item.get("description", "")
+            if desc is None:
+                desc = ""
+                item["description"] = ""
+            if not isinstance(desc, str):
+                raise ValueError(f"Item '{iname}' description must be a string.")
+            if len(desc) > MAX_DESC_LEN:
+                raise ValueError(
+                    f"Item '{iname}' description too long (max {MAX_DESC_LEN} chars)."
+                )
+            price = item.get("price", 0)
+            if isinstance(price, str):
+                price = price.strip()
+                try:
+                    price = float(price)
+                except (TypeError, ValueError):
+                    raise ValueError(f"Item '{iname}' price must be a number.")
+                item["price"] = price
+            if isinstance(price, bool) or not isinstance(price, (int, float)):
+                raise ValueError(f"Item '{iname}' price must be a number.")
+            try:
+                price_f = float(price)
+            except (TypeError, ValueError):
+                raise ValueError(f"Item '{iname}' price must be a number.")
+            if not math.isfinite(price_f):
+                raise ValueError(f"Item '{iname}' price must be finite.")
+            if not (0 <= price_f <= MAX_PRICE):
+                raise ValueError(
+                    f"Item '{iname}' price must be between 0 and {MAX_PRICE}."
+                )
+            item["price"] = round(price_f, 2)
+    return menu
 
 
 @bp.route("/owner/menu")
@@ -136,21 +244,62 @@ def owner_import_menu():
     if err:
         flash(err, "error")
         return redirect(url_for("web_owner_menu.owner_menu"))
+    if file_type != "json":
+        flash("Only JSON files allowed.", "error")
+        return redirect(url_for("web_owner_menu.owner_menu"))
     try:
-        menu = json.loads(file_bytes.decode("utf-8", "strict"))
-        if not isinstance(menu, dict) or "categories" not in menu:
-            raise ValueError("Expected a JSON object with 'categories' key.")
+        text = file_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        flash(f"Invalid menu JSON: file must be UTF-8 encoded ({exc})", "error")
+        return redirect(url_for("web_owner_menu.owner_menu"))
+    try:
+        menu = json.loads(text, parse_constant=_reject_json_constant)
+        _validate_imported_menu(menu)
+    except ValueError as exc:
+        flash(f"Invalid menu JSON: {exc}", "error")
+        return redirect(url_for("web_owner_menu.owner_menu"))
     except Exception as exc:
         flash(f"Invalid menu JSON: {exc}", "error")
         return redirect(url_for("web_owner_menu.owner_menu"))
+    # Dedupe IDs — regenerate uuid4 on collision or missing so that
+    # delete/toggle/upsert behave consistently afterwards.
+    seen_cat_ids: set[str] = set()
+    seen_item_ids: set[str] = set()
     for cat in menu.get("categories", []):
+        cid = cat.get("id")
+        if not cid or not isinstance(cid, str) or cid in seen_cat_ids:
+            cid = str(uuid.uuid4())
+            cat["id"] = cid
+        seen_cat_ids.add(cid)
         cat["ownerId"] = owner_id
-        if not cat.get("id"):
-            cat["id"] = str(uuid.uuid4())
+        # Normalise + sanitise category name.
+        cat["name"] = _safe_text(cat.get("name", ""), max_len=MAX_NAME_LEN)
+        if not isinstance(cat.get("items"), list):
+            cat["items"] = []
         for item in cat.get("items", []):
-            if not item.get("id"):
-                item["id"] = str(uuid.uuid4())
-    save_owner_menu(owner_id, menu)
+            iid = item.get("id")
+            if not iid or not isinstance(iid, str) or iid in seen_item_ids:
+                iid = str(uuid.uuid4())
+                item["id"] = iid
+            seen_item_ids.add(iid)
+            item["name"] = _safe_text(item.get("name", ""), max_len=MAX_NAME_LEN)
+            item["description"] = _safe_text(
+                item.get("description", ""), max_len=MAX_DESC_LEN
+            )
+            if "available" not in item:
+                item["available"] = True
+            if "imageUrl" not in item or item.get("imageUrl") is None:
+                item["imageUrl"] = ""
+    try:
+        save_owner_menu(owner_id, menu)
+    except Exception as exc:
+        log.exception("owner_import_menu save failed for owner %s", owner_id)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        flash(f"Could not save imported menu: {exc}", "error")
+        return redirect(url_for("web_owner_menu.owner_menu"))
     flash("Menu imported successfully.", "success")
     return redirect(url_for("web_owner_menu.owner_menu"))
 
@@ -161,6 +310,7 @@ def owner_import_menu():
 
 @bp.route("/owner/export/menu")
 @login_required
+@limiter.limit("30 per hour")
 def export_menu_csv():
     import csv as _csv
     import io as _io
@@ -174,17 +324,19 @@ def export_menu_csv():
     for cat in menu.get("categories", []):
         for item in cat.get("items", []):
             w.writerow([
-                cat.get("name", ""),
-                item.get("id", ""),
-                item.get("name", ""),
-                item.get("price", ""),
-                (item.get("description") or "")[:300],
-                "yes" if item.get("available", True) else "no",
+                _sanitize_csv_cell(cat.get("name", "")),
+                _sanitize_csv_cell(item.get("id", "")),
+                _sanitize_csv_cell(item.get("name", "")),
+                _sanitize_csv_cell(item.get("price", "")),
+                _sanitize_csv_cell((item.get("description") or "")[:300]),
+                _sanitize_csv_cell("yes" if item.get("available", True) else "no"),
             ])
     out.seek(0)
     fname = f"menu_{_dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
-    return _Resp(out.getvalue(), mimetype="text/csv",
-                 headers={"Content-Disposition": f"attachment; filename={fname}"})
+    return _Resp(out.getvalue(), mimetype="text/csv; charset=utf-8",
+                  headers={"Content-Disposition": f"attachment; filename={fname}",
+                           "Cache-Control": "no-store, private, max-age=0",
+                           "X-Content-Type-Options": "nosniff"})
 
 
 # ---------------------------------------------------------------------------
@@ -214,14 +366,14 @@ def save_menu_item():
     dietary_text = _safe_text(str(form.get("itemDietaryTags", "")), max_len=300)
 
     if not category_id or not name or not price_text:
-        flash("Item name, price, and category are required.")
+        flash("Item name, price, and category are required.", "error")
         return redirect(url_for("web_owner_menu.owner_menu"))
     try:
         price = round(float(price_text), 2)
         if price < 0 or price > 99999.99:
             raise ValueError
     except ValueError:
-        flash("Price must be a positive number up to 99,999.99.")
+        flash("Price must be a positive number up to 99,999.99.", "error")
         return redirect(url_for("web_owner_menu.owner_menu"))
 
     available = form.get("itemAvailable", "1") not in ("0", "false", "False", "")
@@ -250,11 +402,23 @@ def save_menu_item():
         if found:
             break
     if not found:
-        # Insert as new item
+        # Insert as new item — ensure global id uniqueness so later
+        # delete/toggle/upsert stay consistent.
+        existing_ids = {
+            it.get("id")
+            for cat in menu.get("categories", [])
+            for it in cat.get("items", [])
+            if it.get("id")
+        }
+        new_id = item_id
+        if not new_id or new_id in existing_ids:
+            new_id = str(uuid.uuid4())
+            while new_id in existing_ids:
+                new_id = str(uuid.uuid4())
         for cat in menu.get("categories", []):
             if cat.get("id") == category_id:
                 cat.setdefault("items", []).append({
-                    "id": item_id or str(uuid.uuid4()),
+                    "id": new_id,
                     "name": name,
                     "description": description,
                     "price": price,
@@ -265,7 +429,16 @@ def save_menu_item():
                     "prepTime": prep_time,
                 })
                 break
-    save_owner_menu(owner_id, menu)
+    try:
+        save_owner_menu(owner_id, menu)
+    except Exception as exc:
+        log.exception("save_menu_item failed for owner %s", owner_id)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        flash(f"Could not save menu item: {exc}", "error")
+        return redirect(url_for("web_owner_menu.owner_menu"))
     flash(f"Menu item '{name}' saved.", "success")
     return redirect(url_for("web_owner_menu.owner_menu"))
 
@@ -276,16 +449,21 @@ def save_menu_item():
 
 @bp.route("/owner/menu/download")
 @login_required
+@limiter.limit("30 per hour")
 def download_menu():
     """Download the owner's menu as a JSON file (Bug #16 fix — port from legacy monolith)."""
     import json as _json
+    from datetime import date as _date
     from flask import Response as _Resp
     owner_id = logged_in_owner_id()
     menu = load_owner_menu(owner_id)
+    fname = f"menu-{_date.today().isoformat()}.json"
     return _Resp(
-        _json.dumps(menu, indent=2),
-        mimetype="application/json",
-        headers={"Content-Disposition": "attachment; filename=menu.json"},
+        _json.dumps(menu, indent=2, ensure_ascii=False),
+        mimetype="application/json; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={fname}",
+                 "Cache-Control": "no-store, private, max-age=0",
+                 "X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -330,14 +508,46 @@ def owner_upload_item_image(item_id: str):
     if err:
         flash(err, "error")
         return redirect(url_for("web_owner_menu.owner_menu"))
-    mime = "image/jpeg" if file_type == "jpeg" else f"image/{file_type}"
+    if file_type != "image":
+        flash("Only image files allowed.", "error")
+        return redirect(url_for("web_owner_menu.owner_menu"))
+    # validate_uploaded_file returns "image" (not "jpeg"/"png"), so map
+    # the real MIME type from the filename extension (fallback to magic).
+    _fname_lower = (file.filename or "").lower()
+    if _fname_lower.endswith(".png"):
+        mime = "image/png"
+    elif _fname_lower.endswith((".jpg", ".jpeg")):
+        mime = "image/jpeg"
+    elif file_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        mime = "image/png"
+    elif file_bytes.startswith(b"\xff\xd8\xff"):
+        mime = "image/jpeg"
+    else:
+        mime = "image/png"
     data_url = f"data:{mime};base64,{_b64.b64encode(file_bytes).decode()}"
 
     menu = load_owner_menu(owner_id)
+    found = False
     for cat in menu.get("categories", []):
         for item in cat.get("items", []):
             if item.get("id") == item_id:
                 item["imageUrl"] = data_url
-    save_owner_menu(owner_id, menu)
+                found = True
+                break
+        if found:
+            break
+    if not found:
+        flash("Menu item not found.", "error")
+        return redirect(url_for("web_owner_menu.owner_menu"))
+    try:
+        save_owner_menu(owner_id, menu)
+    except Exception as exc:
+        log.exception("owner_upload_item_image save failed for owner %s", owner_id)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        flash(f"Could not save image: {exc}", "error")
+        return redirect(url_for("web_owner_menu.owner_menu"))
     flash("Image uploaded.", "success")
     return redirect(url_for("web_owner_menu.owner_menu"))

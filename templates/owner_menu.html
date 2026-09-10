@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>Menu — Cafe 11:11</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -85,6 +86,7 @@
     .toolbar input[type=search]:focus { border-color: #4f46e5; }
     .empty-state { text-align: center; padding: 4rem 2rem; color: #64748b; }
     .empty-state svg { margin-bottom: 1rem; opacity: .4; }
+    #import-form.open { display: block !important; }
   </style>
 </head>
 <body>
@@ -162,16 +164,14 @@
       </div>
     </div>
 
-    <!-- Import form (hidden by default) -->
+    <!-- Import form (hidden by default, toggled via .open class) -->
     <div id="import-form" style="display:none;background:#fff;border:1.5px solid #e5e7eb;border-radius:14px;padding:1.25rem 1.5rem;margin-bottom:1.5rem;">
-      <div id="import-form" class="" style="display:block">
         <p style="font-size:.85rem;color:#475569;margin-bottom:.85rem;">Upload a JSON file with <code>{ "categories": [...] }</code> structure. Existing menu will be replaced.</p>
         <form method="post" action="{{ url_for('update_menu') }}" enctype="multipart/form-data" style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
           <input type="file" name="menu_file" accept=".json" required style="font-size:.88rem;" />
           <button type="submit" class="btn-primary" style="padding:.48rem 1rem;">Import</button>
         </form>
-      </div>
     </div>
 
     {% if menu.categories %}
@@ -208,7 +208,7 @@
                   <div class="item-name">{{ item.name }}</div>
                   {% if item.description %}<div class="item-desc">{{ item.description | truncate(80) }}</div>{% endif %}
                 </td>
-                <td class="item-price">₹{{ "%.2f" | format(item.price | float) }}</td>
+                <td class="item-price">{{ currency_symbol }}{{ "%.2f" | format(item.price | float) }}</td>
                 <td>
                   {% if item.available %}
                     <span class="avail-pill yes">
