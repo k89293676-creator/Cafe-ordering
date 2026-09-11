@@ -258,6 +258,8 @@ function showToast(msg, ms = 2800) {
   document.querySelectorAll(".cafe-toast").forEach(t => t.remove());
   const t = document.createElement("div");
   t.className = "cafe-toast";
+  t.setAttribute("role", "status");
+  t.setAttribute("aria-live", "polite");
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => {
@@ -289,22 +291,35 @@ function closeCart() {
 async function loadMenu() {
   const mc = $("menu-container");
   if (!mc) return;
-  mc.innerHTML = `<div class="o-loading"><div class="o-spinner"></div><span>Loading menu…</span></div>`;
+  mc.innerHTML = `<div class="o-loading"><div class="o-spinner" role="status" aria-label="Loading menu"></div><span>Loading menu…</span></div>`;
 
   try {
     const res = await fetch(`/api/menu?table_id=${encodeURIComponent(TABLE_ID)}`);
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     menuData = (data.categories || []).filter(c => c.items && c.items.length > 0);
+    try { localStorage.setItem(`cafe_menu_${TABLE_ID}`, JSON.stringify({at: Date.now(), data: menuData})); } catch {}
     buildCatNav();
     renderMenu();
   } catch (err) {
     console.error("[cafe] menu load failed:", err);
-    mc.innerHTML = `<div class="o-empty">
-      <div class="o-empty__icon">🍽</div>
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem(`cafe_menu_${TABLE_ID}`) || "null"); } catch {}
+    if (cached && cached.data && cached.data.length) {
+      menuData = cached.data;
+      buildCatNav();
+      renderMenu();
+      showToast("Showing saved menu — reconnect for latest.");
+      return;
+    }
+    const offline = !navigator.onLine ? `<span>You appear offline. Reconnect, then retry.</span>` : `<span>Please ask a staff member for assistance.</span>`;
+    mc.innerHTML = `<div class="o-empty" role="alert">
+      <div class="o-empty__icon" aria-hidden="true">🍽</div>
       <p>Menu unavailable</p>
-      <span>Please ask a staff member for assistance.</span>
+      ${offline}
+      <button class="o-clear-btn" id="menu-retry-btn" type="button" style="margin-top:.9rem;">↻ Retry</button>
     </div>`;
+    $("menu-retry-btn")?.addEventListener("click", loadMenu);
   }
 }
 
@@ -313,11 +328,14 @@ function buildCatNav() {
   const nav = $("cat-nav");
   if (!nav) return;
   nav.innerHTML = "";
+  nav.setAttribute("role", "tablist");
 
   const all = document.createElement("button");
   all.className = "o-cat o-cat--active";
   all.textContent = "All";
   all.dataset.cat = "";
+  all.setAttribute("role", "tab");
+  all.setAttribute("aria-selected", activeCat === "" ? "true" : "false");
   all.addEventListener("click", () => setCat(""));
   nav.appendChild(all);
 
@@ -326,6 +344,8 @@ function buildCatNav() {
     btn.className = "o-cat";
     btn.textContent = cat.name;
     btn.dataset.cat = cat.id;
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", activeCat === cat.id ? "true" : "false");
     btn.addEventListener("click", () => setCat(cat.id));
     nav.appendChild(btn);
   });
@@ -334,7 +354,9 @@ function buildCatNav() {
 function setCat(id) {
   activeCat = id;
   document.querySelectorAll("#cat-nav .o-cat").forEach(b => {
-    b.classList.toggle("o-cat--active", b.dataset.cat === id);
+    const on = b.dataset.cat === id;
+    b.classList.toggle("o-cat--active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
   });
   renderMenu();
 }
@@ -358,10 +380,19 @@ function renderMenu() {
   })).filter(c => c.items.length > 0);
 
   if (!visible.length) {
-    mc.innerHTML = `<div class="o-empty">
-      <div class="o-empty__icon">🔍</div>
-      <p>No results</p><span>Try a different search</span>
+    const filterNote = activeFilter ? ` with filter “${esc(activeFilter)}”` : "";
+    mc.innerHTML = `<div class="o-empty" role="status">
+      <div class="o-empty__icon" aria-hidden="true">🔍</div>
+      <p>No results${filterNote}</p><span>Try a different search</span>
+      <button class="o-clear-btn" id="clear-search-btn" type="button" style="margin-top:.9rem;">Clear search &amp; filters</button>
     </div>`;
+    $("clear-search-btn")?.addEventListener("click", () => {
+      const si = $("search-input");
+      if (si) si.value = "";
+      activeFilter = "";
+      document.querySelectorAll(".js-diet-filter").forEach(b => { b.classList.remove("o-cat--active"); b.setAttribute("aria-pressed", "false"); });
+      setCat("");
+    });
     return;
   }
 
@@ -394,11 +425,11 @@ function itemCard(item) {
   const actionHtml = !avail
     ? `<button class="o-add o-add--sold-out" disabled>Sold out</button>`
     : qty === 0
-      ? `<button class="o-add js-add">+ Add</button>`
+      ? `<button class="o-add js-add" aria-label="Add ${esc(item.name)}">+ Add</button>`
       : `<div class="o-stepper">
-           <button class="o-stepper__btn js-dec" aria-label="Remove">−</button>
-           <span class="o-stepper__val">${qty}</span>
-           <button class="o-stepper__btn js-inc" aria-label="Add">+</button>
+           <button class="o-stepper__btn js-dec" aria-label="Remove one ${esc(item.name)}">−</button>
+           <span class="o-stepper__val" aria-live="polite">${qty}</span>
+           <button class="o-stepper__btn js-inc" aria-label="Add one ${esc(item.name)}">+</button>
          </div>`;
 
   const popularBadge = item.popular ? `<span class="o-popular-badge">🔥 Popular</span>` : "";
@@ -541,9 +572,9 @@ function syncCart() {
       </div>
       <div class="o-cart-item__right">
         <div class="o-cart-item__controls">
-          <button class="o-qty-btn" data-id="${esc(id)}" data-d="-1" aria-label="Remove one">−</button>
-          <span class="o-qty-val">${qty}</span>
-          <button class="o-qty-btn" data-id="${esc(id)}" data-d="1"  aria-label="Add one">+</button>
+          <button class="o-qty-btn" data-id="${esc(id)}" data-d="-1" aria-label="Remove one ${esc(item.name)}">−</button>
+          <span class="o-qty-val" aria-live="polite">${qty}</span>
+          <button class="o-qty-btn" data-id="${esc(id)}" data-d="1"  aria-label="Add one ${esc(item.name)}">+</button>
         </div>
         <div class="o-cart-item__total">₹${fmt(item.price * qty)}</div>
         <button class="o-cart-item__rm" data-rm="${esc(id)}" aria-label="Remove ${esc(item.name)}">✕</button>
@@ -559,30 +590,60 @@ function syncCart() {
 }
 
 /* ── Checkout ── */
+function _newIdemKey() {
+  try { if (crypto.randomUUID) return crypto.randomUUID(); } catch {}
+  return `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 async function placeOrder(name) {
   const qty = totalQty();
   if (qty === 0) { setResp($("checkout-resp"), "Add items to your order first.", "error"); return; }
 
+  const emailEl = $("customer-email");
+  const phoneEl = $("customer-phone");
+  const email = (emailEl?.value || "").trim();
+  const phone = (phoneEl?.value || "").trim();
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    setResp($("checkout-resp"), "Please enter a valid email or leave it blank.", "error");
+    emailEl?.focus();
+    return;
+  }
+  if (phone && !/^[0-9+\-\s().]{3,30}$/.test(phone)) {
+    setResp($("checkout-resp"), "Please enter a valid phone or leave it blank.", "error");
+    phoneEl?.focus();
+    return;
+  }
+  let customTipEl = $("tip-custom-input");
+  if (customTipEl && customTipEl.style.display !== "none") {
+    const v = parseFloat(customTipEl.value || "0");
+    if (customTipEl.value && (isNaN(v) || v < 0 || v > 10000)) {
+      setResp($("checkout-resp"), "Custom tip must be between ₹0 and ₹10,000.", "error");
+      customTipEl.focus();
+      return;
+    }
+  }
+
   const btn = $("place-order-btn");
   if (btn?.disabled) return;
-  if (btn) { btn.disabled = true; btn.textContent = "Placing order…"; }
+  const origBtn = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.classList.add("is-loading"); btn.innerHTML = `<span class="o-spinner o-spinner--btn" aria-hidden="true"></span> Placing order…`; }
   lastName = name || "Guest";
 
   const tipAmt = getTipAmount();
   const payload = {
     tableId:       TABLE_ID,
     customerName:  lastName,
-    customerEmail: ($("customer-email")?.value || "").trim(),
-    customerPhone: ($("customer-phone")?.value || "").trim(),
+    customerEmail: email,
+    customerPhone: phone,
     notes:         ($("order-notes")?.value || "").trim(),
     tip:           Math.round(tipAmt * 100) / 100,
     items: Object.entries(cart).map(([id, { qty }]) => ({ id, quantity: qty })),
   };
+  try { localStorage.setItem(`cafe_checkout_${TABLE_ID}`, JSON.stringify({name: lastName, email, phone, notes: payload.notes, tipPercent, customTip})); } catch {}
 
   try {
     const res  = await fetch("/api/checkout", {
       method:  "POST",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      headers: csrfHeaders({ "Content-Type": "application/json", "Idempotency-Key": _newIdemKey() }),
       body:    JSON.stringify(payload),
     });
     const data = await res.json();
@@ -614,11 +675,11 @@ async function placeOrder(name) {
     /* Error from server */
     const msg = data.description || data.error || data.message || "Something went wrong — please try again.";
     setResp($("checkout-resp"), msg, "error");
-    if (btn) { btn.disabled = false; btn.textContent = "Place Order →"; }
+    if (btn) { btn.disabled = false; btn.classList.remove("is-loading"); btn.textContent = origBtn || "Place Order →"; }
 
   } catch {
-    setResp($("checkout-resp"), "Network error. Please check your connection.", "error");
-    if (btn) { btn.disabled = false; btn.textContent = "Place Order →"; }
+    setResp($("checkout-resp"), "Network error. Please check your connection and try again — your cart is kept.", "error");
+    if (btn) { btn.disabled = false; btn.classList.remove("is-loading"); btn.textContent = origBtn || "Place Order →"; }
   }
 }
 
@@ -639,11 +700,12 @@ function trackerHtml(order) {
   const stepsHtml = STEPS.map((lbl, i) => {
     const cls = i < si.step ? "o-step is-done" : i === si.step ? "o-step is-active" : "o-step";
     const dot = i < si.step ? "✓" : (i + 1);
+    const cur = i === si.step ? ` aria-current="step"` : "";
     const line = i < STEPS.length - 1
       ? `<div class="o-step-line${i < si.step ? " is-done" : ""}"></div>`
       : "";
-    return `<div class="${cls}">
-      <div class="o-step__dot">${dot}</div>
+    return `<div class="${cls}"${cur}>
+      <div class="o-step__dot" aria-hidden="true">${dot}</div>
       <div class="o-step__lbl">${lbl}</div>
     </div>${line}`;
   }).join("");
@@ -655,8 +717,8 @@ function trackerHtml(order) {
     </div>`).join("");
 
   const cancelBtn = s === "pending"
-    ? `<button class="o-tracker__cancel-btn" id="cancel-btn" data-oid="${esc(String(order.id))}">Cancel order</button>`
-    : "";
+    ? `<button class="o-tracker__cancel-btn" id="cancel-btn" data-oid="${esc(String(order.id))}">Cancel order</button><div id="cancel-window-note" style="font-size:.75rem;color:#6b7280;text-align:center;margin-top:.35rem;">Free cancel for ~2 min while pending.</div>`
+    : (s !== "cancelled" ? `<div style="font-size:.75rem;color:#6b7280;text-align:center;margin-top:.35rem;">Cancel window ended — please ask staff for changes.</div>` : "");
 
   const pickupHtml = order.pickupCode
     ? `<div style="text-align:center;margin:1rem 0;padding:1rem;background:#f0fdf4;border:2px dashed #10b981;border-radius:.75rem;">
@@ -670,7 +732,7 @@ function trackerHtml(order) {
     <div class="o-tracker__id">Order #${esc(String(order.id))}</div>
     <div class="o-tracker__hi">Hi, ${esc(order.customerName || "Guest")}!</div>
     ${pickupHtml}
-    <div class="o-steps" id="tracker-steps">${stepsHtml}</div>
+    <div class="o-steps" id="tracker-steps" role="list" aria-label="Order progress">${stepsHtml}</div>
     <div class="o-tracker__card" id="tracker-card">
       <div class="o-tracker__emoji" id="tracker-emoji">${si.emoji}</div>
       <div>
@@ -702,34 +764,35 @@ function trackerHtml(order) {
 async function lookupByCode(code) {
   const respEl = $("lookup-resp");
   const btn    = $("lookup-code-btn");
-  if (!code) {
-    if (respEl) respEl.textContent = "Please enter a pickup code.";
+  const clean = (code || "").trim().toUpperCase();
+  if (!clean) {
+    if (respEl) { respEl.textContent = "Please enter a pickup code."; respEl.style.color = "#b91c1c"; }
     return;
   }
   if (btn) { btn.disabled = true; btn.textContent = "Looking…"; }
-  if (respEl) respEl.textContent = "";
+  if (respEl) { respEl.textContent = "Searching…"; respEl.style.color = "#6b7280"; }
   try {
-    const res  = await fetch(`/api/orders/lookup?code=${encodeURIComponent(code.toUpperCase())}`);
+    const res  = await fetch(`/api/orders/lookup?code=${encodeURIComponent(clean)}`);
     const data = await res.json();
     if (res.ok && data.order) {
       const order = data.order;
       currentOrderId = order.id;
       _saveOrder(order);
+      if (respEl) { respEl.textContent = "Order found — opening tracker."; respEl.style.color = "#15803d"; }
       const pickupDiv    = $("pickup-success");
       const pickupCodeEl = $("pickup-code-display");
       if (pickupDiv && pickupCodeEl) {
-        pickupCodeEl.textContent = order.pickupCode || code;
+        pickupCodeEl.textContent = order.pickupCode || clean;
         pickupDiv.style.display  = "block";
         pickupDiv.scrollIntoView({ behavior: "smooth", block: "center" });
       }
       showTracker(order);
       showToast("Order found!");
     } else {
-      if (respEl) respEl.textContent =
-        data.description || data.error || "No order found with that code.";
+      if (respEl) { respEl.textContent = data.description || data.error || "No order found with that code."; respEl.style.color = "#b91c1c"; }
     }
   } catch {
-    if (respEl) respEl.textContent = "Network error. Please try again.";
+    if (respEl) { respEl.textContent = "Network error. Please try again."; respEl.style.color = "#b91c1c"; }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "Find"; }
   }
@@ -979,6 +1042,10 @@ function resetToOrdering() {
   const revSection = $("reviews-section");
   if (revSection) revSection.classList.add("o-reviews--hidden");
 
+  /* Restore last checkout context so tip/contact/notes survive */
+  let savedCtx = null;
+  try { savedCtx = JSON.parse(localStorage.getItem(`cafe_checkout_${TABLE_ID}`) || "null"); } catch {}
+
   /* Rebuild the cart panel */
   const cartEl = qs(".o-cart");
   if (!cartEl) return;
@@ -1001,11 +1068,19 @@ function resetToOrdering() {
       <div class="o-cart__totals">
         <div class="o-cart__row">
           <span>Items</span>
-          <span id="cart-item-count">0</span>
+          <span id="cart-item-count" aria-live="polite">0</span>
+        </div>
+        <div class="o-cart__row">
+          <span>Subtotal</span>
+          <span>₹<span id="cart-subtotal">0.00</span></span>
+        </div>
+        <div class="o-cart__row">
+          <span>Tip</span>
+          <span id="cart-tip-amount">—</span>
         </div>
         <div class="o-cart__row o-cart__row--total">
           <span>Total</span>
-          <span class="o-cart__total-val">₹<span id="cart-total">0.00</span></span>
+          <span class="o-cart__total-val">₹<span id="cart-total" aria-live="polite">0.00</span></span>
         </div>
       </div>
       <div class="o-cart__actions">
@@ -1015,6 +1090,7 @@ function resetToOrdering() {
         </button>
       </div>
       <form id="checkout-form" novalidate>
+        <label class="o-field-label" for="customer-name">Name (optional)</label>
         <input
           id="customer-name"
           class="o-name-input"
@@ -1022,7 +1098,10 @@ function resetToOrdering() {
           placeholder="Your name (optional)"
           autocomplete="name"
           maxlength="80"
+          aria-label="Your name (optional)"
+          value="${savedCtx && savedCtx.name && savedCtx.name !== "Guest" ? esc(savedCtx.name) : ""}"
         />
+        <label class="o-field-label" for="customer-email">Email for receipt (optional)</label>
         <input
           id="customer-email"
           class="o-name-input"
@@ -1030,10 +1109,25 @@ function resetToOrdering() {
           placeholder="Email for receipt (optional)"
           autocomplete="email"
           maxlength="254"
+          aria-label="Email for receipt (optional)"
+          value="${savedCtx && savedCtx.email ? esc(savedCtx.email) : ""}"
         />
+        <label class="o-field-label" for="customer-phone">Phone for reorder (optional)</label>
+        <input
+          id="customer-phone"
+          class="o-name-input"
+          type="tel"
+          placeholder="Phone for reorder (optional)"
+          autocomplete="tel"
+          maxlength="30"
+          aria-label="Phone number (optional)"
+          value="${savedCtx && savedCtx.phone ? esc(savedCtx.phone) : ""}"
+        />
+        <label class="o-field-label" for="order-notes">Special requests (optional)</label>
+        <textarea id="order-notes" class="o-name-input" rows="2" maxlength="500" placeholder="Special requests / notes (optional)" aria-label="Order notes" style="resize:vertical;font-family:inherit;padding:.65rem 1rem;">${savedCtx && savedCtx.notes ? esc(savedCtx.notes) : ""}</textarea>
         <button type="submit" class="o-place-btn" id="place-order-btn">Place Order →</button>
       </form>
-      <div id="checkout-resp" class="o-resp"></div>
+      <div id="checkout-resp" class="o-resp" role="alert"></div>
     </div>`;
 
   /* Append order history strip (previous orders at this table) */
@@ -1045,6 +1139,10 @@ function resetToOrdering() {
   }
 
   wireCartPanel(cartEl);
+  if (savedCtx) {
+    tipPercent = savedCtx.tipPercent || 0;
+    customTip = savedCtx.customTip || 0;
+  }
   syncCart();
   closeCart();
 }
@@ -1115,31 +1213,48 @@ async function loadReviews() {
       </div>`;
     }).join("");
   } catch {
-    list.innerHTML = `<p style="text-align:center;color:var(--text-3);font-size:0.9rem;">Reviews unavailable right now.</p>`;
+    list.innerHTML = `<p style="text-align:center;color:var(--text-3);font-size:0.9rem;">Reviews unavailable right now.</p><div style="text-align:center;"><button class="o-clear-btn" id="reviews-retry-btn" type="button">↻ Retry</button></div>`;
+    $("reviews-retry-btn")?.addEventListener("click", loadReviews);
   }
 }
 
 /* ── Feedback modal ── */
+let _lastFocus = null;
 function openFeedback() {
+  _lastFocus = document.activeElement;
   feedbackRating = 0;
   updateStars(0);
   const ta = $("feedback-comment");
-  if (ta) ta.value = "";
+  if (ta) { ta.value = ""; updateFeedbackCount(); }
   const resp = $("feedback-resp");
   if (resp) { resp.textContent = ""; }
   const bg = $("feedback-modal-bg");
-  if (bg) { bg.classList.add("is-open"); document.body.classList.add("feedback-open"); }
+  if (bg) {
+    bg.classList.add("is-open");
+    document.body.classList.add("feedback-open");
+    const first = bg.querySelector(".o-star-btn");
+    if (first) setTimeout(() => first.focus(), 60);
+  }
 }
 
 function closeFeedback() {
   $("feedback-modal-bg")?.classList.remove("is-open");
   document.body.classList.remove("feedback-open");
+  if (_lastFocus && _lastFocus.focus) { try { _lastFocus.focus(); } catch {} }
 }
 
 function updateStars(val) {
   document.querySelectorAll("#feedback-stars .o-star-btn").forEach(btn => {
-    btn.classList.toggle("selected", parseInt(btn.dataset.val) <= val);
+    const on = parseInt(btn.dataset.val) <= val;
+    btn.classList.toggle("selected", on);
+    btn.setAttribute("aria-checked", parseInt(btn.dataset.val) === val ? "true" : "false");
   });
+}
+
+function updateFeedbackCount() {
+  const ta = $("feedback-comment");
+  const c = $("feedback-count");
+  if (ta && c) c.textContent = `${ta.value.length} / 500`;
 }
 
 /* ── Global event delegation ── */
@@ -1158,7 +1273,12 @@ document.addEventListener("click", async e => {
 
   /* Feedback stars */
   const starBtn = t.closest("#feedback-stars .o-star-btn");
-  if (starBtn) { feedbackRating = parseInt(starBtn.dataset.val); updateStars(feedbackRating); return; }
+  if (starBtn) {
+    feedbackRating = parseInt(starBtn.dataset.val);
+    updateStars(feedbackRating);
+    starBtn.focus();
+    return;
+  }
 
   /* Feedback submit */
   if (t.id === "feedback-submit-btn") {
@@ -1197,17 +1317,26 @@ document.addEventListener("submit", async e => {
   await placeOrder(name);
 });
 
-/* ── Star hover effects ── */
+/* ── Star hover + keyboard effects ── */
 document.addEventListener("mouseover", e => {
   if (e.target.closest("#feedback-stars .o-star-btn")) updateStars(parseInt(e.target.closest(".o-star-btn").dataset.val));
 });
 document.addEventListener("mouseout", e => {
   if (e.target.closest("#feedback-stars")) updateStars(feedbackRating);
 });
+document.addEventListener("focusin", e => {
+  if (e.target.closest && e.target.closest("#feedback-stars .o-star-btn")) updateStars(parseInt(e.target.closest(".o-star-btn").dataset.val));
+});
+document.addEventListener("focusout", e => {
+  if (e.target.closest && e.target.closest("#feedback-stars")) setTimeout(() => {
+    if (!document.activeElement || !document.activeElement.closest || !document.activeElement.closest("#feedback-stars")) updateStars(feedbackRating);
+  }, 0);
+});
 
-/* ── Search ── */
+/* ── Search + feedback count ── */
 document.addEventListener("input", e => {
   if (e.target.id === "search-input") renderMenu();
+  if (e.target.id === "feedback-comment") updateFeedbackCount();
 });
 
 /* ── ESC key ── */
@@ -1217,12 +1346,16 @@ document.addEventListener("keydown", e => {
   if (qs(".o-cart.is-open")) closeCart();
 });
 
-/* ── Nav offset for sticky cart ── */
+/* ── Nav offset for sticky subnav (header height only) ── */
 function setNavH() {
   const h1 = qs(".o-header")?.offsetHeight  || 0;
   const h2 = qs(".o-subnav")?.offsetHeight || 0;
   document.documentElement.style.setProperty("--nav-h", (h1 + h2) + "px");
+  document.documentElement.style.setProperty("--header-h", h1 + "px");
+  setTimeout(setNavH._r || (setNavH._r = () => {}), 0);
 }
+window.addEventListener("resize", () => setNavH());
+window.addEventListener("orientationchange", () => setTimeout(setNavH, 200));
 
 /* ── Init ── */
 document.addEventListener("DOMContentLoaded", () => {
@@ -1244,11 +1377,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* ── Dietary filter buttons ── */
   document.querySelectorAll(".js-diet-filter").forEach(btn => {
+    btn.setAttribute("aria-pressed", btn.dataset.filter === activeFilter ? "true" : "false");
     btn.addEventListener("click", () => {
       const val = btn.dataset.filter || "";
       activeFilter = activeFilter === val ? "" : val;
       document.querySelectorAll(".js-diet-filter").forEach(b => {
-        b.classList.toggle("o-cat--active", b.dataset.filter === activeFilter);
+        const on = b.dataset.filter === activeFilter;
+        b.classList.toggle("o-cat--active", on);
+        b.setAttribute("aria-pressed", on ? "true" : "false");
       });
       renderMenu();
     });
@@ -1256,9 +1392,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* ── Tip selector ── */
   document.querySelectorAll(".js-tip-btn").forEach(btn => {
+    btn.setAttribute("aria-pressed", "false");
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".js-tip-btn").forEach(b => b.classList.remove("is-selected"));
+      document.querySelectorAll(".js-tip-btn").forEach(b => { b.classList.remove("is-selected"); b.setAttribute("aria-pressed", "false"); });
       btn.classList.add("is-selected");
+      btn.setAttribute("aria-pressed", "true");
       const val = btn.dataset.tip;
       if (val === "custom") {
         tipPercent = 0;
@@ -1331,12 +1469,30 @@ document.addEventListener("DOMContentLoaded", () => {
   const saveFavBtn = $("save-fav-btn");
   if (saveFavBtn) {
     saveFavBtn.addEventListener("click", () => {
-      const name = $("customer-name")?.value.trim() || "My Order";
+      const name = document.querySelector("#cart-panel #customer-name")?.value.trim() || $("customer-name")?.value.trim() || "My Order";
       saveFavourite(name);
     });
   }
 
   renderFavourites();
+
+  /* ── Pickup code copy ── */
+  document.addEventListener("click", e => {
+    if (e.target.closest("#pickup-copy-btn")) {
+      const code = ($("pickup-code-display")?.textContent || "").trim();
+      if (!code || code === "——") return;
+      const done = () => showToast("Pickup code copied!");
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code).then(done, () => showToast("Code: " + code));
+      } else {
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = code; document.body.appendChild(ta); ta.select();
+          document.execCommand("copy"); ta.remove(); done();
+        } catch { showToast("Code: " + code); }
+      }
+    }
+  });
 });
 
 window.addEventListener("resize", setNavH);

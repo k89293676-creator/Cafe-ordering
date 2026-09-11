@@ -6,12 +6,14 @@
 const CACHE_VERSION  = "cafe-v3";
 const OFFLINE_URL    = "/static/offline.html";
 const STATIC_ASSETS  = [
+  "/static/offline.html",
   "/static/css/styles.css",
   "/static/css/order.css",
+  "/static/css/order-pro.css",
   "/static/css/enhancements.css",
   "/static/js/table.js",
   "/static/manifest.json",
-  "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap",
+  "/static/manifest-customer.json",
 ];
 
 const SYNC_TAG_ORDER = "sync-pending-order";
@@ -19,7 +21,7 @@ const SYNC_TAG_ORDER = "sync-pending-order";
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_VERSION)
-      .then((cache) => cache.addAll(STATIC_ASSETS.map((u) => new Request(u, { mode: "no-cors" }))))
+      .then((cache) => cache.addAll(STATIC_ASSETS).catch(()=>{}))
       .then(() => self.skipWaiting())
   );
 });
@@ -156,8 +158,8 @@ self.addEventListener("push", (event) => {
 
   const options = {
     body,
-    icon:  "/static/img/icon-192.png",
-    badge: "/static/img/icon-badge.png",
+    icon:  "/static/icon-192.png",
+    badge: "/static/icon-192.png",
     data: { ...data, type, tableUrl: data.tableUrl || "/" },
     tag: type === "owner"
       ? "cafe-owner-" + (data.callId || data.orderId || "notify")

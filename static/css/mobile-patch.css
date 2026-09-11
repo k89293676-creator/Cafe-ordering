@@ -1,0 +1,49 @@
+/* Cafe 11:11 — P1/P2 mobile + tokens patch (owner + billing + shared) */
+:root{
+  --brand:#4f46e5; --brand-600:#4338ca; --ink:#0f172a; --muted:#64748b;
+  --ok:#16a34a; --warn:#b45309; --danger:#b91c1c; --ring:0 0 0 3px rgba(79,70,229,.35);
+  --bill-topbar-h:60px;
+}
+*:focus-visible{outline:3px solid #4f46e5 !important;outline-offset:2px;border-radius:6px;}
+/* 44px touch */
+.btn,.btn-sm,.btn-primary,.btn-secondary,.btn-ghost,.act-btn,.ab-bill,.ab-success,.ab-primary,
+button.btn,.nav-link,.filter-btn{min-height:44px;}
+.btn-sm,.act-btn{padding:.55rem .9rem !important;font-size:.85rem !important;}
+select,input[type="text"],input[type="search"],input[type="number"],input[type="email"],input[type="tel"]{min-height:44px;}
+/* Topbar wrap on floor phones */
+.topbar{flex-wrap:wrap;height:auto !important;min-height:64px;row-gap:.5rem;}
+.top-actions{flex-wrap:wrap;row-gap:.4rem;}
+.top-actions .btn{white-space:nowrap;}
+/* Sidebar a11y + 360px */
+.sidebar{width:min(280px,84vw) !important;}
+#sidebarToggle{display:inline-flex !important;min-width:44px;min-height:44px;align-items:center;justify-content:center;}
+.sidebar-overlay.show{display:block;}
+/* KPI density */
+@media (max-width:640px){
+  .grid-5{grid-template-columns:1fr 1fr !important;}
+  .kpi-value{font-size:1.25rem !important;overflow-wrap:anywhere;}
+  .content{padding:.9rem .8rem !important;}
+  .card-body{padding:.9rem !important;}
+  .table-grid{grid-template-columns:1fr !important;}
+  .menu-grid{grid-template-columns:1fr !important;}
+  .fab{bottom:max(1rem, env(safe-area-inset-bottom, 1rem)) !important;right:1rem !important;}
+}
+/* Owner tables/cards */
+.table-card-id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;display:inline-block;vertical-align:bottom;}
+/* Billing: sticky offset uses var, hierarchy, print */
+.billnav{top:var(--bill-topbar-h,60px) !important;}
+.grid-stats .stat.primary .value{font-size:2rem;}
+@media (max-width:640px){.grid-stats{grid-template-columns:1fr 1fr !important;}}
+@media print{
+  body{background:#fff !important;color:#000 !important;}
+  .topbar,.billnav,.sidebar,.fab,.btn{display:none !important;}
+  .panel,.stat{background:#fff !important;color:#000 !important;border-color:#ccc !important;box-shadow:none !important;}
+}
+/* Status pills: add icon prefix for colorblind (not color-only) */
+.badge.pending::before,.pill.warn::before{content:"● ";font-size:.7em;}
+.badge.ready::before,.pill.live::before{content:"● ";font-size:.7em;}
+/* Tables: sticky first col on h-scroll */
+.table-wrap{overflow-x:auto;}
+.table-wrap table{border-collapse:collapse;width:100%;}
+.table-wrap thead th{position:sticky;top:0;background:inherit;z-index:1;}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001s !important;transition-duration:.001s !important;}}

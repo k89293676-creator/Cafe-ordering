@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Table not found — Cafe 11:11</title>
+  <link rel="stylesheet" href="/static/css/order.css" />
+  <style>
+    .tnf-wrap{min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:1.5rem;background:var(--bg,#faf8f4);}
+    .tnf-card{max-width:440px;width:100%;background:#fff;border:1px solid var(--border,#e2d9cd);border-radius:18px;padding:2rem 1.5rem;text-align:center;box-shadow:var(--shadow,0 4px 16px rgba(0,0,0,.1));}
+    .tnf-icon{font-size:3rem;margin-bottom:.75rem;}
+    .tnf-card h1{font-size:1.4rem;margin:0 0 .5rem;color:var(--text,#1c1510);}
+    .tnf-card p{color:var(--text-2,#5a4e42);font-size:.95rem;line-height:1.6;margin:0 0 1.25rem;}
+    .tnf-code{font-family:monospace;background:#f3f4f6;border-radius:8px;padding:.15rem .5rem;font-size:.85rem;}
+    .tnf-actions{display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;}
+    .tnf-btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:.65rem 1.25rem;border-radius:12px;font-weight:700;font-size:.9rem;text-decoration:none;cursor:pointer;border:1.5px solid transparent;}
+    .tnf-btn--primary{background:var(--text,#1c1510);color:#fff;}
+    .tnf-btn--ghost{background:#fff;color:var(--text,#1c1510);border-color:var(--border,#e2d9cd);}
+    .tnf-btn:focus-visible{outline:3px solid #4f46e5;outline-offset:2px;}
+  </style>
+</head>
+<body class="order-body">
+<main class="tnf-wrap">
+  <div class="tnf-card" role="alert">
+    <div class="tnf-icon" aria-hidden="true">🪑</div>
+    <h1>Couldn’t find this table</h1>
+    <p>
+      {% if table_id %}Code <span class="tnf-code">{{ table_id|e }}</span> didn’t match any active table.{% else %}This QR code didn’t match any active table.{% endif %}
+      Please ask staff for help or order at the counter — no need to rescan repeatedly.
+    </p>
+    <div class="tnf-actions">
+      <a class="tnf-btn tnf-btn--primary" href="/">← Back to Home</a>
+      <a class="tnf-btn tnf-btn--ghost" href="/welcome">Cafe info</a>
+    </div>
+  </div>
+</main>
+</body>
+</html>

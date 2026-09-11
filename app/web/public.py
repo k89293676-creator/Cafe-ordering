@@ -82,14 +82,15 @@ def owner_lead_submit():
 
 
 @bp.route("/table/<table_id>")
+@bp.route("/t/<table_id>")
 @limiter.limit("60 per minute")
 def table_order(table_id: str):
     if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
-        abort(404)
+        return render_template("errors/table-not-found.html", table_id=table_id), 404
     tables = load_tables()
     table = next((t for t in tables if t["id"] == table_id), None)
     if not table:
-        abort(404)
+        return render_template("errors/table-not-found.html", table_id=table_id), 404
     owner_id = table.get("ownerId")
     menu = load_owner_menu(owner_id) if owner_id else {"categories": []}
     settings = load_settings(owner_id)
@@ -117,11 +118,11 @@ def table_order(table_id: str):
 @limiter.limit("30 per minute")
 def at_your_service(table_id: str):
     if not re.fullmatch(r"[a-zA-Z0-9\-]{1,64}", table_id):
-        abort(404)
+        return render_template("errors/table-not-found.html", table_id=table_id), 404
     tables = load_tables()
     table = next((t for t in tables if t["id"] == table_id), None)
     if not table:
-        abort(404)
+        return render_template("errors/table-not-found.html", table_id=table_id), 404
     owner_id = table.get("ownerId")
     settings = load_settings(owner_id)
     return render_template("at_your_service.html", table=table, settings=settings)

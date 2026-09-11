@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/static/css/styles.css" />
   <link rel="stylesheet" href="/static/css/enhancements.css" />
+  <link rel="stylesheet" href="/static/css/mobile-patch.css" />
   <style>
     .tables-grid {
       display: grid;
@@ -203,12 +204,12 @@
         <div class="table-card-name">{{ table.name }}</div>
         <div class="table-card-id">{{ table.id }}</div>
         <div class="table-card-actions">
-          <button class="btn-sm btn-qr" onclick="showQR('{{ table.id }}', '{{ table.name }}')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <button class="btn-sm btn-qr" onclick="showQR('{{ table.id }}', '{{ table.name }}')" aria-label="Show QR for {{ table.name }}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
             QR
           </button>
-          <button class="btn-sm btn-rename" onclick="toggleRename('rename-{{ table.id }}')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          <button class="btn-sm btn-rename" onclick="toggleRename('rename-{{ table.id }}', this)" aria-expanded="false" aria-controls="rename-{{ table.id }}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             Rename
           </button>
           <form method="post" action="{{ url_for('delete_table', table_id=table.id) }}" onsubmit="return confirm('Delete {{ table.name }}?');" style="display:inline;">
@@ -273,9 +274,11 @@
 </div>
 
 <script>
-  function toggleRename(id) {
+  function toggleRename(id, btn) {
     const el = document.getElementById(id);
-    el.classList.toggle('open');
+    const open = el.classList.toggle('open');
+    if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) { const inp = el.querySelector('input[name="name"]'); if (inp) setTimeout(()=>inp.focus(), 50); }
   }
   function showQR(tableId, tableName) {
     const url = location.origin + '/table/' + tableId;
@@ -284,13 +287,18 @@
     document.getElementById('qr-open-btn').href = url;
     const canvas = document.getElementById('qr-canvas');
     canvas.innerHTML = '';
-    // Simple QR link fallback using a public API (no external JS lib needed)
+    // Internal QR first (offline-safe, private), external API as fallback
     const img = document.createElement('img');
-    img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(url);
+    img.src = '/owner/tables/' + encodeURIComponent(tableId) + '/qr.png';
     img.alt = 'QR code for ' + tableName;
     img.style.cssText = 'width:160px;height:160px;border:8px solid #fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.1);';
+    img.onerror = function(){
+      img.onerror = null;
+      img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(url);
+    };
     canvas.appendChild(img);
     document.getElementById('qr-modal').classList.add('open');
+    document.getElementById('qr-modal').querySelector('.qr-modal').setAttribute('role','dialog');
   }
   function closeQR() {
     document.getElementById('qr-modal').classList.remove('open');

@@ -56,7 +56,8 @@
   {% if not orders %}
   <div class="co-empty">
     <h2>No orders yet</h2>
-    <p>Your order history will appear here once you place an order using this email address.</p>
+    <p>Your order history will appear here once you place an order using this email{% if customer.phone %} or phone {{ customer.phone }}{% endif %}.</p>
+    <p><a href="/" style="display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:.6rem 1.2rem;background:#4f46e5;color:#fff;border-radius:10px;font-weight:700;text-decoration:none;">← Back to home</a></p>
   </div>
   {% else %}
     {% for order in orders %}

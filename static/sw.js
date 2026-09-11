@@ -1,6 +1,7 @@
 // Cafe 11:11 — minimal offline cache (Toast/Square offline parity)
-const CACHE = 'cafe-11-v2';
-const CORE = ['/owner/dashboard','/owner/tables','/owner/menu','/kitchen','/manifest.json'];
+// Shares CACHE id with /static/js/sw.js so the two workers don't evict each other.
+const CACHE = 'cafe-v3';
+const CORE = ['/owner/dashboard','/owner/tables','/owner/menu','/kitchen','/static/manifest.json','/static/manifest-customer.json','/static/offline.html'];
 self.addEventListener('install', e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE).catch(()=>{})));
   self.skipWaiting();

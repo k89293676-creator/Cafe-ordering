@@ -1233,7 +1233,7 @@ function buildCard(t){
   }
   if(c.count) acts+=`<button class="act-btn" data-act="managecalls">🔔 Calls (${c.count})</button>`;
   acts+=`<button class="act-btn" data-act="cleaning">${t.cleaning?'✅ Mark clean':'🧹 Cleaning'}</button>`;
-  acts+=`<a class="act-btn" href="/t/${t.id}" target="_blank">Menu ↗</a>`;
+  acts+=`<a class="act-btn" href="/table/${t.id}" target="_blank">Menu ↗</a>`;
 
   return `<div class="tcard ${sc}${selClass}" data-id="${esc(t.id)}" data-name="${esc(t.name)}">
     <div class="card-select-box" data-sel="${esc(t.id)}"></div>

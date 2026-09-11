@@ -2,73 +2,120 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="csrf-token" content="{{ csrf_token() }}" />
 <title>KDS — {{ owner.cafeName if owner else 'Kitchen' }}</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
 <style>
-:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#94a3b8;--accent:#4f46e5}
+:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f1f5f9;--muted:#c3ccd8;--accent:#4f46e5}
 body{background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif}
-.top{height:56px;background:#020617;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.75rem;padding:0 1rem;position:sticky;top:0;z-index:10}
+.top{min-height:56px;background:#020617;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.75rem;padding:.5rem 1rem;position:sticky;top:0;z-index:10;flex-wrap:wrap}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1rem;padding:1rem}
 .ticket{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-height:180px}
 .ticket.stuck{border-color:#ef4444;box-shadow:0 0 0 2px rgba(239,68,68,.3)}
-.ticket-head{padding:.7rem 1rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);font-size:.85rem}
+.ticket-head{padding:.7rem 1rem;display:flex;justify-content:space-between;align-items:center;gap:.6rem;border-bottom:1px solid var(--border);font-size:.95rem;flex-wrap:wrap}
 .ticket-body{padding:1rem;flex:1}
-.item{display:flex;justify-content:space-between;padding:.25rem 0;border-bottom:1px dashed rgba(255,255,255,.08);font-size:.9rem}
-.age{font-family:monospace;font-weight:700} .age.warn{color:#f59e0b} .age.danger{color:#ef4444}
-.btn-bump{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:.4rem .7rem;font-weight:700;cursor:pointer}
+.item{display:flex;justify-content:space-between;gap:.6rem;padding:.35rem 0;border-bottom:1px dashed rgba(255,255,255,.08);font-size:1rem}
+.age{font-family:monospace;font-weight:700;font-size:.95rem} .age.warn{color:#fbbf24} .age.danger{color:#f87171}
+.age-bar{height:6px;background:rgba(255,255,255,.12);border-radius:4px;margin-top:.5rem;overflow:hidden}
+.age-bar > span{display:block;height:100%;background:#4f46e5;border-radius:4px}
+.age-bar.warn > span{background:#f59e0b} .age-bar.danger > span{background:#ef4444}
+.btn-bump{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:.7rem 1.1rem;min-height:48px;min-width:120px;font-weight:700;font-size:1rem;cursor:pointer}
 .btn-bump:hover{background:#4338ca}
+.btn-bump:focus-visible{outline:3px solid #fff;outline-offset:2px}
+.filter-row{display:flex;gap:.5rem;flex-wrap:wrap;padding:.6rem 1rem 0;}
+.filter-btn{background:rgba(255,255,255,.08);color:var(--text);border:1px solid var(--border);border-radius:999px;padding:.5rem .95rem;min-height:44px;font-size:.85rem;font-weight:600;cursor:pointer}
+.filter-btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.sr-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);}
+@media (max-width:480px){.grid{grid-template-columns:1fr;padding:.75rem}.item{font-size:1.05rem}}
+@media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
 </style>
 </head>
 <body>
 <div class="top">
-  <a href="{{ url_for('web_owner.owner_dashboard') }}" class="btn btn-sm" style="background:rgba(255,255,255,.1);color:#fff;border:1px solid var(--border);">← Dashboard</a>
-  <strong><i class="bi bi-fire"></i> Kitchen Display</strong>
-  <span id="clock" style="color:var(--muted);font-family:monospace;margin-left:.5rem;"></span>
-  <span style="margin-left:auto;color:var(--muted);font-size:.85rem;"><span id="count">0</span> active • <span id="stuck">0</span> stuck</span>
-  <button class="btn btn-sm" style="background:var(--accent);color:#fff;" onclick="load()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
-  <label style="display:flex;align-items:center;gap:.4rem;color:var(--muted);font-size:.82rem;"><input type="checkbox" id="sound" checked/> Sound</label>
+  <a href="{{ url_for('web_owner.owner_dashboard') }}" class="btn btn-sm" style="background:rgba(255,255,255,.1);color:#fff;border:1px solid var(--border);min-height:44px;display:inline-flex;align-items:center;" aria-label="Back to dashboard">← Dashboard</a>
+  <strong><i class="bi bi-fire" aria-hidden="true"></i> Kitchen Display</strong>
+  <span id="clock" style="color:var(--muted);font-family:monospace;margin-left:.5rem;" aria-hidden="true"></span>
+  <span style="margin-left:auto;color:var(--muted);font-size:.9rem;"><span id="count">0</span> active • <span id="stuck">0</span> stuck</span>
+  <button class="btn btn-sm" id="refresh-btn" style="background:var(--accent);color:#fff;min-height:44px;"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh</button>
+  <label style="display:flex;align-items:center;gap:.4rem;color:var(--muted);font-size:.85rem;min-height:44px;"><input type="checkbox" id="sound" checked style="width:20px;height:20px;"/> Sound</label>
 </div>
-<div id="grid" class="grid"></div>
-<audio id="ding" preload="auto" src="data:audio/wav;base64,UklGRlQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YYQAAAAAAA=="></audio>
+<div class="filter-row" role="group" aria-label="Filter tickets">
+  <button class="filter-btn" data-f="all" aria-pressed="true">All</button>
+  <button class="filter-btn" data-f="pending" aria-pressed="false">Pending</button>
+  <button class="filter-btn" data-f="preparing" aria-pressed="false">Preparing</button>
+  <button class="filter-btn" data-f="ready" aria-pressed="false">Ready</button>
+  <button class="filter-btn" data-f="stuck" aria-pressed="false">Stuck</button>
+</div>
+<div id="grid" class="grid" aria-live="off"></div>
+<div id="kds-live" class="sr-live" role="status" aria-live="polite"></div>
+<audio id="ding" preload="auto" src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmGgU7yEeLGgToJAJoDK0tLQYyzh2e6/jx1j3Kc8eJ5UxwTlfjh4m5UHkLSfnv4G/rxudJKG3sMCK1w=="></audio>
 <script>
-const grid=document.getElementById('grid'), countEl=document.getElementById('count'), stuckEl=document.getElementById('stuck'), soundCb=document.getElementById('sound'), clock=document.getElementById('clock');
+const grid=document.getElementById('grid'), countEl=document.getElementById('count'), stuckEl=document.getElementById('stuck'), soundCb=document.getElementById('sound'), clock=document.getElementById('clock'), liveEl=document.getElementById('kds-live');
 setInterval(()=>{ clock.textContent=new Date().toLocaleTimeString(); },1000);
 let lastIds=new Set();
-function load(){
+let activeFilter='all';
+let _lastHtml='';
+document.querySelectorAll('.filter-btn').forEach(b=>b.addEventListener('click',()=>{
+  activeFilter=b.dataset.f;
+  document.querySelectorAll('.filter-btn').forEach(x=>x.setAttribute('aria-pressed', x===b ? 'true':'false'));
+  load(true);
+}));
+document.getElementById('refresh-btn').addEventListener('click',()=>load(true));
+function agePct(s){ return Math.min(100, Math.round((s||0)/720*100)); }
+function load(force){
   fetch('/api/kds/orders',{credentials:'same-origin'}).then(r=>r.json()).then(d=>{
-    const orders=d.orders||[];
+    let orders=d.orders||[];
     countEl.textContent=orders.length;
     const stuck=orders.filter(o=>o.isStuck).length;
     stuckEl.textContent=stuck;
+    if(activeFilter==='stuck') orders=orders.filter(o=>o.isStuck);
+    else if(activeFilter!=='all') orders=orders.filter(o=>o.status===activeFilter);
     // ding on new ticket
     const ids=new Set(orders.map(o=>o.id));
     let hasNew=false;
     for(let id of ids){ if(!lastIds.has(id)){ hasNew=true; break; } }
-    if(hasNew && soundCb.checked){ document.getElementById('ding').play().catch(()=>{}); }
-    lastIds=ids;
-    grid.innerHTML = orders.length ? orders.map(o=>`
+    if(hasNew){
+      if(soundCb.checked){ document.getElementById('ding').play().catch(()=>{}); }
+      if(liveEl) liveEl.textContent=`${orders.length} active tickets. New order received.`;
+    }
+    lastIds=new Set((d.orders||[]).map(o=>o.id));
+    const html = orders.length ? orders.map(o=>{
+      const ageCls=o.ageSeconds>600?'danger':o.ageSeconds>300?'warn':'';
+      const barCls=o.ageSeconds>600?'danger':o.ageSeconds>300?'warn':'';
+      const next=o.status==='pending'?'Start Preparing':o.status==='preparing'?'Mark Ready':o.status==='ready'?'Complete':'Done';
+      return `
       <div class="ticket ${o.isStuck?'stuck':''}">
         <div class="ticket-head">
           <span><strong>#${o.id}</strong> • ${escapeHtml(o.tableName||o.tableId||'Counter')} • ${escapeHtml(o.customerName)}</span>
-          <span class="age ${o.ageSeconds>600?'danger':o.ageSeconds>300?'warn':''}">${o.ageLabel}</span>
+          <span class="age ${ageCls}">${o.ageLabel}</span>
         </div>
         <div class="ticket-body">
           ${o.items.map(it=>`<div class="item"><span>${it.quantity||1}× ${escapeHtml(it.name||'Item')}</span><span>${it.price? '₹'+Number(it.price).toFixed(0):''}</span></div>`).join('')}
-          <div style="margin-top:.6rem;display:flex;justify-content:space-between;align-items:center;">
-            <span style="color:var(--muted);font-size:.78rem;">${o.status} • ₹${Number(o.total||0).toFixed(0)}</span>
-            <button class="btn-bump" onclick="bump(${o.id})">${o.status==='ready'?'Complete':'Bump → '+(o.status==='pending'?'Preparing':o.status==='preparing'?'Ready':'Done')}</button>
+          <div class="age-bar ${barCls}" aria-hidden="true"><span style="width:${agePct(o.ageSeconds)}%"></span></div>
+          <div style="margin-top:.7rem;display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap;">
+            <span style="color:var(--muted);font-size:.85rem;">${o.status}${o.isStuck?' • stuck':''} • ₹${Number(o.total||0).toFixed(0)}</span>
+            <button class="btn-bump" data-bump="${o.id}" aria-label="${next} for order ${o.id}">${next}</button>
           </div>
         </div>
-      </div>
-    `).join('') : `<div style="grid-column:1/-1;text-align:center;padding:4rem;color:var(--muted);"><i class="bi bi-check-circle" style="font-size:2rem;"></i><div style="margin-top:.5rem;">No active tickets — kitchen clear.</div></div>`;
+      </div>`;
+    }).join('') : `<div style="grid-column:1/-1;text-align:center;padding:4rem;color:var(--muted);"><i class="bi bi-check-circle" style="font-size:2rem;" aria-hidden="true"></i><div style="margin-top:.5rem;">No active tickets — kitchen clear.</div></div>`;
+    if(force || html!==_lastHtml){ grid.innerHTML=html; _lastHtml=html; }
   }).catch(()=>{});
 }
+grid.addEventListener('click',e=>{
+  const b=e.target.closest('[data-bump]');
+  if(b) bump(b.dataset.bump);
+});
 function bump(id){
-  fetch(`/api/kds/orders/${id}/bump`,{method:'POST',headers:{'X-CSRFToken': document.querySelector('meta[name=csrf-token]')?.content || ''}, credentials:'same-origin'}).then(()=>load());
+  const token=document.querySelector('meta[name="csrf-token"]')?.content || '';
+  fetch(`/api/kds/orders/${id}/bump`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken': token}, credentials:'same-origin'}).then(r=>{
+    if(!r.ok && liveEl) liveEl.textContent='Could not update — try again.';
+    return load(true);
+  }).catch(()=>{ if(liveEl) liveEl.textContent='Network error — retrying.'; });
 }
 function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-load(); setInterval(load, 5000);
+load(true); setInterval(load, 5000);
 </script>
 </body>
 </html>

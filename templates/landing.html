@@ -17,13 +17,21 @@
     a:hover { text-decoration:underline; }
 
     .nav { position:sticky; top:0; z-index:50; backdrop-filter:blur(10px); background:rgba(10,10,10,.85); border-bottom:1px solid var(--line); }
-    .nav-inner { max-width:1100px; margin:0 auto; padding:1rem 1.5rem; display:flex; align-items:center; justify-content:space-between; }
+    .nav-inner { max-width:1100px; margin:0 auto; padding:1rem 1.5rem; display:flex; align-items:center; justify-content:space-between; gap:.75rem; }
     .nav-brand { font-family:'Playfair Display',serif; font-weight:700; font-size:1.25rem; color:var(--text); }
     .nav-links { display:flex; gap:1.25rem; align-items:center; }
-    .nav-links a { color:var(--muted); font-size:.95rem; }
+    .nav-links a { color:var(--muted); font-size:.95rem; min-height:44px; display:inline-flex; align-items:center; }
     .nav-links a:hover { color:var(--text); }
-    .nav-cta { background:var(--primary); color:#0a0a0a !important; padding:.55rem 1.1rem; border-radius:8px; font-weight:600; }
+    .nav-cta { background:var(--primary); color:#0a0a0a !important; padding:.55rem 1.1rem; border-radius:8px; font-weight:600; min-height:44px; }
     .nav-cta:hover { text-decoration:none; opacity:.92; }
+    @media (max-width:640px){
+      .nav-inner{padding:.8rem 1rem;}
+      .nav-links{gap:.6rem;overflow-x:auto;scrollbar-width:none;}
+      .nav-links::-webkit-scrollbar{display:none;}
+      .nav-links a{font-size:.85rem;white-space:nowrap;}
+      .compare{overflow-x:auto;}
+      .compare table{min-width:560px;}
+    }
 
     .hero { padding:5rem 1.5rem 4rem; text-align:center; background:radial-gradient(ellipse at 60% 40%, rgba(245,158,11,.18) 0%, transparent 60%), radial-gradient(ellipse at 20% 80%, rgba(79,70,229,.14) 0%, transparent 50%), var(--bg); }
     .hero h1 { font-family:'Playfair Display',serif; font-size:clamp(2.2rem,5vw,3.5rem); margin:0 0 1rem; line-height:1.15; }
@@ -355,7 +363,7 @@
       <div class="alert alert-ok" id="thanks">Thanks — we got your request and emailed you a confirmation. We'll be in touch within 1–2 business days.</div>
     {% endif %}
 
-    <form method="POST" action="/welcome/request-access" autocomplete="on" novalidate>
+    <form method="POST" action="/owner-lead" autocomplete="on" novalidate>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div class="form-row">
         <div class="field">
@@ -497,7 +505,12 @@
   .pricing-cta-primary:hover { opacity: .9; }
   .pricing-cta-secondary { background: #f1f5f9; color: #1e293b !important; }
   .pricing-cta-secondary:hover { background: #e2e8f0; }
-  .pricing-note { color: #94a3b8; font-size: .82rem; margin-top: .5rem; text-align: center; }
+  .pricing-note { color: #64748b; font-size: .82rem; margin-top: .5rem; text-align: center; }
+  @media (max-width:640px){
+    #pricing{padding:3rem 1rem;}
+    .pricing-card{width:100%;max-width:340px;}
+    .pricing-price{font-size:1.9rem;}
+  }
 </style>
 
 <section id="pricing">

@@ -1,0 +1,14 @@
+{
+  "name": "Cafe 11:11 — Order at Table",
+  "short_name": "Cafe Order",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#faf8f4",
+  "theme_color": "#faf8f4",
+  "description": "Scan, order and pay at your table.",
+  "icons": [
+    {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}

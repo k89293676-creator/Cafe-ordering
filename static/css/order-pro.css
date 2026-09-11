@@ -53,18 +53,18 @@
 
 /* ── Floating action button — pulse-in + hover lift ───────────────────── */
 .o-fab {
-  transition: transform .18s ease, box-shadow .18s ease;
+  transition: box-shadow .18s ease, background .18s ease;
 }
 .o-fab:hover {
-  transform: translateY(-2px);
   box-shadow: var(--shadow-l, 0 8px 32px rgba(0,0,0,.18));
 }
-.o-fab:active { transform: translateY(0) scale(.98); }
+.o-fab:active { transform: translateX(-50%) scale(.98); }
 @keyframes opFabIn {
-  from { opacity: 0; transform: translateY(12px) scale(.92); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateX(-50%) translateY(12px) scale(.92); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
 }
 .o-fab--show { animation: opFabIn .22s ease both; }
+body.cart-is-open .o-fab { transform: translateX(-50%) translateY(96px) !important; }
 
 /* ── Tip selector — refined selected state ────────────────────────────── */
 .o-tip-btn {

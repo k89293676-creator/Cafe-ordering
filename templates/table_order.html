@@ -6,8 +6,7 @@
   <meta name="theme-color" content="#faf8f4" />
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>{{ table.name }} — {{ cafe_name }}</title>
-  <link rel="manifest" href="/static/manifest.json" />
-  <meta name="theme-color" content="#1c1c1e" />
+  <link rel="manifest" href="/static/manifest-customer.json" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <!-- Image hosts for menu thumbnails — preconnect so TLS handshake is paid
@@ -15,6 +14,7 @@
   <link rel="preconnect" href="https://loremflickr.com" crossorigin />
   <link rel="dns-prefetch" href="https://image.pollinations.ai" />
   <link rel="stylesheet" href="/static/css/order.css" />
+  <link rel="stylesheet" href="/static/css/mobile-patch.css" />
   <style>
     :root { --gold: {{ branding.brandColor | default('#4f46e5') }}; --gold-border: {{ branding.brandColor | default('#4f46e5') }}33; --gold-bg: {{ branding.brandColor | default('#4f46e5') }}12; }
   </style>
@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="/static/css/order-pro.css" />
 </head>
 <body class="order-body">
+<a class="o-skip" href="#menu-panel">Skip to menu</a>
 
 <!-- Live order-status toast stack (populated by table.js) -->
 <div id="order-toast-stack" aria-live="polite" aria-atomic="true"></div>
@@ -32,7 +33,7 @@
 <header class="o-header">
   <div class="o-header__inner">
 
-    <div class="o-header__brand">
+    <a class="o-header__brand" href="#menu-panel" aria-label="{{ cafe_name }} — back to menu">
       {% if branding.logoUrl %}
       <img class="o-header__logo" src="{{ branding.logoUrl }}" alt="{{ cafe_name }} logo" />
       {% else %}
@@ -40,9 +41,9 @@
       {% endif %}
       <div>
         <span class="o-header__cafe">{{ cafe_name }}</span>
-        <h1 class="o-header__table">{{ table.name }}</h1>
+        <h1 class="o-header__table">You’re at {{ table.name }} — correct?</h1>
       </div>
-    </div>
+    </a>
 
     <button class="o-cart-btn is-empty" id="header-cart-btn" aria-label="View your order" aria-haspopup="dialog">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18M16 10a4 4 0 01-8 0"/></svg>
@@ -93,13 +94,13 @@
   <!-- At Your Service -->
   {% set _ays_table_id = (table.id if table else None) %}
   {% if _ays_table_id %}
-  <div id="ays-bar" style="position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #e5e7eb;padding:.55rem .85rem;">
+  <div id="ays-bar" style="background:#fff;border-bottom:1px solid #e5e7eb;padding:.55rem .85rem;">
 
     <!-- Collapsed: just the trigger button -->
     <div id="ays-collapsed" style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
       <span style="font-size:.8rem;color:#6b7280;font-weight:600;">Need something?</span>
-      <button type="button" id="ays-open-btn" class="ays-btn" style="background:var(--gold,#4f46e5);color:#fff;border-color:var(--gold,#4f46e5);">🛎️ Call for service</button>
-      <span id="ays-quick-status" style="font-size:.78rem;margin-left:auto;"></span>
+      <button type="button" id="ays-open-btn" class="ays-btn" aria-expanded="false" aria-controls="ays-expanded" style="background:var(--gold,#4f46e5);color:#fff;border-color:var(--gold,#4f46e5);">🛎️ Call for service</button>
+      <span id="ays-quick-status" role="status" aria-live="polite" style="font-size:.78rem;margin-left:auto;"></span>
       <button type="button" id="ays-cancel-call-btn" class="ays-btn" style="display:none;background:#fee2e2;color:#991b1b;border-color:#fecaca;font-size:.72rem;padding:.22rem .6rem;">✕ Cancel</button>
     </div>
 
@@ -182,6 +183,7 @@
     function openPanel() {
       collapsed.style.display = 'none';
       expanded.style.display  = 'flex';
+      openBtn.setAttribute('aria-expanded', 'true');
     }
     function closePanel() {
       expanded.style.display    = 'none';
@@ -192,19 +194,24 @@
       statusEl.textContent      = '';
       sendBtn.disabled          = false;
       sendBtn.textContent       = 'Send request';
+      openBtn.setAttribute('aria-expanded', 'false');
       document.querySelectorAll('#ays-expanded .ays-btn[data-reason]')
-              .forEach(function(b){ b.classList.remove('ays-selected'); });
+              .forEach(function(b){ b.classList.remove('ays-selected'); b.removeAttribute('aria-pressed'); });
     }
 
     openBtn.addEventListener('click', openPanel);
     if (cancelBtn) cancelBtn.addEventListener('click', closePanel);
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape' && expanded.style.display !== 'none') closePanel();
+    });
 
     document.querySelectorAll('#ays-expanded .ays-btn[data-reason]').forEach(function(btn){
       btn.addEventListener('click', function(){
         selectedReason = btn.dataset.reason;
         document.querySelectorAll('#ays-expanded .ays-btn[data-reason]')
-                .forEach(function(b){ b.classList.remove('ays-selected'); });
+                .forEach(function(b){ b.classList.remove('ays-selected'); b.removeAttribute('aria-pressed'); });
         btn.classList.add('ays-selected');
+        btn.setAttribute('aria-pressed', 'true');
         confirmLabel.textContent  = REASON_LABELS[selectedReason] || selectedReason;
         confirmArea.style.display = 'flex';
         statusEl.textContent      = '';
@@ -596,6 +603,7 @@
       </div>
 
       <form id="checkout-form" novalidate>
+        <label class="o-field-label" for="customer-name">Name (optional)</label>
         <input
           id="customer-name"
           class="o-name-input"
@@ -606,6 +614,7 @@
           maxlength="80"
           aria-label="Your name (optional)"
         />
+        <label class="o-field-label" for="customer-email">Email for receipt (optional)</label>
         <input
           id="customer-email"
           class="o-name-input"
@@ -616,6 +625,7 @@
           maxlength="254"
           aria-label="Email for receipt (optional)"
         />
+        <label class="o-field-label" for="customer-phone">Phone for reorder (optional)</label>
         <input
           id="customer-phone"
           class="o-name-input"
@@ -626,6 +636,7 @@
           maxlength="30"
           aria-label="Phone number (optional)"
         />
+        <label class="o-field-label" for="order-notes">Special requests (optional)</label>
         <textarea
           id="order-notes"
           class="o-name-input"
@@ -649,12 +660,13 @@
 
       <!-- Pickup code success screen -->
       <div id="pickup-success" style="display:none;text-align:center;padding:1.5rem;background:var(--gold-bg,#f0fdf4);border:2px solid var(--gold,#10b981);border-radius:1rem;margin-top:1rem;">
-        <div style="font-size:2.5rem;margin-bottom:.5rem;">✅</div>
+        <div style="font-size:2.5rem;margin-bottom:.5rem;" aria-hidden="true">✅</div>
         <h3 style="margin:0 0 .25rem;color:#065f46;">Order Placed!</h3>
         <p style="color:#374151;font-size:.9rem;margin-bottom:1rem;">Show this code at the counter when paying.</p>
-        <div style="font-size:3rem;font-weight:900;font-family:monospace;letter-spacing:.2em;color:var(--gold,#4f46e5);background:#fff;border:2px dashed currentColor;border-radius:.75rem;padding:.5rem 1rem;margin-bottom:1rem;" id="pickup-code-display">——</div>
+        <div style="font-size:2.4rem;font-weight:900;font-family:monospace;letter-spacing:.12em;color:var(--gold,#4f46e5);background:#fff;border:2px dashed currentColor;border-radius:.75rem;padding:.5rem .75rem;margin-bottom:1rem;overflow-wrap:anywhere;word-break:break-all;" id="pickup-code-display">——</div>
+        <button type="button" id="pickup-copy-btn" class="o-clear-btn" style="margin-bottom:1rem;">Copy code</button>
         <div style="font-size:.8rem;color:#6b7280;" id="pickup-order-id"></div>
-        <div id="order-status-tracker" style="margin-top:1rem;font-size:.85rem;"></div>
+        <div id="order-status-tracker" role="status" aria-live="polite" style="margin-top:1rem;font-size:.85rem;"><span style="color:#6b7280;">Connecting to live updates…</span></div>
       </div>
 
       <div id="checkout-resp" class="o-resp" role="alert" aria-live="assertive"></div>
@@ -663,15 +675,15 @@
         <div style="font-size:.85rem;font-weight:700;color:#374151;margin-bottom:.5rem;">🔍 Find your order</div>
         <div style="font-size:.78rem;color:#6b7280;margin-bottom:.75rem;">Enter your pickup code to reopen a previous order.</div>
         <div style="display:flex;gap:.5rem;">
-          <input id="lookup-code-input" type="text" placeholder="e.g. AB12"
-                 style="flex:1;padding:.45rem .7rem;border:1px solid #d1d5db;border-radius:.5rem;font-family:monospace;font-size:.95rem;letter-spacing:.1em;text-transform:uppercase;"
-                 maxlength="8" autocomplete="off" inputmode="text" />
+          <input id="lookup-code-input" type="text" placeholder="e.g. AB12CD"
+                 style="flex:1;min-width:0;padding:.6rem .7rem;border:1px solid #d1d5db;border-radius:.5rem;font-family:monospace;font-size:1rem;letter-spacing:.1em;text-transform:uppercase;min-height:44px;"
+                 maxlength="16" autocomplete="off" inputmode="text" aria-label="Pickup code" />
           <button id="lookup-code-btn" type="button"
-                  style="padding:.45rem 1rem;background:#4f46e5;color:#fff;border:0;border-radius:.5rem;font-weight:600;cursor:pointer;font-size:.85rem;">
+                  style="padding:.6rem 1.1rem;background:#4f46e5;color:#fff;border:0;border-radius:.5rem;font-weight:600;cursor:pointer;font-size:.9rem;min-height:44px;min-width:72px;">
             Find
           </button>
         </div>
-        <div id="lookup-resp" style="margin-top:.4rem;font-size:.78rem;color:#ef4444;min-height:1em;"></div>
+        <div id="lookup-resp" role="status" aria-live="polite" style="margin-top:.4rem;font-size:.8rem;color:#b91c1c;min-height:1em;"></div>
       </div>
 
     </div>
@@ -741,12 +753,12 @@
     <h3 class="o-modal__title" id="feedback-title">How was your experience?</h3>
     <p class="o-modal__sub">Your feedback helps us improve</p>
 
-    <div class="o-star-row" id="feedback-stars" role="group" aria-label="Rating">
-      <button class="o-star-btn" data-val="1" aria-label="1 star">★</button>
-      <button class="o-star-btn" data-val="2" aria-label="2 stars">★</button>
-      <button class="o-star-btn" data-val="3" aria-label="3 stars">★</button>
-      <button class="o-star-btn" data-val="4" aria-label="4 stars">★</button>
-      <button class="o-star-btn" data-val="5" aria-label="5 stars">★</button>
+    <div class="o-star-row" id="feedback-stars" role="radiogroup" aria-label="Rating">
+      <button class="o-star-btn" data-val="1" role="radio" aria-checked="false" aria-label="1 star">★</button>
+      <button class="o-star-btn" data-val="2" role="radio" aria-checked="false" aria-label="2 stars">★</button>
+      <button class="o-star-btn" data-val="3" role="radio" aria-checked="false" aria-label="3 stars">★</button>
+      <button class="o-star-btn" data-val="4" role="radio" aria-checked="false" aria-label="4 stars">★</button>
+      <button class="o-star-btn" data-val="5" role="radio" aria-checked="false" aria-label="5 stars">★</button>
     </div>
 
     <textarea
@@ -754,8 +766,10 @@
       class="o-modal__textarea"
       placeholder="Tell us more (optional)…"
       rows="3"
+      maxlength="500"
       aria-label="Additional comments"
     ></textarea>
+    <div id="feedback-count" style="font-size:.75rem;color:#6b7280;text-align:right;margin-top:.25rem;" aria-live="polite">0 / 500</div>
 
     <button class="o-modal__submit" id="feedback-submit-btn">Send Feedback</button>
     <div id="feedback-resp" class="o-modal__resp" role="alert" aria-live="polite"></div>

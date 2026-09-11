@@ -98,9 +98,13 @@ def customer_orders():
         flash("Please log in to view your orders.", "error")
         return redirect(url_for("customers.customer_login"))
 
+    from sqlalchemy import or_ as _or
+    conds = [Order.customer_email == customer.email]
+    if customer.phone:
+        conds.append(Order.customer_phone == customer.phone)
     orders = (
         Order.query
-        .filter(Order.customer_email == customer.email)
+        .filter(_or(*conds))
         .order_by(Order.created_at.desc())
         .limit(50)
         .all()
