@@ -34,6 +34,7 @@ from lib_payments import (
     PaymentProviderError,
     build_provider,
     decrypt_secret,
+    provider_webhook_url,
 )
 from lib_aggregators import (
     PLATFORM_GUIDES,
@@ -135,9 +136,9 @@ def _ih_build_cards(owner_id: int) -> list[IntegrationCard]:
             last_status = None
             last_msg = None
         try:
-            webhook_url = url_for("billing_webhook", provider=prov, _external=True)
+            webhook_url = provider_webhook_url(prov) or "#"
         except Exception:
-            webhook_url = f"/billing/webhook/{prov}"
+            webhook_url = "#"
         cards.append(IntegrationCard(
             key=prov, provider_type="payment", category="payment",
             label=PROVIDER_LABELS.get(prov, prov.title()),
@@ -319,7 +320,7 @@ def owner_integrations_send_setup_email(provider):
         msg = Message(
             subject=f"Setup {PROVIDER_LABELS.get(provider, provider)} for {owner.cafeName or owner.username}",
             recipients=[owner.email],
-            body=f"Hi {owner.username},\n\nHere's your setup link for {PROVIDER_LABELS.get(provider, provider)}:\n{signup_url}\n\nYour webhook URL: {url_for('billing_webhook', provider=provider, _external=True)}\n\nThis link is pre-filled with your info. Complete the signup to start accepting payments.\n\n— Cafe 11:11"
+            body=f"Hi {owner.username},\n\nHere's your setup link for {PROVIDER_LABELS.get(provider, provider)}:\n{signup_url}\n\nYour webhook URL: {provider_webhook_url(provider) or 'see Payment Methods'}\n\nThis link is pre-filled with your info. Complete the signup to start accepting payments.\n\n— Cafe 11:11"
         )
         mail.send(msg)
         flash(f"Setup link emailed to {owner.email}.", "success")

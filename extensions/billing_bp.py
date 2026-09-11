@@ -29,7 +29,7 @@ from flask import (
     url_for,
 )
 
-from app.extensions import db, limiter
+from app.extensions import csrf, db, limiter
 from app.models import (
     BillingLog,
     CashDrawerCount,
@@ -83,6 +83,7 @@ from lib_payments import (
     detect_mode_from_key,
     encrypt_secret,
     mask_secret,
+    provider_webhook_url,
 )
 
 # ---------------------------------------------------------------------------
@@ -477,8 +478,7 @@ def _credential_view(cred: PaymentProviderCredential) -> dict:
         "last_tested_at": cred.last_tested_at,
         "last_test_status": cred.last_test_status,
         "last_test_message": cred.last_test_message,
-        "webhook_url": url_for("billing_webhook", provider=cred.provider, _external=True)
-                       if "billing_webhook" in bp.url_map.bind("").map._rules_by_endpoint else "#",
+        "webhook_url": provider_webhook_url(cred.provider) or "#",
         "guide": PROVIDER_GUIDES.get(cred.provider, {}),
     }
 
@@ -504,7 +504,7 @@ def owner_billing_overview():
     settings = _settings_for(owner_id)
     overview = _billing_overview(owner_id)
     recent_paid = (Order.query
-                   .filter(Order.owner_id == owner_id, Order.payment_status == "paid")
+                   .filter(Order.owner_id == owner_id, Order.payment_status.in_(("paid", "refunded")))
                    .order_by(Order.paid_at.desc().nullslast())
                    .limit(10).all())
     return _no_store(make_response(render_template(
@@ -777,7 +777,8 @@ def owner_billing_settle(order_id: int):
         service_charge_pct=0, service_charge_flat=float(order.service_charge or 0),
         tax_pct=0, tax_flat=float(order.tax or 0), tip=float(order.tip or 0),
     )
-    paid_amount, change_due, err = compute_settlement(totals, payments)
+    paid_amount, change_due, err = compute_settlement(
+        totals, payments, currency=_owner_currency(owner_id)[1])
     if err:
         flash(err, "billing_error")
         return redirect(url_for("billing.owner_billing_order_detail", order_id=order_id))
@@ -880,7 +881,8 @@ def owner_billing_refund(order_id: int):
         return redirect(url_for("billing.owner_billing_order_detail", order_id=order_id))
     cap_verdict = check_refund_amount_cap(
         requested=amount, refunded_today=_refund_total_today(owner_id),
-        gross_revenue_today=_gross_revenue_today(owner_id))
+        gross_revenue_today=_gross_revenue_today(owner_id),
+        currency=_owner_currency(owner_id)[1])
     if not cap_verdict.allowed:
         flash(cap_verdict.reason or "Daily refund cap reached.", "billing_error")
         return redirect(url_for("billing.owner_billing_order_detail", order_id=order_id))
@@ -1188,10 +1190,7 @@ def owner_billing_drawer():
                     Order.payment_method == "cash",
                     Order.paid_at >= day_start, Order.paid_at < day_end).scalar() or 0)
         expected = cash_in - cash_refunded
-        try:
-            variance_d = drawer_variance(counted=counted, expected=expected, float_left=float_left)
-        except TypeError:
-            variance_d = drawer_variance(expected_cash=expected, counted_cash=counted)
+        variance_d = drawer_variance(expected_cash=expected, counted_cash=counted)
         row = CashDrawerCount(
             owner_id=owner_id, counted_by_owner_id=owner_id,
             counted_by_username=logged_in_owner() or "",
@@ -1328,7 +1327,11 @@ def owner_billing_settings():
             flash("Tax / service charge must be a number 0–100.", "billing_error")
             return redirect(url_for("billing.owner_billing_settings"))
         settings.tax_label = (request.form.get("tax_label") or "GST").strip()[:32] or "GST"
-        settings.gstin = (request.form.get("gstin") or "").strip()[:32]
+        gstin = (request.form.get("gstin") or "").strip().upper()[:32]
+        if gstin and not re.fullmatch(r"[0-9A-Z]{15}", gstin):
+            flash("GSTIN must be exactly 15 letters/digits (e.g. 29ABCDE1234F1Z5), or left blank.", "billing_error")
+            return redirect(url_for("billing.owner_billing_settings"))
+        settings.gstin = gstin
         settings.invoice_prefix = re.sub(
             r"[^A-Za-z0-9_\-/]", "",
             (request.form.get("invoice_prefix") or "INV"))[:16] or "INV"
@@ -1358,9 +1361,9 @@ def owner_billing_payment_methods():
                   "guide": PROVIDER_GUIDES.get(p, {})}
                  for p in SUPPORTED_PROVIDERS if p not in configured]
     try:
-        sample_webhook = url_for("billing_webhook", provider="<provider>", _external=True)
+        sample_webhook = request.url_root.rstrip("/") + "/<provider>/webhook"
     except Exception:
-        sample_webhook = "/billing/webhook/<provider>"
+        sample_webhook = "/<provider>/webhook"
     return _no_store(make_response(render_template(
         "owner_billing/payment_methods.html",
         credentials=[_credential_view(c) for c in creds],
@@ -1606,8 +1609,12 @@ def billing_pay_status(order_id: int):
 
 
 @bp.route("/billing/pay/<int:order_id>/razorpay/verify", methods=["POST"])
+@csrf.exempt
 @limiter.limit("30 per minute")
 def billing_pay_razorpay_verify(order_id: int):
+    # Public customer page has no session/CSRF token; authenticity comes
+    # from the Razorpay HMAC signature verified below (same reason the
+    # provider webhooks are CSRF-exempt).
     payload = request.get_json(silent=True) or request.form
     rzp_order_id = (payload.get("razorpay_order_id") or "").strip()
     rzp_payment_id = (payload.get("razorpay_payment_id") or "").strip()

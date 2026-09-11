@@ -38,7 +38,7 @@
 {% endif %}
 
 <div style="display:flex;gap:.5rem;margin-bottom:1.25rem;flex-wrap:wrap;">
-  <a class="btn btn-ghost btn-sm {{ 'btn-primary' if not action }}" href="{{ url_for('owner_billing_logs') }}">All</a>
+  <a class="btn btn-ghost btn-sm {{ 'btn-primary' if not action }}" href="{{ url_for('billing.owner_billing_logs') }}">All</a>
   <a class="btn btn-ghost btn-sm {{ 'btn-primary' if action == 'settled' }}" href="?action=settled">Settled</a>
   <a class="btn btn-ghost btn-sm {{ 'btn-primary' if action == 'voided' }}" href="?action=voided">Voided</a>
   <a class="btn btn-ghost btn-sm {{ 'btn-primary' if action == 'refunded' }}" href="?action=refunded">Refunded</a>
@@ -58,7 +58,7 @@
             <td>
               <span class="pill {% if log.action == 'settled' %}pill-paid{% elif log.action == 'voided' %}pill-voided{% elif log.action == 'refunded' %}pill-refunded{% else %}pill-unpaid{% endif %}">{{ log.action }}</span>
             </td>
-            <td>{% if log.order_id %}<a href="{{ url_for('owner_billing_order_detail', order_id=log.order_id) }}">#{{ log.order_id }}</a>{% else %}—{% endif %}</td>
+            <td>{% if log.order_id %}<a href="{{ url_for('billing.owner_billing_order_detail', order_id=log.order_id) }}">#{{ log.order_id }}</a>{% else %}—{% endif %}</td>
             <td class="mono">{{ log.invoice_number or '—' }}</td>
             <td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(log.amount or 0) }}{% if log.payment_method %} <span class="muted">({{ log.payment_method }})</span>{% endif %}</td>
             <td>{{ log.actor_username or '—' }}<br/><span class="muted mono" style="font-size:.7rem;">{{ log.ip }}</span></td>

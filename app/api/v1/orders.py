@@ -54,6 +54,13 @@ _CANCEL_GRACE_SECONDS = 120
 # across requests and provides the intended 5-second deduplication benefit.
 _orders_response_cache = ResponseCache(max_entries=500)
 
+# Idempotency stores must also be process-wide singletons: constructed
+# per-request they are always empty and deduplication never fires.
+# Scopes ("checkout", f"cancel:{id}", f"reorder:{id}") keep namespaces apart.
+_checkout_idem_cache = IdempotencyCache(ttl_seconds=86400)
+_cancel_idem_cache = IdempotencyCache(ttl_seconds=3600)
+_reorder_idem_cache = IdempotencyCache(ttl_seconds=3600)
+
 
 def _invalidate_orders_cache(owner_id: int | None) -> None:
     """Bug #5 fix: evict all cached order listings for *owner_id*.
@@ -81,7 +88,7 @@ def _invalidate_orders_cache(owner_id: int | None) -> None:
 def checkout():
     if not request.is_json:
         abort(400, description="JSON required.")
-    idem_cache = IdempotencyCache(ttl_seconds=86400)
+    idem_cache = _checkout_idem_cache
     _idem_key = (request.headers.get("Idempotency-Key") or "").strip()[:128]
     if _idem_key:
         cached = idem_cache.get("checkout", _idem_key)
@@ -405,7 +412,7 @@ def customer_cancel_order(order_id: int):
     if not request.is_json:
         abort(400, description="JSON required.")
 
-    idem_cache = IdempotencyCache(ttl_seconds=3600)
+    idem_cache = _cancel_idem_cache
     _idem_key = (request.headers.get("Idempotency-Key") or "").strip()[:128]
     if _idem_key:
         cached = idem_cache.get(f"cancel:{order_id}", _idem_key)
@@ -466,7 +473,7 @@ def reorder_api(order_id: int):
     from app.services.auth import logged_in_owner_id
     from app.models import Order
 
-    idem_cache = IdempotencyCache(ttl_seconds=3600)
+    idem_cache = _reorder_idem_cache
     _idem_key = (request.headers.get("Idempotency-Key") or "").strip()[:128]
     if _idem_key:
         cached = idem_cache.get(f"reorder:{order_id}", _idem_key)

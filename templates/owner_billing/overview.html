@@ -6,7 +6,7 @@
   Live snapshot — <button type="button" class="btn btn-ghost btn-sm" id="billing-refresh-btn" style="padding:.3rem .7rem;min-height:36px;">↻ Refresh now</button>
   <span class="mono">As of {{ overview.as_of[:19] }} UTC</span>
   {% if health and health.verdict != 'ok' %}
-    · <a href="{{ url_for('owner_billing_health') }}" style="color:var(--warn);">⚠ {{ health.verdict|upper }} — view health</a>
+    · <a href="{{ url_for('billing.owner_billing_health') }}" style="color:var(--warn);">⚠ {{ health.verdict|upper }} — view health</a>
   {% endif %}
 </p>
 
@@ -53,9 +53,9 @@
   {% endif %}
 </div>
 <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;">
-  <a class="btn btn-primary btn-sm" href="{{ url_for('owner_billing_open') }}">View open tabs</a>
-  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod') }}">Run EOD report</a>
-  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_logs') }}">View audit trail</a>
+  <a class="btn btn-primary btn-sm" href="{{ url_for('billing.owner_billing_open') }}">View open tabs</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('billing.owner_billing_eod') }}">Run EOD report</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('billing.owner_billing_logs') }}">View audit trail</a>
 </div>
 
 {% if sparkline and sparkline.labels %}
@@ -122,7 +122,7 @@
 <div class="panel" style="margin-bottom:1.5rem;">
   <h2 style="margin-top:0;font-size:1.05rem;font-weight:700;letter-spacing:-.01em;">Today's Revenue by Payment Mode</h2>
   {% if not overview.per_mode %}
-    <p class="muted">No paid orders yet today. <a href="{{ url_for('owner_billing_open') }}">Check open tabs →</a></p>
+    <p class="muted">No paid orders yet today. <a href="{{ url_for('billing.owner_billing_open') }}">Check open tabs →</a></p>
   {% else %}
     <table>
       <thead><tr><th>Method</th><th class="right">Amount</th><th class="right">% of Revenue</th></tr></thead>
@@ -187,8 +187,9 @@
 <div class="panel">
   <h2 style="margin-top:0;font-size:1.05rem;font-weight:700;letter-spacing:-.01em;">Recent Settlements</h2>
   {% if not recent_paid %}
-    <p class="muted">No bills settled yet today. <a href="{{ url_for('owner_billing_open') }}">Settle an open tab →</a></p>
+    <p class="muted">No bills settled yet today. <a href="{{ url_for('billing.owner_billing_open') }}">Settle an open tab →</a></p>
   {% else %}
+  <div class="table-wrap" style="overflow-x:auto;">
     <table>
       <thead><tr><th>Invoice</th><th>Table</th><th>Customer</th><th>Method</th><th class="right">Total</th><th>Paid At</th><th></th></tr></thead>
       <tbody>
@@ -197,14 +198,15 @@
             <td class="mono">{{ o.invoiceNumber or '—' }}</td>
             <td>{{ o.tableName or '—' }}</td>
             <td>{{ o.customerName }}</td>
-            <td><span class="pill pill-paid">{{ o.paymentMethod or 'paid' }}</span></td>
+            <td><span class="pill {{ 'pill-refunded' if o.paymentStatus == 'refunded' else 'pill-paid' }}">{{ o.paymentMethod or 'paid' }}</span></td>
             <td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(o.total) }}{% if o.refundAmount %} <span class="muted">−{{ currency_symbol }}{{ '%.2f'|format(o.refundAmount) }}</span>{% endif %}</td>
             <td class="muted mono">{{ o.paidAt[:19] if o.paidAt else '—' }}</td>
-            <td><a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_invoice', order_id=o.id) }}">Invoice</a></td>
+            <td><a class="btn btn-ghost btn-sm" href="{{ url_for('billing.owner_billing_invoice', order_id=o.id) }}">Invoice</a></td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
   {% endif %}
 </div>
 {% endblock %}

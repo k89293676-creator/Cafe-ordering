@@ -1487,6 +1487,8 @@ def order_receipt(order_id: int):
 
         cafe_name=cafe_name,
 
+        currency_symbol=(getattr(owner, "currencySymbol", None) or "£"),
+
         printed_at=printed_at,
 
         autoprint=request.args.get("autoprint", "0"),

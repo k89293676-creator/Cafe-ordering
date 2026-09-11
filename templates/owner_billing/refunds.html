@@ -17,7 +17,7 @@
     <input type="text" name="q" value="{{ q }}" maxlength="64" placeholder="e.g. complaint" />
   </div>
   <button class="btn btn-primary btn-sm" type="submit">Filter</button>
-  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_refunds') }}">Reset</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('billing.owner_billing_refunds') }}">Reset</a>
 </form>
 
 {% if not events %}
@@ -30,12 +30,12 @@
         {% for e in events %}
           <tr>
             <td class="mono muted">{{ e.created_at.strftime('%Y-%m-%d %H:%M') if e.created_at else '—' }}</td>
-            <td class="mono">{% if e.order_id %}<a href="{{ url_for('owner_billing_order_detail', order_id=e.order_id) }}">{{ e.invoice_number or '#' ~ e.order_id }}</a>{% else %}—{% endif %}</td>
+            <td class="mono">{% if e.order_id %}<a href="{{ url_for('billing.owner_billing_order_detail', order_id=e.order_id) }}">{{ e.invoice_number or '#' ~ e.order_id }}</a>{% else %}—{% endif %}</td>
             <td>{{ e.actor_username or '—' }}</td>
             <td>{{ e.reason or '—' }}</td>
             <td class="right mono"><strong style="color:var(--danger);">{{ currency_symbol }}{{ '%.2f'|format(e.amount or 0) }}</strong></td>
             <td class="mono muted" style="font-size:.78rem;">{{ e.ip or '—' }}</td>
-            <td><a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_order_detail', order_id=e.order_id) }}">Open</a></td>
+            <td><a class="btn btn-ghost btn-sm" href="{{ url_for('billing.owner_billing_order_detail', order_id=e.order_id) }}">Open</a></td>
           </tr>
         {% endfor %}
       </tbody>

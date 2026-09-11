@@ -63,20 +63,20 @@
     {% for it in order['items'] %}
     <div class="item-row">
       <span class="item-name">{{ it.quantity }}× {{ it.name }}{% if it.size %} <small>({{ it.size }})</small>{% endif %}</span>
-      <span>₹{{ "%.2f"|format(it.lineTotal or 0) }}</span>
+      <span>{{ currency_symbol|default('₹') }}{{ "%.2f"|format(it.lineTotal or 0) }}</span>
     </div>
     {% if it.modifiers %}
       {% for m in it.modifiers %}
-        <div class="item-mod">+ {{ m.name }}{% if (m.priceDelta or m.price or 0)|float != 0 %} (₹{{ "%.0f"|format(m.priceDelta or m.price or 0) }}){% endif %}</div>
+        <div class="item-mod">+ {{ m.name }}{% if (m.priceDelta or m.price or 0)|float != 0 %} ({{ currency_symbol|default('₹') }}{{ "%.0f"|format(m.priceDelta or m.price or 0) }}){% endif %}</div>
       {% endfor %}
     {% endif %}
     {% if it.notes %}<div class="item-mod">📝 {{ it.notes }}</div>{% endif %}
     {% endfor %}
 
     <div class="totals">
-      <div><span>Subtotal</span><span>₹{{ "%.2f"|format(order.subtotal) }}</span></div>
-      {% if order.tip %}<div><span>Tip</span><span>₹{{ "%.2f"|format(order.tip) }}</span></div>{% endif %}
-      <div class="grand"><span>Total</span><span>₹{{ "%.2f"|format(order.total) }}</span></div>
+      <div><span>Subtotal</span><span>{{ currency_symbol|default('₹') }}{{ "%.2f"|format(order.subtotal) }}</span></div>
+      {% if order.tip %}<div><span>Tip</span><span>{{ currency_symbol|default('₹') }}{{ "%.2f"|format(order.tip) }}</span></div>{% endif %}
+      <div class="grand"><span>Total</span><span>{{ currency_symbol|default('₹') }}{{ "%.2f"|format(order.total) }}</span></div>
     </div>
 
     {% if order.notes %}
@@ -87,10 +87,10 @@
   </div>
 
   <div class="actions no-print">
-    <a class="btn btn-back"  href="{{ url_for('owner_dashboard') }}#table-calls">← Back</a>
+    <a class="btn btn-back"  href="{{ url_for('web_owner.owner_dashboard') }}#table-calls">← Back</a>
     <button class="btn btn-print" onclick="window.print()">🖨 Print</button>
     {% if order.status not in ('completed', 'cancelled') %}
-    <form method="POST" action="{{ url_for('mark_order_paid', order_id=order.id) }}" style="flex:1;margin:0;">
+    <form method="POST" action="{{ url_for('web_owner.mark_order_paid', order_id=order.id) }}" style="flex:1;margin:0;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
       <button type="submit" class="btn btn-paid">✓ Mark paid</button>
     </form>

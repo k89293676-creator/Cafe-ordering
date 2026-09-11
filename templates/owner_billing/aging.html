@@ -70,7 +70,7 @@
             <td>{{ o.customerName }}</td>
             <td><span class="pill {{ bucket_class }}">{{ age_label }}</span></td>
             <td class="right mono">{{ currency_symbol }}{{ '%.2f'|format(o.total) }}</td>
-            <td><a class="btn btn-primary btn-sm" href="{{ url_for('owner_billing_order_detail', order_id=o.id) }}">Settle →</a></td>
+            <td><a class="btn btn-primary btn-sm" href="{{ url_for('billing.owner_billing_order_detail', order_id=o.id) }}">Settle →</a></td>
           </tr>
         {% endfor %}
       </tbody>

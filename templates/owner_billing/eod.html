@@ -13,11 +13,11 @@
     <input type="date" name="to" value="{{ summary.to }}" />
   </div>
   <button class="btn btn-primary btn-sm" type="submit">Load</button>
-  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod') }}">Today</a>
-  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod') }}?from={{ summary.preset_week_from }}&amp;to={{ summary.to }}">This week</a>
-  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod') }}?from={{ summary.preset_month_from }}&amp;to={{ summary.to }}">This month</a>
-  <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_eod_csv') }}?from={{ summary.from }}&amp;to={{ summary.to }}">Export CSV</a>
-  <a class="btn btn-ghost btn-sm" href="javascript:window.print()">Print</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('billing.owner_billing_eod') }}">Today</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('billing.owner_billing_eod') }}?from={{ summary.preset_week_from }}&amp;to={{ summary.to }}">This week</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('billing.owner_billing_eod') }}?from={{ summary.preset_month_from }}&amp;to={{ summary.to }}">This month</a>
+  <a class="btn btn-ghost btn-sm" href="{{ url_for('billing.owner_billing_eod_csv') }}?from={{ summary.from }}&amp;to={{ summary.to }}">Export CSV</a>
+  <button class="btn btn-ghost btn-sm" type="button" onclick="window.print()">Print</button>
 </form>
 
 <div class="grid grid-stats" style="margin-bottom:1.5rem;">
@@ -86,13 +86,14 @@
   {% if not paid %}
     <p class="muted">No bills settled on this day.</p>
   {% else %}
+  <div class="table-wrap" style="overflow-x:auto;">
     <table>
       <thead><tr><th>Time</th><th>Invoice</th><th>Table</th><th>Customer</th><th>Method</th><th class="right">Total</th><th class="right">Refund</th></tr></thead>
       <tbody>
         {% for o in paid %}
           <tr>
             <td class="mono muted">{{ o.paidAt[11:19] if o.paidAt else '—' }}</td>
-            <td class="mono"><a href="{{ url_for('owner_billing_invoice', order_id=o.id) }}">{{ o.invoiceNumber }}</a></td>
+            <td class="mono"><a href="{{ url_for('billing.owner_billing_invoice', order_id=o.id) }}">{{ o.invoiceNumber }}</a></td>
             <td>{{ o.tableName or '—' }}</td>
             <td>{{ o.customerName }}</td>
             <td><span class="pill {{ 'pill-refunded' if o.paymentStatus == 'refunded' else 'pill-paid' }}">{{ o.paymentMethod }}</span></td>
@@ -102,12 +103,14 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
   {% endif %}
 </div>
 
 {% if voided %}
 <div class="panel">
   <h2 style="margin-top:0;color:var(--danger);">Voided Bills ({{ voided|length }})</h2>
+  <div class="table-wrap" style="overflow-x:auto;">
   <table>
     <thead><tr><th>#</th><th>Table</th><th class="right">Value</th><th>Reason</th></tr></thead>
     <tbody>
@@ -116,6 +119,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endif %}
 {% endblock %}

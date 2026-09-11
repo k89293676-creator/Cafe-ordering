@@ -11,6 +11,7 @@
   .pm-card .summary{color:var(--muted);font-size:.88rem;margin:0 0 .9rem;}
   .pm-row{display:grid;grid-template-columns:200px 1fr;gap:.7rem;align-items:center;
           padding:.45rem 0;border-top:1px solid var(--line);}
+  @media (max-width:640px){ .pm-row{ grid-template-columns:1fr; } }
   .pm-row:first-of-type{border-top:0;}
   .pm-row label{font-size:.85rem;color:var(--muted);font-weight:600;}
   .pm-row input[type=text],.pm-row input[type=password],.pm-row select{
@@ -105,7 +106,7 @@
     </p>
     {% endif %}
 
-    <form method="post" action="{{ url_for('owner_billing_payment_methods_save') }}"
+    <form method="post" action="{{ url_for('billing.owner_billing_payment_methods_save') }}"
           autocomplete="off" style="margin-top:14px;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="provider" value="{{ cred.provider }}">
@@ -136,7 +137,7 @@
         <div>
           <input type="password" name="secret_key" value="" autocomplete="new-password"
                  placeholder="{% if cred.has_secret %}•••••••• (saved){% else %}Paste secret{% endif %}">
-          <div class="hint">Stored encrypted with Fernet. Leave blank to keep the existing secret.</div>
+          <div class="hint">Stored encrypted. Leave blank to keep the existing secret.</div>
         </div>
       </div>
 
@@ -188,13 +189,13 @@
 
     <div class="pm-actions" style="margin-top:8px;">
       <form method="post"
-            action="{{ url_for('owner_billing_payment_methods_test', cred_id=cred.id) }}"
+            action="{{ url_for('billing.owner_billing_payment_methods_test', cred_id=cred.id) }}"
             style="display:inline;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="pm-btn pm-btn-secondary">Verify connection now</button>
       </form>
       <form method="post"
-            action="{{ url_for('owner_billing_payment_methods_delete', cred_id=cred.id) }}"
+            action="{{ url_for('billing.owner_billing_payment_methods_delete', cred_id=cred.id) }}"
             style="display:inline;"
             onsubmit="return pmConfirm(this, '{{ cred.provider }}');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -208,7 +209,7 @@
     <details class="pm-details" style="margin-top:10px;">
       <summary>Rotate webhook secret</summary>
       <form method="post"
-            action="{{ url_for('owner_billing_payment_methods_rotate_webhook', cred_id=cred.id) }}"
+            action="{{ url_for('billing.owner_billing_payment_methods_rotate_webhook', cred_id=cred.id) }}"
             autocomplete="off" style="margin-top:10px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <p class="hint" style="margin:0 0 8px;">
@@ -223,7 +224,7 @@
                    autocomplete="new-password"
                    placeholder="Paste the new secret from your provider dashboard"
                    required>
-            <div class="hint">Stored encrypted with Fernet. The previous secret is overwritten on save and cannot be recovered.</div>
+            <div class="hint">Stored encrypted. The previous secret is overwritten on save and cannot be recovered.</div>
           </div>
         </div>
         <div class="pm-actions">
@@ -261,7 +262,7 @@
     </h3>
     {% if av.guide.summary %}<p class="summary">{{ av.guide.summary }}</p>{% endif %}
 
-    <form method="post" action="{{ url_for('owner_billing_payment_methods_save') }}"
+    <form method="post" action="{{ url_for('billing.owner_billing_payment_methods_save') }}"
           autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="provider" value="{{ av.slug }}">

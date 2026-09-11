@@ -116,12 +116,15 @@ def loyalty_earn_for_order(owner_id: int, order_id: int, customer_phone: str, to
         except: pass
 
 # ── KDS (Kitchen Display) ────────────────────────────────────────────────
+# Consolidated on templates/kitchen.html (the advanced view: filters+counts,
+# sort, WebAudio chimes, table-calls sidebar, KOT print, urgency bars).
+# /owner/kds is kept as a redirect so old bookmarks keep working; the
+# /api/kds/* JSON endpoints stay for backward compatibility.
 
 @bp.route("/owner/kds", methods=["GET"])
 @login_required
 def kds_view():
-    owner = logged_in_owner_obj()
-    return render_template("pos/kds.html", owner=owner, owner_username=owner.username if owner else "")
+    return redirect(url_for("web_owner.kitchen"))
 
 @bp.route("/api/kds/orders", methods=["GET"])
 @login_required
@@ -162,8 +165,10 @@ def kds_bump(order_id: int):
     return jsonify(ok=True, status=nxt)
 
 # ── Split / Merge ────────────────────────────────────────────────────────
+# NOTE: lives under /owner/orders/* (not /owner/billing/*) — split posts a
+# form to this endpoint; the billing blueprint owns /owner/billing/*.
 
-@bp.route("/owner/billing/orders/<int:order_id>/split", methods=["POST"])
+@bp.route("/owner/orders/<int:order_id>/split", methods=["POST"])
 @login_required
 def split_bill(order_id: int):
     from app.models import Order

@@ -4,7 +4,8 @@
 <h1>Cash Drawer Reconciliation</h1>
 <p class="muted" style="margin-top:-.75rem;">Count the cash in the till at end-of-day and record it here. The system tracks variance vs the cash payments it logged so you can spot drift early.</p>
 
-<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:1.25rem;align-items:start;">
+<div class="bill-drawer-grid" style="display:grid;grid-template-columns:1.4fr 1fr;gap:1.25rem;align-items:start;">
+  <style>@media (max-width:900px){ .bill-drawer-grid{ grid-template-columns:1fr !important; } }</style>
   <div>
     <div class="panel" style="margin-bottom:1.25rem;">
       <h2 style="margin-top:0;">Today's Count &mdash; <span class="mono" style="font-weight:400;">{{ today_str }}</span></h2>
@@ -13,7 +14,7 @@
         <tr><td>Cash refunds today</td><td class="right mono">−{{ currency_symbol }}{{ '%.2f'|format(cash_refunds) }}</td></tr>
         <tr style="border-top:2px solid var(--line);"><td><strong>Net expected in drawer</strong></td><td class="right mono"><strong>{{ currency_symbol }}{{ '%.2f'|format(expected_cash - cash_refunds) }}</strong></td></tr>
       </table>
-      <form method="POST" action="{{ url_for('owner_billing_drawer') }}">
+      <form method="POST" action="{{ url_for('billing.owner_billing_drawer') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="day" value="{{ today_str }}" />
         <div class="row">
@@ -63,7 +64,7 @@
       <ul class="muted" style="font-size:.88rem;line-height:1.55;">
         <li><strong>Recurring shortages</strong> on a single shift &mdash; coach the staff member.</li>
         <li><strong>Large overages</strong> &mdash; usually missed bill entries; check the audit log.</li>
-        <li><strong>Round-number variances</strong> ({{ currency_symbol }}100, {{ currency_symbol }}500, {{ currency_symbol }}2000) &mdash; usually a missed sale, not theft.</li>
+        <li><strong>Round-number variances</strong> ({{ currency_symbol }}100, {{ currency_symbol }}500, {{ currency_symbol }}1000) &mdash; usually a missed sale, not theft.</li>
       </ul>
       <p class="muted" style="font-size:.82rem;margin-top:1rem;">Configure the alert threshold via <code>BILLING_DRAWER_VARIANCE_ALERT_PCT</code>.</p>
     </div>

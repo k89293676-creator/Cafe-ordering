@@ -65,7 +65,29 @@ def kitchen_orders_json():
     else:
         orders = query.order_by(Order.created_at.asc()).limit(limit).all()
 
-    return jsonify(orders=[_order_dict(o) for o in orders]), 200
+    # Age fields drive the urgency bars/badges in kitchen.html (same
+    # thresholds as /api/kds/orders: warn ≥8m, late/stuck ≥15m).
+    now = datetime.now(timezone.utc)
+    out = []
+    for o in orders:
+        d = _order_dict(o)
+        try:
+            created = o.created_at
+            if created is None:
+                age = 0
+            else:
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                age = max(0, int((now - created).total_seconds()))
+        except Exception:
+            age = 0
+        d["ageSeconds"] = age
+        m, s = divmod(age, 60)
+        d["ageLabel"] = f"{m}m {s}s" if m else f"{s}s"
+        d["isStuck"] = age > 900
+        out.append(d)
+
+    return jsonify(orders=out), 200
 
 
 @bp.route("/api/v1/kitchen/orders/<int:order_id>/status", methods=["POST"])

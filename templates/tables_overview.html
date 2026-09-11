@@ -506,12 +506,34 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
 
 /* ═══════════════════════════════════════════════════════════
    PRINT STYLES
-═══════════════════════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════════════ */
 @media print{
   .topbar,.kpi-ribbon,.toolbar,.bulk-bar,.toast-stack,.modal-bg,.card-actions,.kcard-actions{display:none!important;}
   .page{padding:.5rem;max-width:none;}
   .tcard{break-inside:avoid;box-shadow:none;border:1px solid #ccc;margin-bottom:.5rem;}
   .grid{grid-template-columns:repeat(3,1fr);gap:.5rem;}
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TOUCH / MOBILE / A11Y PATCH
+   ═══════════════════════════════════════════════════════════ */
+.act-btn,.kcard-btn,.calls-manage-btn,.view-btn,.icon-btn,.mbtn,.bulk-action,.bulk-cancel,.tbtn{
+  min-height:44px;
+}
+.act-btn,.kcard-btn,.calls-manage-btn{display:inline-flex;align-items:center;}
+.calls-manage-btn{font-size:.75rem;padding:.5rem .7rem;}
+.icon-btn{width:44px;height:44px;}
+.modal-x{min-width:44px;min-height:44px;}
+.card-select-box:focus-visible{outline:3px solid var(--primary);outline-offset:2px;}
+.bulk-bar{flex-wrap:wrap;white-space:normal;max-width:calc(100vw - 2rem);justify-content:center;}
+@media(max-width:420px){
+  .two-col{grid-template-columns:1fr;}
+  .stats4{grid-template-columns:1fr 1fr;}
+  .floor-grid{grid-template-columns:repeat(auto-fill,minmax(96px,1fr));}
+}
+@media (prefers-reduced-motion: reduce){
+  .ft-needs_attention,.kpi-attn-val.has-attn,#live-pip.connected{animation:none !important;}
+  *{transition-duration:.001s !important;}
 }
 </style>
 </head>
@@ -535,16 +557,16 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
       <input type="checkbox" id="auto-refresh" checked />
       Auto
     </label>
-    <button class="tbtn tbtn-icon" id="sound-btn" title="Sound alerts">🔔</button>
-    <button class="tbtn tbtn-icon" id="dark-btn" title="Toggle dark mode">🌙</button>
-    <button class="tbtn tbtn-icon" id="print-btn" title="Print floor report">🖨</button>
-    <button class="tbtn" id="select-btn">☑ Select</button>
+    <button class="tbtn tbtn-icon" id="sound-btn" title="Sound alerts" aria-label="Toggle sound alerts" aria-pressed="true">🔔</button>
+    <button class="tbtn tbtn-icon" id="dark-btn" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+    <button class="tbtn tbtn-icon" id="print-btn" title="Print floor report" aria-label="Print floor report">🖨</button>
+    <button class="tbtn" id="select-btn" aria-pressed="false">☑ Select</button>
     <button class="tbtn" id="refresh-btn">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
       Refresh
     </button>
-    <a class="tbtn" href="{{ url_for('owner_dashboard') }}">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+    <a class="tbtn" href="{{ url_for('web_owner.owner_dashboard') }}">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
       Dashboard
     </a>
   </div>
@@ -724,10 +746,10 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
 
 <!-- ══════════ DETAIL MODAL ══════════ -->
 <div class="modal-bg" id="modal-detail">
-  <div class="modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title">
     <div class="modal-hdr">
       <h2 id="detail-title">Table details</h2>
-      <button class="modal-x" id="detail-close">✕</button>
+      <button class="modal-x" id="detail-close" aria-label="Close table details">✕</button>
     </div>
     <div class="modal-body">
       <p class="modal-sub" id="detail-sub"></p>
@@ -780,17 +802,17 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
 
 <!-- ══════════ WALK-IN MODAL ══════════ -->
 <div class="modal-bg" id="modal-walkin">
-  <div class="modal" style="max-width:420px;">
+  <div class="modal" style="max-width:420px;" role="dialog" aria-modal="true" aria-labelledby="walkin-title">
     <div class="modal-hdr">
-      <h2>New walk-in order</h2>
-      <button class="modal-x" id="walkin-close">✕</button>
+      <h2 id="walkin-title">New walk-in order</h2>
+      <button class="modal-x" id="walkin-close" aria-label="Close walk-in dialog">✕</button>
     </div>
     <div class="modal-body">
       <p class="modal-sub">Seating <strong id="walkin-table-name"></strong>. Name &amp; phone are optional.</p>
-      <div class="field"><label>Customer name (optional)</label><input id="walkin-name" type="text" maxlength="80" placeholder="e.g. Aisha" autocomplete="off" /></div>
+      <div class="field"><label for="walkin-name">Customer name (optional)</label><input id="walkin-name" type="text" maxlength="80" placeholder="e.g. Aisha" autocomplete="off" /></div>
       <div class="two-col">
-        <div class="field"><label>Phone (optional)</label><input id="walkin-phone" type="tel" maxlength="32" placeholder="+91…" inputmode="tel" /></div>
-        <div class="field"><label>Party size</label><input id="walkin-party" type="number" min="1" max="50" placeholder="2" inputmode="numeric" /></div>
+        <div class="field"><label for="walkin-phone">Phone (optional)</label><input id="walkin-phone" type="tel" maxlength="32" placeholder="+91…" inputmode="tel" /></div>
+        <div class="field"><label for="walkin-party">Party size</label><input id="walkin-party" type="number" min="1" max="50" placeholder="2" inputmode="numeric" /></div>
       </div>
       <div class="err-text" id="walkin-error"></div>
       <div class="modal-actions">
@@ -809,14 +831,14 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
 
 <!-- ══════════ TRANSFER MODAL ══════════ -->
 <div class="modal-bg" id="modal-transfer">
-  <div class="modal" style="max-width:380px;">
+  <div class="modal" style="max-width:380px;" role="dialog" aria-modal="true" aria-labelledby="transfer-title">
     <div class="modal-hdr">
-      <h2>Transfer order</h2>
-      <button class="modal-x" id="transfer-close">✕</button>
+      <h2 id="transfer-title">Transfer order</h2>
+      <button class="modal-x" id="transfer-close" aria-label="Close transfer dialog">✕</button>
     </div>
     <div class="modal-body">
       <p class="modal-sub">Move open order from <strong id="transfer-from-name"></strong> to another table.</p>
-      <div class="field"><label>Target table</label><select id="transfer-target"></select></div>
+      <div class="field"><label for="transfer-target">Target table</label><select id="transfer-target"></select></div>
       <div class="err-text" id="transfer-error"></div>
       <div class="modal-actions">
         <button class="mbtn" id="transfer-cancel">Cancel</button>
@@ -1034,9 +1056,15 @@ function updateKPI(tables, summary){
   const nowHr = new Date().getHours() + new Date().getMinutes()/60;
   const totalRev = tables.reduce((s,t)=>s+(t.today.revenue||0),0);
   document.getElementById('kpi-rev').textContent = money(totalRev);
-  const hoursOpen = Math.max(0.5, nowHr - 8);
-  const forecast  = hoursOpen > 0 ? (totalRev / hoursOpen) * 12 : 0;
-  document.getElementById('kpi-forecast').textContent = forecast > 0 ? money(forecast) : '—';
+  /* Forecast assumes an 8am open; before opening there is no run-rate yet. */
+  const OPEN_HR = 8, DAY_HRS = 12;
+  let forecastTxt = '—';
+  if (nowHr >= OPEN_HR) {
+    const hoursOpen = Math.max(0.5, nowHr - OPEN_HR);
+    const forecast = (totalRev / hoursOpen) * DAY_HRS;
+    if (forecast > 0) forecastTxt = money(forecast);
+  }
+  document.getElementById('kpi-forecast').textContent = forecastTxt;
   const active = (summary.occupied||0)+(summary.ready_to_serve||0)+(summary.needs_attention||0);
   const occ = summary.total ? Math.round(active/summary.total*100) : 0;
   document.getElementById('kpi-occ').textContent = occ+'%';
@@ -1077,10 +1105,12 @@ function updateSummary(s, prev){
     document.getElementById(id).textContent=d===0?'':(d>0?'▲ +'+d:' ▼ '+d)+' since last';
   }
   if(prev){
+    trend('sum-total-t',  s.total||0,            prev.total||0);
     trend('sum-free-t',   s.free||0,            prev.free||0);
     trend('sum-occ-t',    s.occupied||0,         prev.occupied||0);
     trend('sum-ready-t',  s.ready_to_serve||0,   prev.ready_to_serve||0);
     trend('sum-attn-t',   s.needs_attention||0,  prev.needs_attention||0);
+    trend('sum-clean-t',  s.cleaning||0,         prev.cleaning||0);
   }
   document.querySelectorAll('.filter-pill .pill-count').forEach(el=>{
     const k=el.dataset.count, n=(k==='all')?(s.total||0):(s[k]||0);
@@ -1233,13 +1263,13 @@ function buildCard(t){
   }
   if(c.count) acts+=`<button class="act-btn" data-act="managecalls">🔔 Calls (${c.count})</button>`;
   acts+=`<button class="act-btn" data-act="cleaning">${t.cleaning?'✅ Mark clean':'🧹 Cleaning'}</button>`;
-  acts+=`<a class="act-btn" href="/table/${t.id}" target="_blank">Menu ↗</a>`;
+  acts+=`<a class="act-btn" href="/table/${esc(t.id)}" target="_blank" rel="noopener">Menu ↗</a>`;
 
   return `<div class="tcard ${sc}${selClass}" data-id="${esc(t.id)}" data-name="${esc(t.name)}">
-    <div class="card-select-box" data-sel="${esc(t.id)}"></div>
+    <div class="card-select-box" data-sel="${esc(t.id)}" role="checkbox" tabindex="0" aria-label="Select ${esc(t.name)}"></div>
     <div class="card-head">
       <div><div class="card-name">${esc(t.name)}</div><div class="card-id">${esc(t.id)}</div></div>
-      <span class="status-badge ${badge}">${STATUS_LABEL[t.status]||t.status}</span>
+      <span class="status-badge ${badge}">${esc(STATUS_LABEL[t.status]||t.status)}</span>
     </div>
     <div class="card-body">${orderHtml}${callsHtml}${timerHtml}${statsHtml}${noteHtml}</div>
     <div class="card-actions">${acts}</div>
@@ -1282,8 +1312,11 @@ const KANBAN_COLS = ['needs_attention','ready_to_serve','occupied','cleaning','f
 function renderKanban(tables){
   KANBAN_COLS.forEach(status=>{
     const col=document.getElementById('kb-'+status);
+    if(!col) return;
     /* FIX: save header outerHTML before destroying, then reconstruct */
-    const hdrHTML=col.querySelector('.kanban-col-head').outerHTML;
+    const head=col.querySelector('.kanban-col-head');
+    if(!head) return;
+    const hdrHTML=head.outerHTML;
     col.innerHTML=hdrHTML;   /* rebuilds column from just the saved header */
 
     const group=tables.filter(t=>t.status===status);
@@ -1322,6 +1355,10 @@ function renderKanban(tables){
    RENDER — floor
 ═══════════════════════════════════════════════ */
 function renderFloor(tables){
+  if(!tables.length){
+    floorGrid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:3rem 1rem;color:var(--ink-3);">No tables yet. <a href="/owner/tables" style="color:var(--primary);font-weight:700;">Create your first table →</a></div>';
+    return;
+  }
   floorGrid.innerHTML=tables.map(t=>{
     const callDot=t.openCalls&&t.openCalls.count?`<div class="floor-table-calls">🔔 ${t.openCalls.count}</div>`:'';
     /* Bill-request badge — stands out visually above the regular call dot */
@@ -1346,9 +1383,15 @@ function render(){
   updateSummary(s, prevSummary);
   updateKPI(tables, s);
   const rows=sortedFiltered(tables);
+  /* Don't yank the DOM out from keyboard/screen-reader users mid-task:
+     if focus is inside a view or a modal is open, update numbers only and
+     let the next poll render after they finish. */
+  const ae=document.activeElement;
+  const busy=ae && (ae.closest('.modal-bg.show') || ae.closest('#grid,#view-kanban,#floor-grid'));
+  if(busy) return;
   if(activeView==='grid')   renderGrid(rows);
-  if(activeView==='kanban') renderKanban(tables);
-  if(activeView==='floor')  renderFloor(tables);
+  if(activeView==='kanban') renderKanban(rows);
+  if(activeView==='floor')  renderFloor(rows);
   document.getElementById('topbar-sub').textContent=
     `${s.total} tables · ${new Date(lastData.fetchedAt).toLocaleTimeString()}`;
 }
@@ -1417,9 +1460,13 @@ function cardActionDelegate(root){
       const card=e.target.closest('.tcard');
       if(card&&!e.target.closest('.act-btn')&&!e.target.closest('a')){ toggleSelect(card.dataset.id); return; }
     }
-    /* Floor plan tile */
+    /* Floor plan tile: free table → walk-in, otherwise detail */
     const ft=e.target.closest('.floor-table');
-    if(ft){ openManageCalls(ft.dataset.id,ft.dataset.name); return; }
+    if(ft){
+      const t=lastData&&lastData.tables.find(x=>x.id===ft.dataset.id);
+      if(t&&!t.openOrder&&!t.cleaning){ openWalkin(t.id,t.name); return; }
+      openManageCalls(ft.dataset.id,ft.dataset.name); return;
+    }
     /* Kanban card background (not a button) */
     const kcard=e.target.closest('.kcard');
     if(kcard&&!e.target.closest('.kcard-btn')&&!e.target.closest('a')){ openDetail(kcard.dataset.id,kcard.dataset.name); return; }
@@ -1460,6 +1507,7 @@ async function doSettle(id,name){
   else toast(data.error||'Failed to settle order','error');
 }
 async function doClose(id,name){
+  if(!confirm(`Close ${name}? This completes the open order and queues cleaning.`)) return;
   const{ok,data}=await postJSON(`/api/owner/tables/${id}/close`);
   if(ok){ toast(`${name} closed & queued for cleaning`,'ok'); load(); }
   else toast(data.error||'Failed to close table','error');
@@ -1494,11 +1542,19 @@ function toggleSelectMode(){
   selected.clear();
   const btn=document.getElementById('select-btn');
   btn.classList.toggle('tbtn-active',selectMode);
+  btn.setAttribute('aria-pressed',selectMode?'true':'false');
   btn.textContent=selectMode?'✕ Cancel select':'☑ Select';
   gridEl.classList.toggle('select-active',selectMode);
   updateBulkBar();
   if(lastData) renderGrid(sortedFiltered(lastData.tables));
 }
+/* Keyboard: Enter/Space on the select checkbox toggles in select mode */
+document.getElementById('grid').addEventListener('keydown',e=>{
+  if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-sel]')&&selectMode){
+    e.preventDefault();
+    toggleSelect(e.target.dataset.sel);
+  }
+});
 function exitSelectMode(){ if(selectMode) toggleSelectMode(); }
 function toggleSelect(id){
   if(selected.has(id)) selected.delete(id); else selected.add(id);
@@ -1516,17 +1572,32 @@ document.getElementById('bulk-deselect').addEventListener('click',()=>{
   selected.clear(); updateBulkBar();
   if(lastData) renderGrid(sortedFiltered(lastData.tables));
 });
+let bulkRunning=false;
 async function bulkAction(fn,successMsg){
+  if(bulkRunning) return;
   const ids=[...selected];
   if(!ids.length) return;
-  let done=0;
-  for(const id of ids){ const{ok}=await fn(id); if(ok) done++; }
-  toast(`${successMsg}: ${done}/${ids.length}`,'ok');
+  bulkRunning=true;
+  document.querySelectorAll('#bulk-bar button').forEach(b=>b.disabled=true);
+  try{
+    let done=0;
+    for(const id of ids){ const{ok}=await fn(id); if(ok) done++; }
+    toast(`${successMsg}: ${done}/${ids.length}`,'ok');
+  } finally {
+    bulkRunning=false;
+    document.querySelectorAll('#bulk-bar button').forEach(b=>b.disabled=false);
+  }
   selected.clear(); updateBulkBar(); load();
 }
-document.getElementById('bulk-clear').addEventListener('click',()=>bulkAction(id=>postJSON(`/api/owner/tables/${id}/clear`),'Calls cleared'));
+document.getElementById('bulk-clear').addEventListener('click',()=>{
+  if(!confirm(`Clear calls on ${selected.size} table(s)? Sticky notes are wiped.`)) return;
+  bulkAction(id=>postJSON(`/api/owner/tables/${id}/clear`),'Calls cleared');
+});
 document.getElementById('bulk-cleaning').addEventListener('click',()=>bulkAction(id=>postJSON(`/api/owner/tables/${id}/cleaning`,{on:true}),'Marked cleaning'));
-document.getElementById('bulk-close').addEventListener('click',()=>bulkAction(id=>postJSON(`/api/owner/tables/${id}/close`),'Tables closed'));
+document.getElementById('bulk-close').addEventListener('click',()=>{
+  if(!confirm(`Close ${selected.size} table(s)? Open orders complete, notes are wiped, tables queue for cleaning.`)) return;
+  bulkAction(id=>postJSON(`/api/owner/tables/${id}/close`),'Tables closed');
+});
 
 /* ═══════════════════════════════════════════════
    DETAIL MODAL  — with active calls management
@@ -1623,7 +1694,12 @@ async function openDetail(id,name){
           </div>`;
         }).join('')
       :'<div style="color:var(--ink-3);font-size:.82rem;">No call history</div>';
-  }catch(e){ toast('Failed to load table detail','error'); }
+  }catch(e){
+    toast('Failed to load table detail','error');
+    document.getElementById('recent-orders').innerHTML='<div style="color:var(--danger,#b91c1c);font-size:.82rem;">Couldn’t load detail. <button type="button" class="act-btn" id="detail-retry-btn" style="margin-left:.4rem;">↻ Retry</button></div>';
+    document.getElementById('recent-calls').innerHTML='<div style="color:var(--ink-3);font-size:.82rem;">Unavailable — detail failed to load.</div>';
+    document.getElementById('detail-retry-btn')?.addEventListener('click',()=>openDetail(id,name));
+  }
 }
 document.getElementById('detail-clear-calls').addEventListener('click',async()=>{
   if(!currentTableId) return;
@@ -1677,7 +1753,15 @@ document.getElementById('walkin-confirm').addEventListener('click',async()=>{
     errEl.style.display='block';
     /* If table already has order, offer to open it */
     if(data.orderId){
-      errEl.innerHTML+=` <a href="/owner/billing/orders/${data.orderId}" style="color:var(--primary);font-weight:700;text-decoration:underline;">Open existing order →</a>`;
+      const oid=Number(data.orderId);
+      if(Number.isFinite(oid)){
+        const a=document.createElement('a');
+        a.href=`/owner/billing/orders/${oid}`;
+        a.style.cssText='color:var(--primary);font-weight:700;text-decoration:underline;';
+        a.textContent='Open existing order →';
+        errEl.appendChild(document.createTextNode(' '));
+        errEl.appendChild(a);
+      }
     }
   }
 });
@@ -1691,7 +1775,7 @@ function openTransfer(id,name){
   document.getElementById('transfer-error').style.display='none';
   const sel=document.getElementById('transfer-target');
   sel.innerHTML=(lastData?.tables||[]).filter(t=>t.id!==id&&!t.openOrder)
-    .map(t=>`<option value="${esc(t.id)}">${esc(t.name)} (${t.status.replace(/_/g,' ')})</option>`).join('');
+    .map(t=>`<option value="${esc(t.id)}">${esc(t.name)} (${esc(String(t.status).replace(/_/g,' '))})</option>`).join('');
   if(!sel.options.length){
     sel.innerHTML='<option disabled>No free tables available</option>';
     document.getElementById('transfer-confirm').disabled=true;
@@ -1710,10 +1794,23 @@ document.getElementById('transfer-confirm').addEventListener('click',async()=>{
 
 /* ═══════════════════════════════════════════════
    MODAL HELPERS
-═══════════════════════════════════════════════ */
-function showModal(id){ document.getElementById(id).classList.add('show'); }
-function closeModal(id){ document.getElementById(id).classList.remove('show'); }
-function closeAllModals(){ document.querySelectorAll('.modal-bg').forEach(m=>m.classList.remove('show')); }
+   ═══════════════════════════════════════════════ */
+let _modalReturnFocus=null;
+function showModal(id){
+  _modalReturnFocus=document.activeElement;
+  const m=document.getElementById(id);
+  m.classList.add('show');
+  const f=m.querySelector('input:not([type=hidden]),select,textarea,button.btn,.act-btn');
+  if(f) setTimeout(()=>{ try{ f.focus(); }catch{} },60);
+}
+function closeModal(id){
+  document.getElementById(id).classList.remove('show');
+  if(_modalReturnFocus&&_modalReturnFocus.focus){ try{ _modalReturnFocus.focus(); }catch{} _modalReturnFocus=null; }
+}
+function closeAllModals(){
+  document.querySelectorAll('.modal-bg').forEach(m=>m.classList.remove('show'));
+  if(_modalReturnFocus&&_modalReturnFocus.focus){ try{ _modalReturnFocus.focus(); }catch{} _modalReturnFocus=null; }
+}
 [['detail-close','modal-detail'],['walkin-close','modal-walkin'],['walkin-cancel','modal-walkin'],
  ['transfer-close','modal-transfer'],['transfer-cancel','modal-transfer']].forEach(([btnId,modalId])=>{
   const el=document.getElementById(btnId);
@@ -1722,6 +1819,9 @@ function closeAllModals(){ document.querySelectorAll('.modal-bg').forEach(m=>m.c
 document.querySelectorAll('.modal-bg').forEach(bg=>{
   bg.addEventListener('click',e=>{ if(e.target===bg) closeAllModals(); });
 });
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape') closeAllModals();
+});
 
 /* ═══════════════════════════════════════════════
    SSE LIVE STREAM (auto-reconnect with backoff)
@@ -1729,10 +1829,13 @@ document.querySelectorAll('.modal-bg').forEach(bg=>{
 function initSSE(){
   if(!window.EventSource) return;
   try{
-    sseSource=new EventSource('/api/owner/stream');
-    const RELOAD={'order_created':1,'order_updated':1,'table_call_update':1};
+    /* Owner channel carries {"type": event} for new_order/order_updated.
+       (Table-call events travel on per-table channels the floor view
+       doesn't subscribe to — the 10s poll still picks those up.) */
+    sseSource=new EventSource('/api/orders/stream');
+    const RELOAD={'new_order':1,'order_updated':1};
     sseSource.addEventListener('message',e=>{
-      try{ const m=JSON.parse(e.data); if(RELOAD[m.kind]){ load(); scheduleRefresh(); } }catch(e){}
+      try{ const m=JSON.parse(e.data); if(RELOAD[m.type]){ load(); scheduleRefresh(); } }catch(e){}
     });
     sseSource.addEventListener('open',()=>{ setLive('connected'); sseRetryDelay=2000; });
     sseSource.addEventListener('error',()=>{

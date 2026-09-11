@@ -58,7 +58,7 @@
     <option value="table">Sort: Table</option>
   </select>
   {% if table_filter %}
-    <a class="btn btn-ghost btn-sm" href="{{ url_for('owner_billing_open') }}" title="Clear table filter">
+    <a class="btn btn-ghost btn-sm" href="{{ url_for('billing.owner_billing_open') }}" title="Clear table filter">
       Clear: <span class="mono">{{ table_filter }}</span> ✕
     </a>
   {% endif %}

@@ -181,11 +181,11 @@ class VelocityVerdict:
 
 
 def check_refund_amount_cap(*, requested: float, refunded_today: float,
-                            gross_revenue_today: float) -> VelocityVerdict:
+                            gross_revenue_today: float, currency: str = "₹") -> VelocityVerdict:
     """Block refunds that would push today's refund total above the
     configured percentage of today's *gross revenue*. The cap is on
     cumulative refunds, not single-event size — a determined attacker
-    can't escape it by splitting one ₹10k refund into 100 × ₹100."""
+    can't escape it by splitting one large refund into many small ones."""
     cap_pct = refund_daily_cap_pct()
     if cap_pct <= 0:
         return VelocityVerdict(allowed=True)
@@ -206,9 +206,9 @@ def check_refund_amount_cap(*, requested: float, refunded_today: float,
             allowed=False,
             reason=(
                 f"Refund cap reached: today's refunds may not exceed "
-                f"{cap_pct:.0f}% of gross revenue (₹{cap_amount:.2f}). "
-                f"Already refunded ₹{float(refunded_today or 0):.2f}; "
-                f"this would bring it to ₹{new_total:.2f}."
+                f"{cap_pct:.0f}% of gross revenue ({currency}{cap_amount:.2f}). "
+                f"Already refunded {currency}{float(refunded_today or 0):.2f}; "
+                f"this would bring it to {currency}{new_total:.2f}."
             ),
             cap=cap_amount, used=float(refunded_today or 0),
         )

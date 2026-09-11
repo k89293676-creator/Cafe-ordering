@@ -112,7 +112,7 @@
           Pay securely with {{ provider.title() }}
         </div>
       </div>
-      <span class="badge {% if mode == 'live' %}live{% endif %}">{{ mode }} mode</span>
+      <span class="badge {% if mode == 'live' %}live{% endif %}" {% if mode != 'live' %}title="Sandbox — test payments only"{% endif %}>{{ 'Live' if mode == 'live' else 'Test' }}</span>
     </div>
 
     <!-- Step strip: review → pay → confirm. Even a one-tap hosted
@@ -177,8 +177,8 @@
         </button>
         <div id="status"></div>
         <div class="secure">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          Secured by {{ provider.title() }} · {{ mode }} mode
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Secured by {{ provider.title() }}
         </div>
       {% endif %}
     </div>
@@ -190,7 +190,7 @@
     // customer returns from a hosted-checkout redirect (Stripe / Cashfree)
     // — the webhook is the source of truth, this just lets the page reflect
     // the success state without a manual reload.
-    const STATUS_URL = {{ url_for('billing_pay_status', order_id=order.id) | tojson }};
+    const STATUS_URL = {{ url_for('billing.billing_pay_status', order_id=order.id) | tojson }};
     let pollTimer = null;
     function startStatusPolling(intervalMs = 3000, maxAttempts = 40) {
       let attempts = 0;
@@ -251,7 +251,7 @@
     (function () {
       const status = document.getElementById('status');
       const btn = document.getElementById('pay-btn');
-      const VERIFY_URL = {{ url_for('billing_pay_razorpay_verify', order_id=order.id) | tojson }};
+      const VERIFY_URL = {{ url_for('billing.billing_pay_razorpay_verify', order_id=order.id) | tojson }};
       btn.addEventListener('click', () => {
         const rzp = new Razorpay({
           key: {{ public_key|tojson }},

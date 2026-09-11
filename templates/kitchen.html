@@ -42,7 +42,7 @@
     }
     .filter-pill {
       background: var(--k-card); border: 1px solid var(--k-border); color: var(--k-text);
-      padding: .35rem .8rem; border-radius: 999px; font-size: .78rem; font-weight: 600;
+      padding: .35rem .8rem; min-height: 44px; border-radius: 999px; font-size: .78rem; font-weight: 600;
       cursor: pointer; transition: background .15s, border-color .15s;
       display: inline-flex; align-items: center; gap: .35rem; user-select: none;
     }
@@ -143,16 +143,29 @@
     .card-actions .btn-stage {
       flex: 1 1 auto;
       min-width: 7.5rem;
-      height: 2.3rem;
+      min-height: 44px;
+      height: 2.75rem;
       padding: 0 .85rem;
-      font-weight: 700; font-size: .78rem; border-radius: 8px;
+      font-weight: 700; font-size: .82rem; border-radius: 8px;
       display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
     }
     .card-actions .btn-stage.btn-cancel {
-      flex: 0 0 auto; min-width: 2.6rem; padding: 0 .65rem;
+      flex: 0 0 auto; min-width: 44px; padding: 0 .65rem;
     }
     .card-actions .btn-stage.btn-print {
-      flex: 0 0 auto; min-width: 2.6rem; padding: 0 .65rem;
+      flex: 0 0 auto; min-width: 44px; padding: 0 .65rem;
+    }
+    button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible {
+      outline: 3px solid #fff; outline-offset: 2px;
+    }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip: rect(0,0,0,0); white-space: nowrap;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .kitchen-card.late, .kitchen-card.flash, .kitchen-card.removing,
+      .k-toast { animation: none !important; }
+      * { transition-duration: .001s !important; }
     }
     .btn-stage[disabled] { opacity: .85; cursor: wait; }
     .btn-stage .spinner-border-sm { width: 1rem; height: 1rem; border-width: .15em; }
@@ -328,12 +341,12 @@
   <!-- Orders grid -->
   <div id="orders-wrap">
     <!-- Filter / sort bar -->
-    <div id="filter-bar" class="no-print">
-      <button class="filter-pill active" data-filter="all">All <span class="count" data-count="all">0</span></button>
-      <button class="filter-pill" data-filter="pending">Pending <span class="count" data-count="pending">0</span></button>
-      <button class="filter-pill" data-filter="confirmed">Confirmed <span class="count" data-count="confirmed">0</span></button>
-      <button class="filter-pill" data-filter="preparing">Preparing <span class="count" data-count="preparing">0</span></button>
-      <button class="filter-pill" data-filter="ready">Ready <span class="count" data-count="ready">0</span></button>
+    <div id="filter-bar" class="no-print" role="group" aria-label="Filter orders by status">
+      <button class="filter-pill active" data-filter="all" aria-pressed="true">All <span class="count" data-count="all">0</span></button>
+      <button class="filter-pill" data-filter="pending" aria-pressed="false">Pending <span class="count" data-count="pending">0</span></button>
+      <button class="filter-pill" data-filter="confirmed" aria-pressed="false">Confirmed <span class="count" data-count="confirmed">0</span></button>
+      <button class="filter-pill" data-filter="preparing" aria-pressed="false">Preparing <span class="count" data-count="preparing">0</span></button>
+      <button class="filter-pill" data-filter="ready" aria-pressed="false">Ready <span class="count" data-count="ready">0</span></button>
       <div class="spacer"></div>
       <label class="text-muted small me-1" for="sort-sel">Sort</label>
       <select id="sort-sel" title="Sort orders">
@@ -378,6 +391,7 @@
 
 <!-- Toasts -->
 <div id="toast-stack" aria-live="polite" aria-atomic="true"></div>
+<div id="kitchen-live" class="sr-only" role="status" aria-live="polite"></div>
 
 <!-- Order card template -->
 <template id="card-template">
@@ -698,8 +712,11 @@
   function setFilter(f) {
     curFilter = f;
     localStorage.setItem('kitchen-filter', f);
-    document.querySelectorAll('.filter-pill').forEach(p =>
-      p.classList.toggle('active', p.dataset.filter === f));
+    document.querySelectorAll('.filter-pill').forEach(p => {
+      const on = p.dataset.filter === f;
+      p.classList.toggle('active', on);
+      p.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
     rerender();
   }
   document.querySelectorAll('.filter-pill').forEach(p =>
@@ -711,8 +728,11 @@
     rerender();
   });
   // Apply initial active pill
-  document.querySelectorAll('.filter-pill').forEach(p =>
-    p.classList.toggle('active', p.dataset.filter === curFilter));
+  document.querySelectorAll('.filter-pill').forEach(p => {
+    const on = p.dataset.filter === curFilter;
+    p.classList.toggle('active', on);
+    p.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
 
   function sortedOrders(list) {
     const arr = list.slice();
@@ -916,6 +936,8 @@
         const newIds = [...currentIds].filter(id => !lastOrderIds.has(id));
         if (newIds.length) {
           orderChime();
+          const liveEl = document.getElementById('kitchen-live');
+          if (liveEl) liveEl.textContent = `${newIds.length} new order${newIds.length !== 1 ? 's' : ''} received.`;
           rerender();   // need DOM to exist before flashing
           newIds.forEach(id => {
             const card = document.querySelector(`[data-order-id="${id}"] .kitchen-card`);

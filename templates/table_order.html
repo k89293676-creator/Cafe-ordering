@@ -575,15 +575,16 @@
 
       <!-- Tip selector -->
       <div class="o-tip-selector">
-        <div class="o-tip-label">Add a tip?</div>
-        <div class="o-tip-btns">
-          <button class="o-tip-btn js-tip-btn" data-tip="0">No tip</button>
-          <button class="o-tip-btn js-tip-btn" data-tip="10">10%</button>
-          <button class="o-tip-btn js-tip-btn" data-tip="15">15%</button>
-          <button class="o-tip-btn js-tip-btn" data-tip="20">20%</button>
-          <button class="o-tip-btn js-tip-btn" data-tip="custom">Custom</button>
+        <div class="o-tip-label" id="tip-label">Add a tip?</div>
+        <div class="o-tip-btns" role="group" aria-labelledby="tip-label">
+          <button class="o-tip-btn js-tip-btn" data-tip="0" aria-pressed="false">No tip</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="10" aria-pressed="false">10%</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="15" aria-pressed="false">15%</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="20" aria-pressed="false">20%</button>
+          <button class="o-tip-btn js-tip-btn" data-tip="custom" aria-pressed="false">Custom</button>
         </div>
-        <input id="tip-custom-input" type="number" min="0" step="1" placeholder="Custom tip ₹" class="o-tip-custom" style="display:none;" />
+        <label class="o-field-label" for="tip-custom-input">Custom tip amount (₹)</label>
+        <input id="tip-custom-input" type="number" min="0" max="10000" step="1" placeholder="Custom tip ₹" class="o-tip-custom" style="display:none;" aria-label="Custom tip amount in rupees" />
       </div>
 
       <div class="o-cart__actions">

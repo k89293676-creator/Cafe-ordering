@@ -120,7 +120,7 @@ def normalise_payments(raw: Iterable[dict]) -> list[dict]:
     return out
 
 
-def compute_settlement(totals: BillTotals, payments: list[dict]) -> tuple[float, float, str | None]:
+def compute_settlement(totals: BillTotals, payments: list[dict], currency: str = "₹") -> tuple[float, float, str | None]:
     """Returns (paid_amount, change_due, error_message_or_None).
 
     Cash overpayment yields positive ``change_due``. Any non-cash
@@ -135,7 +135,7 @@ def compute_settlement(totals: BillTotals, payments: list[dict]) -> tuple[float,
     diff = _money(paid - target)
 
     if diff < -SETTLEMENT_TOLERANCE:
-        return paid, 0.0, f"Short by ₹{abs(diff):.2f}. Collected ₹{paid:.2f}, total ₹{target:.2f}."
+        return paid, 0.0, f"Short by {currency}{abs(diff):.2f}. Collected {currency}{paid:.2f}, total {currency}{target:.2f}."
     if diff > SETTLEMENT_TOLERANCE:
         # Overpayment is only OK if there's enough cash to cover it (we
         # give the change back from cash). Otherwise it's a data-entry
@@ -143,7 +143,7 @@ def compute_settlement(totals: BillTotals, payments: list[dict]) -> tuple[float,
         if cash_paid >= diff:
             return paid, diff, None
         return paid, 0.0, (
-            f"Overpaid by ₹{diff:.2f} but no cash was tendered to give change. "
+            f"Overpaid by {currency}{diff:.2f} but no cash was tendered to give change. "
             "Reduce the non-cash amount, or add cash to cover the change."
         )
     return paid, 0.0, None

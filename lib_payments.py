@@ -36,6 +36,33 @@ log = logging.getLogger(__name__)
 
 SUPPORTED_PROVIDERS = ("stripe", "razorpay", "cashfree")
 
+# Canonical inbound webhook paths (see app/api/v1/payments.py).
+# Single source of truth — every "copy your webhook URL" surface must use
+# provider_webhook_url() instead of hardcoding paths or url_for() names
+# that no longer exist (previously "billing_webhook", now 404).
+PROVIDER_WEBHOOK_PATHS = {
+    "stripe": "/stripe/webhook",
+    "razorpay": "/razorpay/webhook",
+}
+
+
+def provider_webhook_url(provider: str) -> str:
+    """Absolute webhook URL for *provider*, or ``""`` when it has none.
+
+    Must be called inside a request context; returns ``""`` otherwise
+    instead of raising, so admin pages never 500 on URL display.
+    """
+    path = PROVIDER_WEBHOOK_PATHS.get(provider, "")
+    if not path:
+        return ""
+    try:
+        from flask import has_request_context, request as _req
+        if not has_request_context():
+            return ""
+        return _req.url_root.rstrip("/") + path
+    except Exception:
+        return ""
+
 # ── Issue #12: Module-level circuit breaker singletons ───────────────────────
 # Imported lazily so lib_payments can be imported without the middleware
 # package being present (e.g., tests or CLI scripts that only need encrypt).

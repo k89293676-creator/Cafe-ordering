@@ -503,6 +503,7 @@ function cartChange(id, delta) {
 
 function cartClear() {
   cart = {};
+  _rotateIdemKey();
   syncCart();
   renderMenu();
 }
@@ -594,6 +595,17 @@ function _newIdemKey() {
   try { if (crypto.randomUUID) return crypto.randomUUID(); } catch {}
   return `idem-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
+/* Stable key per logical order: retries of the same cart re-send the same
+   key so the server can dedupe "persisted but response lost". Rotated on
+   success or when the cart is cleared/modified into a new fingerprint. */
+let _idemKey = null, _idemFp = null;
+function _stableIdemKey(fp) {
+  if (_idemKey && _idemFp === fp) return _idemKey;
+  _idemFp = fp;
+  _idemKey = _newIdemKey();
+  return _idemKey;
+}
+function _rotateIdemKey() { _idemKey = null; _idemFp = null; }
 async function placeOrder(name) {
   const qty = totalQty();
   if (qty === 0) { setResp($("checkout-resp"), "Add items to your order first.", "error"); return; }
@@ -638,12 +650,14 @@ async function placeOrder(name) {
     tip:           Math.round(tipAmt * 100) / 100,
     items: Object.entries(cart).map(([id, { qty }]) => ({ id, quantity: qty })),
   };
+  const fp = JSON.stringify([payload.tableId, payload.items, payload.tip, payload.customerName, payload.customerEmail, payload.customerPhone, payload.notes]);
+  const idemKey = _stableIdemKey(fp);
   try { localStorage.setItem(`cafe_checkout_${TABLE_ID}`, JSON.stringify({name: lastName, email, phone, notes: payload.notes, tipPercent, customTip})); } catch {}
 
   try {
     const res  = await fetch("/api/checkout", {
       method:  "POST",
-      headers: csrfHeaders({ "Content-Type": "application/json", "Idempotency-Key": _newIdemKey() }),
+      headers: csrfHeaders({ "Content-Type": "application/json", "Idempotency-Key": idemKey }),
       body:    JSON.stringify(payload),
     });
     const data = await res.json();
@@ -656,6 +670,7 @@ async function placeOrder(name) {
     if (res.ok && data.order) {
       currentOrderId = data.order.id;
       _saveOrder(data.order);
+      _rotateIdemKey();
 
       /* Show pickup-success panel on the main page */
       const pickupDiv = $("pickup-success");
@@ -1031,6 +1046,70 @@ async function cancelOrder(orderId) {
   }
 }
 
+/* ── Favourites (global: used by init + resetToOrdering) ── */
+function saveFavourite(label) {
+  const items = Object.entries(cart).map(([id, {item, qty}]) => ({id, name: item.name, price: item.price, quantity: qty}));
+  if (!items.length) { showToast("Add items before saving a favourite."); return; }
+  const fav = { name: label || "My Order", items, savedAt: new Date().toISOString() };
+  favourites = [fav, ...favourites.filter(f => f.name !== fav.name)].slice(0, 5);
+  try { localStorage.setItem("cafe_favourites", JSON.stringify(favourites)); } catch {}
+  showToast("Saved as favourite!");
+  renderFavourites();
+}
+
+function renderFavourites() {
+  const container = $("favourites-list");
+  if (!container) return;
+  if (!favourites.length) {
+    container.innerHTML = "<p class='o-fav-empty'>No saved orders yet.</p>";
+    return;
+  }
+  container.innerHTML = favourites.map((fav, i) => `
+    <div class="o-fav-item">
+      <div>
+        <span class="o-fav-item__name">${esc(fav.name)}</span>
+        <span class="o-fav-item__meta"> · ${fav.items.length} item(s)</span>
+      </div>
+      <button class="o-fav-reorder" data-idx="${i}" aria-label="Reorder ${esc(fav.name)}">Order again</button>
+    </div>`).join("");
+}
+
+function loadFavourite(idx) {
+  const fav = favourites[parseInt(idx)];
+  if (!fav) return;
+  cart = {};
+  fav.items.forEach(it => {
+    const menuItem = findItem(it.id);
+    if (menuItem) cart[it.id] = { item: menuItem, qty: it.quantity };
+  });
+  syncCart();
+  renderMenu();
+  openCart();
+  showToast("Favourite order loaded!");
+}
+
+/* ── Tip selector (global: works for initial + rebuilt cart panel) ── */
+function handleTipSelect(btn) {
+  document.querySelectorAll(".js-tip-btn").forEach(b => { b.classList.remove("is-selected"); b.setAttribute("aria-pressed", "false"); });
+  btn.classList.add("is-selected");
+  btn.setAttribute("aria-pressed", "true");
+  const val = btn.dataset.tip;
+  if (val === "custom") {
+    tipPercent = 0;
+    const customInput = $("tip-custom-input");
+    if (customInput) {
+      customInput.style.display = "block";
+      customTip = parseFloat(customInput.value) || 0;
+    }
+  } else {
+    tipPercent = parseInt(val) || 0;
+    customTip = 0;
+    const ci = $("tip-custom-input");
+    if (ci) ci.style.display = "none";
+  }
+  syncCart();
+}
+
 /* ── Reset to ordering ── */
 function resetToOrdering() {
   _archiveOrder();
@@ -1042,9 +1121,16 @@ function resetToOrdering() {
   const revSection = $("reviews-section");
   if (revSection) revSection.classList.add("o-reviews--hidden");
 
-  /* Restore last checkout context so tip/contact/notes survive */
+  /* Restore last checkout context so tip/contact/notes survive.
+     The rebuilt panel includes the full tip selector + favourites + lookup
+     (same blocks as the server-rendered template), with selection restored. */
   let savedCtx = null;
   try { savedCtx = JSON.parse(localStorage.getItem(`cafe_checkout_${TABLE_ID}`) || "null"); } catch {}
+  const selTip = savedCtx ? (savedCtx.customTip > 0 ? "custom" : String(savedCtx.tipPercent || 0)) : "";
+  const isSel = v => selTip === String(v) ? " is-selected" : "";
+  const ariaSel = v => selTip === String(v) ? "true" : "false";
+  const showCustom = selTip === "custom" ? "block" : "none";
+  const customVal = savedCtx && savedCtx.customTip > 0 ? esc(String(savedCtx.customTip)) : "";
 
   /* Rebuild the cart panel */
   const cartEl = qs(".o-cart");
@@ -1088,6 +1174,27 @@ function resetToOrdering() {
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
           Clear cart
         </button>
+        <button id="save-fav-btn" class="o-clear-btn" type="button" aria-label="Save as favourite">
+          ♥ Save
+        </button>
+      </div>
+      <!-- Tip selector (restored selection) -->
+      <div class="o-tip-selector">
+        <div class="o-tip-label" id="tip-label-reset">Add a tip?</div>
+        <div class="o-tip-btns" role="group" aria-labelledby="tip-label-reset">
+          <button class="o-tip-btn js-tip-btn${isSel(0)}" data-tip="0" aria-pressed="${ariaSel(0)}">No tip</button>
+          <button class="o-tip-btn js-tip-btn${isSel(10)}" data-tip="10" aria-pressed="${ariaSel(10)}">10%</button>
+          <button class="o-tip-btn js-tip-btn${isSel(15)}" data-tip="15" aria-pressed="${ariaSel(15)}">15%</button>
+          <button class="o-tip-btn js-tip-btn${isSel(20)}" data-tip="20" aria-pressed="${ariaSel(20)}">20%</button>
+          <button class="o-tip-btn js-tip-btn${isSel('custom')}" data-tip="custom" aria-pressed="${ariaSel('custom')}">Custom</button>
+        </div>
+        <label class="o-field-label" for="tip-custom-input">Custom tip amount (₹)</label>
+        <input id="tip-custom-input" type="number" min="0" max="10000" step="1" placeholder="Custom tip ₹" class="o-tip-custom" style="display:${showCustom};" value="${customVal}" aria-label="Custom tip amount in rupees" />
+      </div>
+      <!-- Favourites -->
+      <div class="o-favourites">
+        <div class="o-fav-label">Saved Orders</div>
+        <div id="favourites-list"></div>
       </div>
       <form id="checkout-form" novalidate>
         <label class="o-field-label" for="customer-name">Name (optional)</label>
@@ -1128,6 +1235,31 @@ function resetToOrdering() {
         <button type="submit" class="o-place-btn" id="place-order-btn">Place Order →</button>
       </form>
       <div id="checkout-resp" class="o-resp" role="alert"></div>
+      <!-- Pickup code success screen -->
+      <div id="pickup-success" style="display:none;text-align:center;padding:1.5rem;background:var(--gold-bg,#f0fdf4);border:2px solid var(--gold,#10b981);border-radius:1rem;margin-top:1rem;">
+        <div style="font-size:2.5rem;margin-bottom:.5rem;" aria-hidden="true">✅</div>
+        <h3 style="margin:0 0 .25rem;color:#065f46;">Order Placed!</h3>
+        <p style="color:#374151;font-size:.9rem;margin-bottom:1rem;">Show this code at the counter when paying.</p>
+        <div style="font-size:2.4rem;font-weight:900;font-family:monospace;letter-spacing:.12em;color:var(--gold,#4f46e5);background:#fff;border:2px dashed currentColor;border-radius:.75rem;padding:.5rem .75rem;margin-bottom:1rem;overflow-wrap:anywhere;word-break:break-all;" id="pickup-code-display">——</div>
+        <button type="button" id="pickup-copy-btn" class="o-clear-btn" style="margin-bottom:1rem;">Copy code</button>
+        <div style="font-size:.8rem;color:#6b7280;" id="pickup-order-id"></div>
+        <div id="order-status-tracker" role="status" aria-live="polite" style="margin-top:1rem;font-size:.85rem;"><span style="color:#6b7280;">Connecting to live updates…</span></div>
+      </div>
+      <!-- ── Find order by pickup code ── -->
+      <div id="pickup-lookup" style="margin-top:1.5rem;padding:1.25rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:.875rem;">
+        <div style="font-size:.85rem;font-weight:700;color:#374151;margin-bottom:.5rem;">🔍 Find your order</div>
+        <div style="font-size:.78rem;color:#6b7280;margin-bottom:.75rem;">Enter your pickup code to reopen a previous order.</div>
+        <div style="display:flex;gap:.5rem;">
+          <input id="lookup-code-input" type="text" placeholder="e.g. AB12CD"
+                 style="flex:1;min-width:0;padding:.6rem .7rem;border:1px solid #d1d5db;border-radius:.5rem;font-family:monospace;font-size:1rem;letter-spacing:.1em;text-transform:uppercase;min-height:44px;"
+                 maxlength="16" autocomplete="off" inputmode="text" aria-label="Pickup code" />
+          <button id="lookup-code-btn" type="button"
+                  style="padding:.6rem 1.1rem;background:#4f46e5;color:#fff;border:0;border-radius:.5rem;font-weight:600;cursor:pointer;font-size:.9rem;min-height:44px;min-width:72px;">
+            Find
+          </button>
+        </div>
+        <div id="lookup-resp" role="status" aria-live="polite" style="margin-top:.4rem;font-size:.8rem;color:#b91c1c;min-height:1em;"></div>
+      </div>
     </div>`;
 
   /* Append order history strip (previous orders at this table) */
@@ -1143,6 +1275,7 @@ function resetToOrdering() {
     tipPercent = savedCtx.tipPercent || 0;
     customTip = savedCtx.customTip || 0;
   }
+  renderFavourites();
   syncCart();
   closeCart();
 }
@@ -1152,12 +1285,8 @@ function wireCartPanel(root) {
   root.querySelector("#clear-cart-btn")?.addEventListener("click", () => {
     if (totalQty() > 0) cartClear();
   });
-  const form = root.querySelector("#checkout-form");
-  form?.addEventListener("submit", async e => {
-    e.preventDefault();
-    const name = (root.querySelector("#customer-name")?.value || "").trim() || "Guest";
-    await placeOrder(name);
-  });
+  /* Submit is handled once by the global document submit listener below —
+     a per-form listener here would double-fire placeOrder(). */
 }
 
 /* ── Reviews ── */
@@ -1267,6 +1396,42 @@ document.addEventListener("click", async e => {
   if (t.closest("#cart-close-btn"))         { closeCart(); return; }
   if (t.closest(".o-backdrop"))             { closeCart(); return; }
 
+  /* Tip selector (delegated: survives cart rebuilds) */
+  const tipBtn = t.closest(".js-tip-btn");
+  if (tipBtn) { handleTipSelect(tipBtn); return; }
+
+  /* Favourites (delegated) */
+  const favReorder = t.closest(".o-fav-reorder");
+  if (favReorder) { loadFavourite(favReorder.dataset.idx); return; }
+  if (t.closest("#save-fav-btn")) {
+    const name = (qs(".o-cart #customer-name")?.value || "").trim() || "My Order";
+    saveFavourite(name);
+    return;
+  }
+
+  /* Pickup-code lookup (delegated) */
+  if (t.closest("#lookup-code-btn")) {
+    lookupByCode(($("lookup-code-input")?.value || "").trim().toUpperCase());
+    return;
+  }
+
+  /* Pickup code copy (delegated) */
+  if (t.closest("#pickup-copy-btn")) {
+    const code = ($("pickup-code-display")?.textContent || "").trim();
+    if (!code || code === "——") return;
+    const done = () => showToast("Pickup code copied!");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code).then(done, () => showToast("Code: " + code));
+    } else {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = code; document.body.appendChild(ta); ta.select();
+        document.execCommand("copy"); ta.remove(); done();
+      } catch { showToast("Code: " + code); }
+    }
+    return;
+  }
+
   /* Feedback */
   if (t.closest("#open-feedback-btn") || t.closest("#reviews-feedback-btn")) { openFeedback(); return; }
   if (t.closest("#feedback-close-btn") || t.id === "feedback-modal-bg")       { closeFeedback(); return; }
@@ -1333,14 +1498,22 @@ document.addEventListener("focusout", e => {
   }, 0);
 });
 
-/* ── Search + feedback count ── */
+/* ── Search + feedback count + custom tip (delegated: survives cart rebuilds) ── */
 document.addEventListener("input", e => {
   if (e.target.id === "search-input") renderMenu();
   if (e.target.id === "feedback-comment") updateFeedbackCount();
+  if (e.target.id === "tip-custom-input") {
+    customTip = parseFloat(e.target.value) || 0;
+    syncCart();
+  }
 });
 
-/* ── ESC key ── */
+/* ── ESC key + lookup Enter (delegated) ── */
 document.addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target && e.target.id === "lookup-code-input") {
+    lookupByCode((e.target.value || "").trim().toUpperCase());
+    return;
+  }
   if (e.key !== "Escape") return;
   if ($("feedback-modal-bg")?.classList.contains("is-open")) { closeFeedback(); return; }
   if (qs(".o-cart.is-open")) closeCart();
@@ -1352,10 +1525,29 @@ function setNavH() {
   const h2 = qs(".o-subnav")?.offsetHeight || 0;
   document.documentElement.style.setProperty("--nav-h", (h1 + h2) + "px");
   document.documentElement.style.setProperty("--header-h", h1 + "px");
-  setTimeout(setNavH._r || (setNavH._r = () => {}), 0);
+  /* Second-pass read after layout settles (fonts, images, injected nav). */
+  if (!setNavH._scheduled) {
+    setNavH._scheduled = true;
+    requestAnimationFrame(() => {
+      setNavH._scheduled = false;
+      const a = qs(".o-header")?.offsetHeight || 0;
+      const b = qs(".o-subnav")?.offsetHeight || 0;
+      document.documentElement.style.setProperty("--nav-h", (a + b) + "px");
+      document.documentElement.style.setProperty("--header-h", a + "px");
+    });
+  }
 }
 window.addEventListener("resize", () => setNavH());
 window.addEventListener("orientationchange", () => setTimeout(setNavH, 200));
+if ("ResizeObserver" in window) {
+  try {
+    const _ro = new ResizeObserver(() => setNavH());
+    document.addEventListener("DOMContentLoaded", () => {
+      if (qs(".o-header")) _ro.observe(qs(".o-header"));
+      if (qs(".o-subnav")) _ro.observe(qs(".o-subnav"));
+    });
+  } catch {}
+}
 
 /* ── Init ── */
 document.addEventListener("DOMContentLoaded", () => {
@@ -1366,16 +1558,10 @@ document.addEventListener("DOMContentLoaded", () => {
   loadMenu();
   _restoreOrder();
 
-  /* ── Pickup-code lookup form ── */
-  $("lookup-code-btn")?.addEventListener("click", () => {
-    const code = ($("lookup-code-input")?.value || "").trim().toUpperCase();
-    lookupByCode(code);
-  });
-  $("lookup-code-input")?.addEventListener("keydown", e => {
-    if (e.key === "Enter") lookupByCode((e.target.value || "").trim().toUpperCase());
-  });
+  /* ── Pickup-code lookup + tip + favourites are document-delegated ──
+     (see global click/keydown/input handlers) so they survive cart rebuilds. */
 
-  /* ── Dietary filter buttons ── */
+  /* ── Dietary filter buttons (static subnav DOM) ── */
   document.querySelectorAll(".js-diet-filter").forEach(btn => {
     btn.setAttribute("aria-pressed", btn.dataset.filter === activeFilter ? "true" : "false");
     btn.addEventListener("click", () => {
@@ -1390,109 +1576,5 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  /* ── Tip selector ── */
-  document.querySelectorAll(".js-tip-btn").forEach(btn => {
-    btn.setAttribute("aria-pressed", "false");
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".js-tip-btn").forEach(b => { b.classList.remove("is-selected"); b.setAttribute("aria-pressed", "false"); });
-      btn.classList.add("is-selected");
-      btn.setAttribute("aria-pressed", "true");
-      const val = btn.dataset.tip;
-      if (val === "custom") {
-        tipPercent = 0;
-        const customInput = $("tip-custom-input");
-        if (customInput) {
-          customInput.style.display = "block";
-          customTip = parseFloat(customInput.value) || 0;
-        }
-      } else {
-        tipPercent = parseInt(val) || 0;
-        customTip = 0;
-        const ci = $("tip-custom-input");
-        if (ci) ci.style.display = "none";
-      }
-      syncCart();
-    });
-  });
-
-  const customTipInput = $("tip-custom-input");
-  if (customTipInput) {
-    customTipInput.addEventListener("input", () => {
-      customTip = parseFloat(customTipInput.value) || 0;
-      syncCart();
-    });
-  }
-
-  /* ── Favourites ── */
-  function saveFavourite(label) {
-    const items = Object.entries(cart).map(([id, {item, qty}]) => ({id, name: item.name, price: item.price, quantity: qty}));
-    if (!items.length) { showToast("Add items before saving a favourite."); return; }
-    const fav = { name: label || "My Order", items, savedAt: new Date().toISOString() };
-    favourites = [fav, ...favourites.filter(f => f.name !== fav.name)].slice(0, 5);
-    localStorage.setItem("cafe_favourites", JSON.stringify(favourites));
-    showToast("Saved as favourite!");
-    renderFavourites();
-  }
-
-  function renderFavourites() {
-    const container = $("favourites-list");
-    if (!container) return;
-    if (!favourites.length) {
-      container.innerHTML = "<p class='o-fav-empty'>No saved orders yet.</p>";
-      return;
-    }
-    container.innerHTML = favourites.map((fav, i) => `
-      <div class="o-fav-item">
-        <div>
-          <span class="o-fav-item__name">${esc(fav.name)}</span>
-          <span class="o-fav-item__meta"> · ${fav.items.length} item(s)</span>
-        </div>
-        <button class="o-fav-reorder" data-idx="${i}">Order again</button>
-      </div>`).join("");
-    container.querySelectorAll(".o-fav-reorder").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const fav = favourites[parseInt(btn.dataset.idx)];
-        if (!fav) return;
-        cart = {};
-        fav.items.forEach(it => {
-          const menuItem = findItem(it.id);
-          if (menuItem) cart[it.id] = { item: menuItem, qty: it.quantity };
-        });
-        syncCart();
-        renderMenu();
-        openCart();
-        showToast("Favourite order loaded!");
-      });
-    });
-  }
-
-  const saveFavBtn = $("save-fav-btn");
-  if (saveFavBtn) {
-    saveFavBtn.addEventListener("click", () => {
-      const name = document.querySelector("#cart-panel #customer-name")?.value.trim() || $("customer-name")?.value.trim() || "My Order";
-      saveFavourite(name);
-    });
-  }
-
   renderFavourites();
-
-  /* ── Pickup code copy ── */
-  document.addEventListener("click", e => {
-    if (e.target.closest("#pickup-copy-btn")) {
-      const code = ($("pickup-code-display")?.textContent || "").trim();
-      if (!code || code === "——") return;
-      const done = () => showToast("Pickup code copied!");
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(code).then(done, () => showToast("Code: " + code));
-      } else {
-        try {
-          const ta = document.createElement("textarea");
-          ta.value = code; document.body.appendChild(ta); ta.select();
-          document.execCommand("copy"); ta.remove(); done();
-        } catch { showToast("Code: " + code); }
-      }
-    }
-  });
 });
-
-window.addEventListener("resize", setNavH);

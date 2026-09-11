@@ -6,7 +6,6 @@ import time
 
 from flask import (
     Blueprint,
-    abort,
     flash,
     redirect,
     render_template,
@@ -43,6 +42,9 @@ def owner_landing():
 def owner_lead_submit():
     from app.models import OwnerLead
     from app.utils.serializers import _safe_text
+    # Honeypot: bots fill the hidden `website` field; silently accept + redirect.
+    if str(request.form.get("website", "")).strip():
+        return redirect(url_for("web_public.owner_landing", thanks=1))
     name = _safe_text(request.form.get("contact_name"), max_len=100)
     cafe = _safe_text(request.form.get("cafe_name"), max_len=100)
     email = _safe_text(request.form.get("email"), max_len=254)
@@ -55,11 +57,11 @@ def owner_lead_submit():
         table_count = 0
 
     if not name or not cafe or not email:
-        flash("Please fill in all required fields.", "error")
+        flash("Please fill in all required fields.", "lead_error")
         return redirect(url_for("web_public.owner_landing"))
 
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
-        flash("Invalid email address.", "error")
+        flash("Invalid email address.", "lead_error")
         return redirect(url_for("web_public.owner_landing"))
 
     from app.utils.security import _client_ip
@@ -77,8 +79,8 @@ def owner_lead_submit():
     db.session.add(lead)
     db.session.commit()
     log_security("OWNER_LEAD_SUBMITTED", f"email={email!r}")
-    flash("Thanks! We'll be in touch shortly.", "success")
-    return redirect(url_for("web_public.owner_landing"))
+    flash("Thanks! We'll be in touch shortly.", "lead_info")
+    return redirect(url_for("web_public.owner_landing", thanks=1))
 
 
 @bp.route("/table/<table_id>")
