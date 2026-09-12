@@ -36,6 +36,36 @@ log = logging.getLogger(__name__)
 
 SUPPORTED_PROVIDERS = ("stripe", "razorpay", "cashfree")
 
+
+def payment_sdk_status() -> dict:
+    """Report whether the payment provider SDKs import in this process.
+
+    Used by the billing health check so a missing SDK shows up on the
+    Health page / health JSON instead of surfacing as a customer-facing
+    500 the first time someone pays. Never raises.
+    """
+    import importlib
+
+    out: dict = {}
+    for pkg in ("razorpay", "stripe"):
+        try:
+            mod = importlib.import_module(pkg)
+            ver = (
+                getattr(mod, "__version__", None)
+                or getattr(mod, "VERSION", None)
+                or getattr(mod, "version", None)
+            )
+            if callable(ver):
+                try:
+                    ver = ver()
+                except Exception:
+                    ver = None
+            out[pkg] = {"installed": True, "version": str(ver or "unknown")}
+        except Exception as exc:
+            out[pkg] = {"installed": False, "version": "",
+                        "error": str(exc)[:160]}
+    return out
+
 # Canonical inbound webhook paths (see app/api/v1/payments.py).
 # Single source of truth — every "copy your webhook URL" surface must use
 # provider_webhook_url() instead of hardcoding paths or url_for() names

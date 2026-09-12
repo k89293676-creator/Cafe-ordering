@@ -83,9 +83,9 @@ from lib_payments import (
     detect_mode_from_key,
     encrypt_secret,
     mask_secret,
+    payment_sdk_status,
     provider_webhook_url,
 )
-
 # ---------------------------------------------------------------------------
 # Currency helpers
 # ---------------------------------------------------------------------------
@@ -361,6 +361,22 @@ def _billing_health_compute(owner_id: int, *, include_metrics: bool = True) -> d
             "key": "refund_ratio_7d", "label": "7-day refund ratio",
             "value": round(ratio, 2), "unit": "%", "ok": ratio < 5.0,
             "severity": "ok" if ratio < 5.0 else ("warn" if ratio < 10.0 else "alert"),
+        })
+        # Payment SDKs must import in the web process — a missing SDK turns
+        # every checkout with that provider into a 500. Surface it here so
+        # the Health page / health JSON names the culprit immediately.
+        sdk = payment_sdk_status()
+        snapshot["sdk"] = sdk
+        missing = sorted(k for k, v in sdk.items() if not v.get("installed"))
+        detail = ", ".join(
+            f"{k} {v.get('version') or 'missing'}"
+            for k, v in sorted(sdk.items()))
+        snapshot["checks"].append({
+            "key": "payment_sdks",
+            "label": ("Payment SDKs missing: " + ", ".join(missing)
+                      if missing else f"Payment SDKs installed ({detail})"),
+            "value": detail, "ok": not missing,
+            "severity": "ok" if not missing else "alert",
         })
     except Exception as exc:
         snapshot["degraded"] = True

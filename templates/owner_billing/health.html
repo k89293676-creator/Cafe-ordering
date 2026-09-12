@@ -25,6 +25,9 @@
   <div class="stat"><div class="label">Recent settle</div><div class="value">{% if snapshot.metrics.recent_settle_seconds is not none %}{{ '%.2f'|format(snapshot.metrics.recent_settle_seconds) }}s{% else %}—{% endif %}</div><div class="sub">latency p≈last</div></div>
   <div class="stat"><div class="label">Webhook fails (1h)</div><div class="value">{{ snapshot.metrics.webhook_failures_last_hour }}</div><div class="sub">delete &amp; retry if &gt;5</div></div>
   <div class="stat"><div class="label">Active providers</div><div class="value">{{ snapshot.metrics.payment_credentials_active }}</div><div class="sub">online charging</div></div>
+  <div class="stat"><div class="label">Payment SDKs</div>
+    <div class="value" style="font-size:1rem;">{% for name, s in (snapshot.sdk|default({})).items() %}{{ '✓' if s.installed else '✕' }} {{ name }}{% if s.version %} {{ s.version }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    <div class="sub">must import in web process</div></div>
 </div>
 
 <div class="panel" style="margin-bottom:1.25rem;">
