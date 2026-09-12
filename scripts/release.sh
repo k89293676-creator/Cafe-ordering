@@ -66,6 +66,10 @@ optional = [
     ("redis", "redis"), ("rq", "rq"), ("gevent", "gevent"),
     ("sentry_sdk", "sentry-sdk"), ("prometheus_client", "prometheus-client"),
     ("psutil", "psutil"), ("pandas", "pandas"),
+    # Payment SDKs are load-bearing for checkout (lib_payments imports
+    # them lazily). Warn loudly here so a missing SDK is visible in the
+    # deploy log instead of surfacing as a customer-facing 500 later.
+    ("razorpay", "razorpay-sdk"), ("stripe", "stripe-sdk"),
 ]
 missing = [friendly for mod, friendly in critical if _missing(mod)]
 warn = [friendly for mod, friendly in optional if _missing(mod)]

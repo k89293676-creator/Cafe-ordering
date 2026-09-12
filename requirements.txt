@@ -32,6 +32,8 @@ pyotp~=2.9.0
 python-dotenv~=1.0.1
 pywebpush~=2.0.0
 qrcode[pil]~=8.0.0
+# Payment SDKs — must stay installed: lib_payments imports them lazily and
+# customer checkout 500s without them. Covered by the release.sh audit.
 razorpay~=1.4.2
 redis~=5.2.1
 rq~=1.16.0
