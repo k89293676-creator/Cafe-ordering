@@ -58,7 +58,10 @@ services:
     region: oregon
     plan: free
     buildCommand: "pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r requirements.txt"
-    startCommand: "bash scripts/release.sh; python start.py"
+    # Whole release phase capped at 10 min: every inner step already has its
+    # own timeout, but this guarantees a wedged pre-boot can never burn the
+    # ~15 min port-scan window again — gunicorn always gets a chance to bind.
+    startCommand: "timeout 600 bash scripts/release.sh; python start.py"
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:

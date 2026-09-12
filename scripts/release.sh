@@ -180,15 +180,20 @@ else
   fi
 fi
 
-# ── Step 4: Idempotent schema sync (non-fatal) ────────────────────────────
+# ── Step 4: Idempotent schema sync (bounded + non-fatal) ───────────────────
+# Same latent hang risk as db upgrade/current (stalled connection), so it
+# gets its own timeout. Non-fatal: the app self-heals schema at startup.
 step_start "Running flask sync-schema (idempotent ADD COLUMN safety net)…"
-if flask sync-schema 2>&1; then
+if timeout 120 flask sync-schema 2>&1; then
   step_done
 else
-  echo "[release] WARN: flask sync-schema unavailable or failed — skipping (non-fatal)." >&2
+  echo "[release] WARN: flask sync-schema unavailable, failed, or timed out — skipping (non-fatal)." >&2
 fi
 
-# ── Step 5: Audit trail ───────────────────────────────────────────────────
-CURRENT_REV="$(flask db current 2>/dev/null | tail -n 1 || true)"
+# ── Step 5: Audit trail (bounded) ───────────────────────────────────────────
+# `flask db current` hung silently on one deploy (no output for 13+ min),
+# wedging the whole start command. Bound it like everything else.
+CURRENT_REV="$(timeout 60 flask db current 2>/dev/null | tail -n 1 || echo unknown)"
+CURRENT_REV="${CURRENT_REV:-unknown}"
 echo "[release] DB now at revision: ${CURRENT_REV}"
 echo "[release] Release complete."
