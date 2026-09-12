@@ -1634,7 +1634,6 @@ body.feedback-open { overflow: hidden; }
 .o-place-btn.is-loading{opacity:.75;pointer-events:none;}
 .o-spinner--btn{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;display:inline-block;animation:o-spin .7s linear infinite;vertical-align:-3px;}
 @keyframes o-spin{to{transform:rotate(360deg);}}
-.o-cart__foot{max-height:60dvh;overflow-y:auto;}
 .o-fab{bottom:max(1rem, env(safe-area-inset-bottom, 1rem));max-width:calc(100vw - 2rem);}
 .cafe-toast{bottom:max(6.5rem, calc(5.5rem + env(safe-area-inset-bottom, 1rem)));}
 #order-toast-stack{top:max(.75rem, env(safe-area-inset-top, .75rem));}
@@ -1650,5 +1649,35 @@ body.feedback-open { overflow: hidden; }
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001s !important;transition-duration:.001s !important;scroll-behavior:auto !important;}
+}
+
+/* ═══ Device-compat layer (all viewports) ═══ */
+/* Toasts wrap instead of truncating on narrow screens */
+.cafe-toast{white-space:normal;text-align:center;max-width:min(92vw,34rem);}
+/* Backdrop scrim is visual only — taps fall through to .o-backdrop (which closes) */
+body.cart-is-open::before{pointer-events:none !important;}
+/* Toast dismiss target */
+.o-toast__close{min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;}
+/* Tracker buttons hit 44px */
+.o-tracker__cancel-btn{min-height:44px;}
+/* Long table names wrap instead of crushing the Order button */
+.o-header__brand{min-width:0;}
+.o-header__table{overflow-wrap:anywhere;}
+/* No sticky-hover artifacts on touch devices */
+@media (hover:none){
+  .o-item:hover,.o-place-btn:hover,.o-fab:hover,.o-cat:hover,
+  .o-cart-item:hover,.o-fav-item:hover,.o-add:hover,.o-clear-btn:hover{transform:none;box-shadow:none;}
+}
+/* Short landscape phones: compress chrome, keep every control reachable */
+@media (max-height:500px) and (orientation:landscape){
+  .o-subnav__inner{padding:.4rem .8rem;gap:.35rem;}
+  .o-header__inner{padding:.5rem .8rem;}
+  .o-layout{padding-top:.75rem;}
+  .o-cart{max-height:94dvh;max-height:94vh;}
+}
+/* Sheet owns vertical panning so background never scroll-chains */
+@media (max-width:768px){
+  .o-cart{touch-action:pan-y;}
+  .o-modal{max-height:92dvh;max-height:92vh;overflow-y:auto;}
 }
 

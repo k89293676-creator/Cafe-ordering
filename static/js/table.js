@@ -1632,6 +1632,39 @@ document.addEventListener("input", e => {
   }
 });
 
+/* ── Swipe-down to close the bottom sheet (touch, sheet at top) ── */
+let _swY = null, _swDy = 0;
+const _coarseSheet = () =>
+  window.matchMedia && matchMedia("(max-width: 768px)").matches;
+document.addEventListener("touchstart", e => {
+  const sheet = e.target.closest ? e.target.closest(".o-cart.is-open") : null;
+  if (!sheet || !_coarseSheet() || e.touches.length !== 1) { _swY = null; return; }
+  _swY = e.touches[0].clientY;
+  _swDy = 0;
+}, { passive: true });
+document.addEventListener("touchmove", e => {
+  if (_swY == null) return;
+  const sheet = e.target.closest ? e.target.closest(".o-cart.is-open") : null;
+  if (!sheet || !_coarseSheet()) { _swY = null; return; }
+  const dy = e.touches[0].clientY - _swY;
+  /* Only engage past the top edge — normal scrolling stays native. */
+  if (dy > 0 && sheet.scrollTop <= 0) {
+    _swDy = dy;
+    sheet.style.transition = "none";
+    sheet.style.transform = `translateY(${Math.min(dy, 160)}px)`;
+  } else if (dy <= 0) {
+    _swDy = 0;
+    sheet.style.transition = "";
+    sheet.style.transform = "";
+  }
+}, { passive: true });
+document.addEventListener("touchend", e => {
+  const sheet = e.target.closest ? e.target.closest(".o-cart") : qs(".o-cart");
+  if (sheet) { sheet.style.transition = ""; sheet.style.transform = ""; }
+  if (_swY != null && _swDy > 110) closeCart();
+  _swY = null; _swDy = 0;
+});
+
 /* ── ESC key + lookup Enter (delegated) ── */
 document.addEventListener("keydown", e => {
   if (e.key === "Enter" && e.target && e.target.id === "lookup-code-input") {
