@@ -526,6 +526,19 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
 .modal-x{min-width:44px;min-height:44px;}
 .card-select-box:focus-visible{outline:3px solid var(--primary);outline-offset:2px;}
 .bulk-bar{flex-wrap:wrap;white-space:normal;max-width:calc(100vw - 2rem);justify-content:center;}
+.bulk-action:disabled,.bulk-cancel:disabled{opacity:.45;cursor:not-allowed;}
+.tbtn-icon{width:44px;height:44px;}
+.auto-toggle input[type=checkbox]{width:20px;height:20px;}
+.search{min-height:44px;}
+.sort-select{min-height:44px;}
+.filter-pill{min-height:44px;}
+.floor-table:focus-visible,.kcard:focus-visible,.sum-card:focus-visible{outline:3px solid var(--primary);outline-offset:2px;}
+@media(max-width:720px){
+  .topbar{height:auto;min-height:var(--topbar-h);padding:.6rem 1rem;flex-wrap:wrap;}
+  .kpi-ribbon{position:static;}
+  .kbd-hint{display:none;}
+  .topbar-right{flex-wrap:wrap;}
+}
 @media(max-width:420px){
   .two-col{grid-template-columns:1fr;}
   .stats4{grid-template-columns:1fr 1fr;}
@@ -549,8 +562,8 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
     </div>
   </div>
   <div class="topbar-right">
-    <div class="live-pill">
-      <span id="live-pip"></span>
+    <div class="live-pill" role="status" aria-live="polite">
+      <span id="live-pip" aria-hidden="true"></span>
       <span id="live-label">Connecting…</span>
     </div>
     <label class="auto-toggle" title="Auto-refresh every 10 seconds">
@@ -599,24 +612,24 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
     <div><div class="kpi-label">Bill requests</div><div class="kpi-val" id="kpi-bill">0</div></div>
   </div>
   <div class="kpi-spacer"></div>
-  <div class="view-switcher">
-    <button class="view-btn active" data-view="grid">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+  <div class="view-switcher" role="group" aria-label="Change layout view">
+    <button class="view-btn active" data-view="grid" aria-pressed="true">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       Grid
     </button>
-    <button class="view-btn" data-view="kanban">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="5" height="18"/><rect x="10" y="3" width="5" height="12"/><rect x="17" y="3" width="5" height="15"/></svg>
+    <button class="view-btn" data-view="kanban" aria-pressed="false">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="3" y="3" width="5" height="18"/><rect x="10" y="3" width="5" height="12"/><rect x="17" y="3" width="5" height="15"/></svg>
       Kanban
     </button>
-    <button class="view-btn" data-view="floor">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+    <button class="view-btn" data-view="floor" aria-pressed="false">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       Floor
     </button>
   </div>
-  <div class="ribbon-extras">
-    <button class="icon-btn active" id="density-default" title="Default density">▣</button>
-    <button class="icon-btn" id="density-compact" title="Compact">⊟</button>
-    <button class="icon-btn" id="density-comfortable" title="Comfortable">⊞</button>
+  <div class="ribbon-extras" role="group" aria-label="Card density">
+    <button class="icon-btn active" id="density-default" title="Default density" aria-label="Default density" aria-pressed="true">▣</button>
+    <button class="icon-btn" id="density-compact" title="Compact" aria-label="Compact density" aria-pressed="false">⊟</button>
+    <button class="icon-btn" id="density-comfortable" title="Comfortable" aria-label="Comfortable density" aria-pressed="false">⊞</button>
   </div>
 </div>
 
@@ -624,44 +637,44 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
 <main class="page">
 
   <!-- Summary cards -->
-  <div class="summary" id="summary">
-    <div class="sum-card sc-total" data-sc="all">
+  <div class="summary" id="summary" role="group" aria-label="Filter by table status">
+    <div class="sum-card sc-total" data-sc="all" role="button" tabindex="0" aria-pressed="true" aria-label="Show all tables">
       <div class="sum-label">Total</div><div class="sum-value" id="sum-total">—</div>
-      <div class="sum-trend" id="sum-total-t"></div><div class="sum-icon">⊞</div>
+      <div class="sum-trend" id="sum-total-t"></div><div class="sum-icon" aria-hidden="true">⊞</div>
     </div>
-    <div class="sum-card sc-free" data-sc="free">
+    <div class="sum-card sc-free" data-sc="free" role="button" tabindex="0" aria-pressed="false" aria-label="Show free tables">
       <div class="sum-label">Free</div><div class="sum-value" id="sum-free">—</div>
-      <div class="sum-trend" id="sum-free-t"></div><div class="sum-icon">✓</div>
+      <div class="sum-trend" id="sum-free-t"></div><div class="sum-icon" aria-hidden="true">✓</div>
     </div>
-    <div class="sum-card sc-occ" data-sc="occupied">
+    <div class="sum-card sc-occ" data-sc="occupied" role="button" tabindex="0" aria-pressed="false" aria-label="Show occupied tables">
       <div class="sum-label">Occupied</div><div class="sum-value" id="sum-occupied">—</div>
-      <div class="sum-trend" id="sum-occ-t"></div><div class="sum-icon">👤</div>
+      <div class="sum-trend" id="sum-occ-t"></div><div class="sum-icon" aria-hidden="true">👤</div>
     </div>
-    <div class="sum-card sc-ready" data-sc="ready_to_serve">
+    <div class="sum-card sc-ready" data-sc="ready_to_serve" role="button" tabindex="0" aria-pressed="false" aria-label="Show tables ready to serve">
       <div class="sum-label">Ready to serve</div><div class="sum-value" id="sum-ready">—</div>
-      <div class="sum-trend" id="sum-ready-t"></div><div class="sum-icon">🍽</div>
+      <div class="sum-trend" id="sum-ready-t"></div><div class="sum-icon" aria-hidden="true">🍽</div>
     </div>
-    <div class="sum-card sc-attn" data-sc="needs_attention">
+    <div class="sum-card sc-attn" data-sc="needs_attention" role="button" tabindex="0" aria-pressed="false" aria-label="Show tables needing attention">
       <div class="sum-label">Needs attention</div><div class="sum-value" id="sum-attn">—</div>
-      <div class="sum-trend" id="sum-attn-t"></div><div class="sum-icon">🔔</div>
+      <div class="sum-trend" id="sum-attn-t"></div><div class="sum-icon" aria-hidden="true">🔔</div>
     </div>
-    <div class="sum-card sc-clean" data-sc="cleaning">
+    <div class="sum-card sc-clean" data-sc="cleaning" role="button" tabindex="0" aria-pressed="false" aria-label="Show tables being cleaned">
       <div class="sum-label">Cleaning</div><div class="sum-value" id="sum-clean">—</div>
-      <div class="sum-trend" id="sum-clean-t"></div><div class="sum-icon">🧹</div>
+      <div class="sum-trend" id="sum-clean-t"></div><div class="sum-icon" aria-hidden="true">🧹</div>
     </div>
   </div>
 
   <!-- Toolbar -->
-  <div class="toolbar">
-    <button class="filter-pill active" data-filter="all">All <span class="pill-count" data-count="all">0</span></button>
-    <button class="filter-pill" data-filter="needs_attention">⚠ Attention <span class="pill-count" data-count="needs_attention">0</span></button>
-    <button class="filter-pill" data-filter="ready_to_serve">🍽 Ready <span class="pill-count" data-count="ready_to_serve">0</span></button>
-    <button class="filter-pill" data-filter="occupied">👤 Occupied <span class="pill-count" data-count="occupied">0</span></button>
-    <button class="filter-pill" data-filter="cleaning">🧹 Cleaning <span class="pill-count" data-count="cleaning">0</span></button>
-    <button class="filter-pill" data-filter="free">✓ Free <span class="pill-count" data-count="free">0</span></button>
+  <div class="toolbar" role="group" aria-label="Filter and search tables">
+    <button class="filter-pill active" data-filter="all" aria-pressed="true">All <span class="pill-count" data-count="all">0</span></button>
+    <button class="filter-pill" data-filter="needs_attention" aria-pressed="false">⚠ Attention <span class="pill-count" data-count="needs_attention">0</span></button>
+    <button class="filter-pill" data-filter="ready_to_serve" aria-pressed="false">🍽 Ready <span class="pill-count" data-count="ready_to_serve">0</span></button>
+    <button class="filter-pill" data-filter="occupied" aria-pressed="false">👤 Occupied <span class="pill-count" data-count="occupied">0</span></button>
+    <button class="filter-pill" data-filter="cleaning" aria-pressed="false">🧹 Cleaning <span class="pill-count" data-count="cleaning">0</span></button>
+    <button class="filter-pill" data-filter="free" aria-pressed="false">✓ Free <span class="pill-count" data-count="free">0</span></button>
     <div class="search-wrap">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="search" class="search" id="search" placeholder="Search tables… (/)" />
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="search" class="search" id="search" placeholder="Search tables… (/)" aria-label="Search tables" />
     </div>
     <select id="sort-select" class="sort-select">
       <option value="status">Sort: Priority</option>
@@ -677,9 +690,10 @@ body.density-comfortable .tcard .card-head{padding:1.1rem 1.2rem .85rem;}
   <div id="view-grid" style="display:block;">
     <div id="grid" class="grid"></div>
     <div id="empty-state" class="empty">
-      <div class="empty-icon">🔍</div>
+      <div class="empty-icon" aria-hidden="true">🔍</div>
       <h3>No tables match</h3>
       <p>Try a different filter or search term.</p>
+      <p><button type="button" class="act-btn" id="empty-clear-btn" style="margin-top:.75rem;">Clear filters</button></p>
     </div>
   </div>
 
@@ -926,7 +940,9 @@ function reasonLabel(r){ return ({service:'Call server',bill:'Request bill',wate
 /* ── Dark mode ────────────────────────────────── */
 function applyTheme(){
   document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-  document.getElementById('dark-btn').textContent = isDark ? '☀️' : '🌙';
+  const db=document.getElementById('dark-btn');
+  db.textContent = isDark ? '☀️' : '🌙';
+  db.setAttribute('aria-pressed',isDark?'true':'false');
 }
 applyTheme();
 document.getElementById('dark-btn').addEventListener('click',()=>{
@@ -938,6 +954,7 @@ function updateSoundBtn(){
   const btn=document.getElementById('sound-btn');
   btn.textContent = soundEnabled ? '🔔' : '🔕';
   btn.title = soundEnabled ? 'Sound ON — click to mute' : 'Sound OFF — click to enable';
+  btn.setAttribute('aria-pressed',soundEnabled?'true':'false');
 }
 updateSoundBtn();
 document.getElementById('sound-btn').addEventListener('click',()=>{
@@ -963,7 +980,9 @@ function playAlert(){
 function applyView(v){
   activeView=v; localStorage.setItem('tov-view',v);
   document.querySelectorAll('.view-btn[data-view]').forEach(btn=>{
-    btn.classList.toggle('active',btn.dataset.view===v);
+    const on=btn.dataset.view===v;
+    btn.classList.toggle('active',on);
+    btn.setAttribute('aria-pressed',on?'true':'false');
   });
   /* Explicitly set display — single source of truth (no CSS [data-view] conflict) */
   document.getElementById('view-grid').style.display   = v==='grid'   ? 'block' : 'none';
@@ -983,7 +1002,9 @@ function applyDensity(d){
   document.body.classList.remove('density-compact','density-comfortable');
   if(d!=='default') document.body.classList.add('density-'+d);
   ['default','compact','comfortable'].forEach(x=>{
-    document.getElementById('density-'+x).classList.toggle('active',x===d);
+    const b=document.getElementById('density-'+x);
+    b.classList.toggle('active',x===d);
+    b.setAttribute('aria-pressed',x===d?'true':'false');
   });
 }
 ['default','compact','comfortable'].forEach(d=>{
@@ -1016,11 +1037,22 @@ function setLive(state){
 /* ── Summary cards click to filter ───────────── */
 document.querySelectorAll('.sum-card[data-sc]').forEach(card=>{
   card.addEventListener('click',()=>setFilter(card.dataset.sc));
+  card.addEventListener('keydown',e=>{
+    if((e.key==='Enter'||e.key===' ')&&e.target===card){ e.preventDefault(); setFilter(card.dataset.sc); }
+  });
 });
 function setFilter(f){
   activeFilter=f;
-  document.querySelectorAll('.filter-pill').forEach(b=>b.classList.toggle('active',b.dataset.filter===f));
-  document.querySelectorAll('.sum-card[data-sc]').forEach(c=>c.classList.toggle('active-filter',c.dataset.sc===f));
+  document.querySelectorAll('.filter-pill').forEach(b=>{
+    const on=b.dataset.filter===f;
+    b.classList.toggle('active',on);
+    b.setAttribute('aria-pressed',on?'true':'false');
+  });
+  document.querySelectorAll('.sum-card[data-sc]').forEach(c=>{
+    const on=c.dataset.sc===f;
+    c.classList.toggle('active-filter',on);
+    c.setAttribute('aria-pressed',on?'true':'false');
+  });
   render();
 }
 document.querySelectorAll('.filter-pill').forEach(btn=>{
@@ -1030,6 +1062,10 @@ document.querySelectorAll('.filter-pill').forEach(btn=>{
 /* ── Sort / Search ────────────────────────────── */
 document.getElementById('sort-select').addEventListener('change',e=>{activeSort=e.target.value;render();});
 searchEl.addEventListener('input',render);
+document.getElementById('empty-clear-btn').addEventListener('click',()=>{
+  searchEl.value='';
+  setFilter('all');
+});
 
 /* ── Refresh ──────────────────────────────────── */
 document.getElementById('refresh-btn').addEventListener('click',()=>{load();scheduleRefresh();});
@@ -1266,9 +1302,9 @@ function buildCard(t){
   acts+=`<a class="act-btn" href="/table/${esc(t.id)}" target="_blank" rel="noopener">Menu ↗</a>`;
 
   return `<div class="tcard ${sc}${selClass}" data-id="${esc(t.id)}" data-name="${esc(t.name)}">
-    <div class="card-select-box" data-sel="${esc(t.id)}" role="checkbox" tabindex="0" aria-label="Select ${esc(t.name)}"></div>
+    <div class="card-select-box" data-sel="${esc(t.id)}" role="checkbox" tabindex="0" aria-checked="${selected.has(t.id)}" aria-label="Select ${esc(t.name)}"></div>
     <div class="card-head">
-      <div><div class="card-name">${esc(t.name)}</div><div class="card-id">${esc(t.id)}</div></div>
+      <div><div class="card-name">${esc(t.name)}</div><div class="card-id" title="${esc(t.id)}">${esc(String(t.id).slice(0,8))}</div></div>
       <span class="status-badge ${badge}">${esc(STATUS_LABEL[t.status]||t.status)}</span>
     </div>
     <div class="card-body">${orderHtml}${callsHtml}${timerHtml}${statsHtml}${noteHtml}</div>
@@ -1333,6 +1369,9 @@ function renderKanban(tables){
       const kc=document.createElement('div');
       kc.className=`kcard s-${t.status}`;
       kc.dataset.id=t.id; kc.dataset.name=t.name;
+      kc.setAttribute('tabindex','0');
+      kc.setAttribute('role','button');
+      kc.setAttribute('aria-label',`${t.name}, ${STATUS_LABEL[t.status]||t.status||''}`.replace(/_/g,' '));
       kc.innerHTML=`
         <div class="kcard-name">${esc(t.name)}</div>
         <div class="kcard-meta">
@@ -1364,9 +1403,10 @@ function renderFloor(tables){
     /* Bill-request badge — stands out visually above the regular call dot */
     const billDot=t.openCalls&&t.openCalls.hasBillCall?`<div class="floor-table-calls" style="background:var(--bill-bg);color:var(--bill-fg);">💳 Bill</div>`:'';
     const sub=t.openOrder?money(t.openOrder.total):(t.cleaning?'Cleaning':'Free');
-    return `<div class="floor-table ft-${t.status}" data-id="${esc(t.id)}" data-name="${esc(t.name)}">
-      <div class="floor-table-badge"></div>
-      <div class="floor-table-icon">${FLOOR_ICONS[t.status]||'🪑'}</div>
+    const statusTxt=(STATUS_LABEL[t.status]||t.status||'').replace(/_/g,' ');
+    return `<div class="floor-table ft-${t.status}" data-id="${esc(t.id)}" data-name="${esc(t.name)}" tabindex="0" role="button" aria-label="${esc(t.name)}, ${esc(statusTxt)}${t.openOrder?', bill '+money(t.openOrder.total):''}">
+      <div class="floor-table-badge" aria-hidden="true"></div>
+      <div class="floor-table-icon" aria-hidden="true">${FLOOR_ICONS[t.status]||'🪑'}</div>
       <div class="floor-table-name">${esc(t.name)}</div>
       <div class="floor-table-sub">${sub}</div>
       ${billDot||callDot}
@@ -1442,9 +1482,19 @@ function scheduleRefresh(){
    API HELPERS
 ═══════════════════════════════════════════════ */
 async function postJSON(url,body={}){
+  /* Read the token fresh per call (not once at boot) so long-lived
+     floor sessions don't post a stale token after rotation. */
+  const token=document.querySelector('meta[name="csrf-token"]')?.content||csrf;
   const r=await fetch(url,{method:'POST',credentials:'same-origin',
-    headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify(body)});
-  return{ok:r.ok,status:r.status,data:await r.json().catch(()=>({}))};
+    headers:{'Content-Type':'application/json','X-CSRFToken':token},body:JSON.stringify(body)});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok&&(r.status===400||r.status===403)&&/csrf|token/i.test(data.error||data.message||data.description||'')){
+    toast('Session expired — reloading…','error');
+    setTimeout(()=>location.reload(),1200);
+  } else if(!r.ok&&!data.error&&!data.message){
+    console.warn('[tables-overview] non-JSON error response',r.status,url);
+  }
+  return{ok:r.ok,status:r.status,data};
 }
 
 /* ═══════════════════════════════════════════════
@@ -1489,6 +1539,16 @@ function cardActionDelegate(root){
 cardActionDelegate(document.getElementById('grid'));
 cardActionDelegate(document.getElementById('view-kanban'));
 cardActionDelegate(document.getElementById('floor-grid'));
+/* Keyboard: Enter/Space on floor tiles + kanban cards (they're divs, not buttons) */
+['grid','view-kanban','floor-grid'].forEach(rid=>{
+  document.getElementById(rid).addEventListener('keydown',e=>{
+    if(e.key!=='Enter'&&e.key!==' ') return;
+    const ft=e.target.closest?e.target.closest('.floor-table'):null;
+    if(ft){ e.preventDefault(); ft.click(); return; }
+    const kc=e.target.closest?e.target.closest('.kcard'):null;
+    if(kc&&!e.target.closest('button')&&!e.target.closest('a')){ e.preventDefault(); kc.click(); }
+  });
+});
 
 /* ═══════════════════════════════════════════════
    ACTIONS
@@ -1558,8 +1618,12 @@ document.getElementById('grid').addEventListener('keydown',e=>{
 function exitSelectMode(){ if(selectMode) toggleSelectMode(); }
 function toggleSelect(id){
   if(selected.has(id)) selected.delete(id); else selected.add(id);
-  const card=gridEl.querySelector(`[data-id="${id}"]`);
-  if(card) card.classList.toggle('selected',selected.has(id));
+  const card=gridEl.querySelector(`[data-id="${CSS.escape(id)}"]`);
+  if(card){
+    card.classList.toggle('selected',selected.has(id));
+    const box=card.querySelector('[data-sel]');
+    if(box) box.setAttribute('aria-checked',selected.has(id)?'true':'false');
+  }
   updateBulkBar();
 }
 function updateBulkBar(){
