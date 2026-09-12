@@ -34,7 +34,10 @@ pywebpush~=2.0.0
 qrcode[pil]~=8.0.0
 # Payment SDKs — must stay installed: lib_payments imports them lazily and
 # customer checkout 500s without them. Covered by the release.sh audit.
-razorpay~=1.4.2
+# NOTE: razorpay>=2.0 required — 1.4.x imports pkg_resources at module top
+# level, which no longer exists on setuptools>=81 (Python 3.14 images),
+# so `import razorpay` fails at runtime despite a successful pip install.
+razorpay~=2.0
 redis~=5.2.1
 rq~=1.16.0
 reportlab~=4.2.0
