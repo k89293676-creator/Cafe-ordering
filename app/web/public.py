@@ -99,12 +99,14 @@ def table_order(table_id: str):
     # Derive cafe_name and branding for the template
     cafe_name = "Cafe"
     google_place_id = ""
+    currency_symbol = "₹"
     if owner_id:
         from app.models import Owner
         _owner = db.session.get(Owner, owner_id)
         if _owner:
             cafe_name = _owner.cafe_name or _owner.username or "Cafe"
             google_place_id = getattr(_owner, "google_place_id", "") or ""
+            currency_symbol = getattr(_owner, "currencySymbol", None) or "₹"
     return render_template(
         "table_order.html",
         table=table,
@@ -113,6 +115,7 @@ def table_order(table_id: str):
         cafe_name=cafe_name,
         branding=settings,
         google_place_id=google_place_id,
+        currency_symbol=currency_symbol,
     )
 
 

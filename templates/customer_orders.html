@@ -79,7 +79,7 @@
         {% for item in order['items'] %}
         <div class="order-item-row">
           <span>{{ item.name | default('Item') }} × {{ item.quantity | default(1) }}</span>
-          <span>₹{{ '%.2f' | format((item.lineTotal or 0) | float) }}</span>
+          <span>{{ currency_symbol|default('₹') }}{{ '%.2f' | format((item.lineTotal or 0) | float) }}</span>
         </div>
         {% endfor %}
       </div>
@@ -87,15 +87,51 @@
 
       <div class="order-total-row">
         <span>Total</span>
-        <span>₹{{ '%.2f' | format(order.total | float) }}</span>
+        <span>{{ currency_symbol|default('₹') }}{{ '%.2f' | format(order.total | float) }}</span>
       </div>
 
       {% if order.pickupCode %}
       <div><span class="pickup-code">🎫 {{ order.pickupCode }}</span></div>
       {% endif %}
+
+      {% if order['items'] %}
+      <div style="margin-top:.75rem;">
+        <button type="button" class="fav-save-btn" data-order="{{ loop.index0 }}"
+                style="min-height:44px;padding:.55rem 1rem;border:1.5px solid #4f46e5;color:#4f46e5;background:#fff;border-radius:10px;font-weight:700;font-size:.85rem;cursor:pointer;">
+          ♥ Save as favourite
+        </button>
+        <div style="font-size:.75rem;color:#6b7280;margin-top:.35rem;">Reorder it fast: open your table QR → Saved Orders → Order again.</div>
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   {% endif %}
 </main>
+<script>
+(function(){
+  var orders = {{ orders|tojson }};
+  function esc(s){ return String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+  document.querySelectorAll(".fav-save-btn").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var order = orders[parseInt(btn.dataset.order, 10)];
+      if (!order || !order.items || !order.items.length) return;
+      var items = order.items.map(function(it){
+        var q = it.quantity || 1;
+        return { id: it.id || it.name || "", name: it.name || "Item",
+                 price: (it.lineTotal != null ? it.lineTotal / q : (it.price || 0)),
+                 quantity: q };
+      }).filter(function(it){ return it.id; });
+      if (!items.length) return;
+      var favs = [];
+      try { favs = JSON.parse(localStorage.getItem("cafe_favourites") || "[]"); } catch(e) {}
+      var fav = { name: "Order #" + order.id, items: items, savedAt: new Date().toISOString() };
+      favs = [fav].concat(favs.filter(function(f){ return f.name !== fav.name; })).slice(0, 5);
+      try { localStorage.setItem("cafe_favourites", JSON.stringify(favs)); } catch(e) {}
+      btn.textContent = "✓ Saved!";
+      btn.disabled = true;
+    });
+  });
+})();
+</script>
 </body>
 </html>

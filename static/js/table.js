@@ -6,6 +6,7 @@
 /* ── Constants injected by template ── */
 const TABLE_ID  = (window.CAFE_TABLE_ID  || "").trim();
 const CAFE_NAME = (window.CAFE_NAME      || "Cafe 11:11").trim();
+const CUR       = (window.CAFE_CURRENCY  || "₹").trim() || "₹";
 
 /* ── State ── */
 let menuData      = [];   // [{id, name, items:[...]}]
@@ -277,14 +278,32 @@ function setResp(el, msg, type) {
 }
 
 /* ── Cart open/close ── */
+let _lastCartFocus = null;
 function openCart() {
-  qs(".o-cart")?.classList.add("is-open");
+  const panel = qs(".o-cart");
+  if (panel && !panel.classList.contains("is-open"))
+    _lastCartFocus = document.activeElement;
+  panel?.classList.add("is-open");
   document.body.classList.add("cart-is-open");
+  ["header-cart-btn", "cart-fab"].forEach(id => {
+    const b = $(id);
+    if (b) b.setAttribute("aria-expanded", "true");
+  });
+  const closeBtn = panel?.querySelector(".o-cart__close");
+  if (closeBtn) setTimeout(() => { try { closeBtn.focus({ preventScroll: true }); } catch {} }, 80);
 }
 
 function closeCart() {
   qs(".o-cart")?.classList.remove("is-open");
   document.body.classList.remove("cart-is-open");
+  ["header-cart-btn", "cart-fab"].forEach(id => {
+    const b = $(id);
+    if (b) b.setAttribute("aria-expanded", "false");
+  });
+  if (_lastCartFocus && _lastCartFocus.focus) {
+    try { _lastCartFocus.focus({ preventScroll: true }); } catch {}
+    _lastCartFocus = null;
+  }
 }
 
 /* ── Menu loading ── */
@@ -326,6 +345,13 @@ async function loadMenu() {
     try { localStorage.setItem(`cafe_menu_${TABLE_ID}`, JSON.stringify({at: Date.now(), data: menuData})); } catch {}
     buildCatNav();
     renderMenu();
+    /* First-visit discovery hint (once per browser). */
+    try {
+      if (!localStorage.getItem("cafe_seen_menu")) {
+        localStorage.setItem("cafe_seen_menu", "1");
+        setTimeout(() => showToast("Tap + Add to build your order, then View Order.", 4200), 900);
+      }
+    } catch {}
   } catch (err) {
     console.error("[cafe] menu load failed:", err);
     let cached = null;
@@ -406,6 +432,8 @@ function renderMenu() {
 
   if (!visible.length) {
     const filterNote = activeFilter ? ` with filter “${esc(activeFilter)}”` : "";
+    const mc2 = $("menu-count");
+    if (mc2) mc2.textContent = "No menu items match.";
     mc.innerHTML = `<div class="o-empty" role="status">
       <div class="o-empty__icon" aria-hidden="true">🔍</div>
       <p>No results${filterNote}</p><span>Try a different search</span>
@@ -441,23 +469,48 @@ function renderMenu() {
     el.querySelector(".js-inc")?.addEventListener("click",  () => cartChange(id,  1));
     el.querySelector(".js-dec")?.addEventListener("click",  () => cartChange(id, -1));
   });
+
+  /* Screen-reader result count */
+  const total = visible.reduce((s, c) => s + c.items.length, 0);
+  const mcCount = $("menu-count");
+  if (mcCount) mcCount.textContent =
+    `${total} item${total !== 1 ? "s" : ""} shown` +
+    (activeCat ? ` in ${(menuData.find(c => c.id === activeCat) || {}).name || "category"}` : "") +
+    (activeFilter ? `, ${activeFilter} filter on` : "") + ".";
+}
+
+function actionHtml(item, qty) {
+  const avail = item.available !== false;
+  if (!avail)
+    return `<button class="o-add o-add--sold-out" disabled>Sold out</button>`;
+  if (qty === 0)
+    return `<button class="o-add js-add" aria-label="Add ${esc(item.name)}">+ Add</button>`;
+  return `<div class="o-stepper">
+           <button class="o-stepper__btn js-dec" aria-label="Remove one ${esc(item.name)}">−</button>
+           <span class="o-stepper__val" aria-live="polite">${qty}</span>
+           <button class="o-stepper__btn js-inc" aria-label="Add one ${esc(item.name)}">+</button>
+         </div>`;
+}
+
+/* Patch one card's action slot in place (no full menu re-render). */
+function refreshCardSlot(id) {
+  const card = document.querySelector(`[data-item="${CSS.escape(id)}"]`);
+  if (!card) return;
+  const item = findItem(id);
+  if (!item) return;
+  const slot = card.querySelector(".o-item__action");
+  if (!slot) return;
+  slot.innerHTML = actionHtml(item, cart[id]?.qty || 0);
+  slot.querySelector(".js-add")?.addEventListener("click", () => cartAdd(id, item));
+  slot.querySelector(".js-inc")?.addEventListener("click", () => cartChange(id, 1));
+  slot.querySelector(".js-dec")?.addEventListener("click", () => cartChange(id, -1));
 }
 
 function itemCard(item) {
   const qty  = cart[item.id]?.qty || 0;
   const avail = item.available !== false;
 
-  const actionHtml = !avail
-    ? `<button class="o-add o-add--sold-out" disabled>Sold out</button>`
-    : qty === 0
-      ? `<button class="o-add js-add" aria-label="Add ${esc(item.name)}">+ Add</button>`
-      : `<div class="o-stepper">
-           <button class="o-stepper__btn js-dec" aria-label="Remove one ${esc(item.name)}">−</button>
-           <span class="o-stepper__val" aria-live="polite">${qty}</span>
-           <button class="o-stepper__btn js-inc" aria-label="Add one ${esc(item.name)}">+</button>
-         </div>`;
-
-  const popularBadge = item.popular ? `<span class="o-popular-badge">🔥 Popular</span>` : "";
+  const popularBadge = item.popular ? `<span class="o-popular-badge" aria-hidden="true">🔥 Popular</span>` : "";
   // Image cascade (kept intentionally tiny and CSP-safe):
   //   1. Custom image_url the owner saved (could be /static/... or any allowed
   //      origin — explicit owner intent always wins).
@@ -497,11 +550,11 @@ function itemCard(item) {
         ${item.tags?.length ? `<div class="o-item__tags">${item.tags.map(t => `<span class="o-item__tag">${esc(t)}</span>`).join("")}</div>` : ""}
         ${item.dietary_tags?.length ? `<div class="o-item__dietary">${item.dietary_tags.map(t => `<span class="o-diet-badge o-diet-badge--${esc(t.replace(/\s+/g,"-"))}">${esc(t)}</span>`).join("")}</div>` : ""}
         ${item.prep_time ? `<div class="o-item__prep">⏱ ~${esc(item.prep_time)} min</div>` : ""}
-        ${item.modifiers?.length ? `<div class="o-item__modifiers">${item.modifiers.map(m => `<span class="o-modifier">+ ${esc(m.name)} ₹${fmt(m.price)}</span>`).join("")}</div>` : ""}
+        ${item.modifiers?.length ? `<div class="o-item__modifiers">${item.modifiers.map(m => `<span class="o-modifier">+ ${esc(m.name)} ${CUR}${fmt(m.price)}</span>`).join("")}</div>` : ""}
       </div>
       <div class="o-item__footer">
-        <span class="o-item__price">₹${fmt(item.price)}</span>
-        ${actionHtml}
+        <span class="o-item__price">${CUR}${fmt(item.price)}</span>
+        <div class="o-item__action">${actionHtml(item, qty)}</div>
       </div>
     </div>`;
 }
@@ -514,12 +567,12 @@ function findItem(id) {
   return null;
 }
 
-/* ── Cart operations ── */
+/* ── Cart operations (menu cards patch in place; no full re-render) ── */
 function cartAdd(id, item) {
   if (!item || item.available === false) return;
   cart[id] = cart[id] ? { item, qty: cart[id].qty + 1 } : { item, qty: 1 };
   syncCart();
-  renderMenu();
+  refreshCardSlot(id);
 }
 
 function cartChange(id, delta) {
@@ -527,14 +580,15 @@ function cartChange(id, delta) {
   cart[id].qty += delta;
   if (cart[id].qty <= 0) delete cart[id];
   syncCart();
-  renderMenu();
+  refreshCardSlot(id);
 }
 
 function cartClear() {
+  const ids = Object.keys(cart);
   cart = {};
   _rotateIdemKey();
   syncCart();
-  renderMenu();
+  ids.forEach(refreshCardSlot);
 }
 
 /* ── Sync cart display ── */
@@ -574,7 +628,7 @@ function syncCart() {
   if (totalEl) totalEl.textContent = fmt(grand);
   // Update tip display if elements exist
   const tipEl = $("cart-tip-amount");
-  if (tipEl) tipEl.textContent = tip > 0 ? "₹" + fmt(tip) : "—";
+  if (tipEl) tipEl.textContent = tip > 0 ? CUR + fmt(tip) : "—";
   const subtotalEl = $("cart-subtotal");
   if (subtotalEl) subtotalEl.textContent = fmt(price);
   // Update FAB price
@@ -598,7 +652,7 @@ function syncCart() {
     <div class="o-cart-item">
       <div class="o-cart-item__info">
         <div class="o-cart-item__name">${esc(item.name)}</div>
-        <div class="o-cart-item__unit">₹${fmt(item.price)} each</div>
+        <div class="o-cart-item__unit">${CUR}${fmt(item.price)} each</div>
       </div>
       <div class="o-cart-item__right">
         <div class="o-cart-item__controls">
@@ -606,7 +660,7 @@ function syncCart() {
           <span class="o-qty-val" aria-live="polite">${qty}</span>
           <button class="o-qty-btn" data-id="${esc(id)}" data-d="1"  aria-label="Add one ${esc(item.name)}">+</button>
         </div>
-        <div class="o-cart-item__total">₹${fmt(item.price * qty)}</div>
+        <div class="o-cart-item__total">${CUR}${fmt(item.price * qty)}</div>
         <button class="o-cart-item__rm" data-rm="${esc(id)}" aria-label="Remove ${esc(item.name)}">✕</button>
       </div>
     </div>`).join("");
@@ -615,7 +669,12 @@ function syncCart() {
     btn.addEventListener("click", () => cartChange(btn.dataset.id, parseInt(btn.dataset.d)));
   });
   listEl.querySelectorAll("[data-rm]").forEach(btn => {
-    btn.addEventListener("click", () => { delete cart[btn.dataset.rm]; syncCart(); renderMenu(); });
+    btn.addEventListener("click", () => {
+      const rid = btn.dataset.rm;
+      delete cart[rid];
+      syncCart();
+      refreshCardSlot(rid);
+    });
   });
 }
 
@@ -657,7 +716,7 @@ async function placeOrder(name) {
   if (customTipEl && customTipEl.style.display !== "none") {
     const v = parseFloat(customTipEl.value || "0");
     if (customTipEl.value && (isNaN(v) || v < 0 || v > 10000)) {
-      setResp($("checkout-resp"), "Custom tip must be between ₹0 and ₹10,000.", "error");
+      setResp($("checkout-resp"), `Custom tip must be between ${CUR}0 and ${CUR}10,000.`, "error");
       customTipEl.focus();
       return;
     }
@@ -757,7 +816,7 @@ function trackerHtml(order) {
   const itemsHtml = (order.items || []).map(it => `
     <div class="o-tracker__line">
       <span>${esc(it.name)} × ${it.quantity}</span>
-      <span>₹${fmt(it.lineTotal || 0)}</span>
+      <span>${CUR}${fmt(it.lineTotal || 0)}</span>
     </div>`).join("");
 
   const cancelBtn = s === "pending"
@@ -795,7 +854,7 @@ function trackerHtml(order) {
       ${itemsHtml}
       <div class="o-tracker__line o-tracker__line--total">
         <span>Total</span>
-        <span class="o-tracker__total-val">₹${fmt(order.total || 0)}</span>
+        <span class="o-tracker__total-val">${CUR}${fmt(order.total || 0)}</span>
       </div>
     </div>
     ${cancelBtn}
@@ -831,7 +890,9 @@ async function lookupByCode(code) {
         pickupDiv.scrollIntoView({ behavior: "smooth", block: "center" });
       }
       showTracker(order);
-      showToast("Order found!");
+      showToast(totalQty() > 0
+        ? "Order found — your cart items are kept."
+        : "Order found!");
     } else {
       if (respEl) { respEl.textContent = data.description || data.error || "No order found with that code."; respEl.style.color = "#b91c1c"; }
     }
@@ -868,6 +929,7 @@ function showTracker(order) {
     if (oid && confirm("Cancel this order?")) cancelOrder(oid);
   });
 
+  startCancelCountdown(order);
   openCart();
   startPolling(order.id, order.pickupCode || "");
 
@@ -879,6 +941,33 @@ function showTracker(order) {
       order.pickupCode || ""
     );
   }
+}
+
+/* ── Free-cancel countdown (server allows ~120s while pending) ── */
+const CANCEL_GRACE_S = 120;
+let _cancelTimer = null;
+function stopCancelCountdown() {
+  if (_cancelTimer) { clearInterval(_cancelTimer); _cancelTimer = null; }
+}
+function startCancelCountdown(order) {
+  stopCancelCountdown();
+  if ((order.status || "pending") !== "pending") return;
+  const placed = Date.parse(order.createdAt || "") || Date.now();
+  const tick = () => {
+    const left = Math.max(0, CANCEL_GRACE_S - Math.floor((Date.now() - placed) / 1000));
+    const note = $("cancel-window-note");
+    const btn = $("cancel-btn");
+    if (left <= 0) {
+      btn?.remove();
+      if (note) note.textContent = "Cancel window ended — please ask staff for changes.";
+      stopCancelCountdown();
+      return;
+    }
+    if (note) note.textContent =
+      `Free cancel: ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} left.`;
+  };
+  tick();
+  _cancelTimer = setInterval(tick, 1000);
 }
 
 /* ── Order-status toast — pops a card whenever the kitchen moves the order forward ── */
@@ -945,7 +1034,7 @@ function patchTrackerStatus(status) {
   _lastToastStatus = status;
 
   /* Remove cancel button if no longer pending */
-  if (status !== "pending") $("cancel-btn")?.remove();
+  if (status !== "pending") { $("cancel-btn")?.remove(); stopCancelCountdown(); }
 
   /* Update steps */
   const stepsEl = $("tracker-steps");
@@ -1143,6 +1232,7 @@ function handleTipSelect(btn) {
 function resetToOrdering() {
   _archiveOrder();
   stopPolling();
+  stopCancelCountdown();
   currentOrderId = null;
   orderDone      = false;
   reviewsShown   = false;
@@ -1187,7 +1277,7 @@ function resetToOrdering() {
         </div>
         <div class="o-cart__row">
           <span>Subtotal</span>
-          <span>₹<span id="cart-subtotal">0.00</span></span>
+          <span>${CUR}<span id="cart-subtotal">0.00</span></span>
         </div>
         <div class="o-cart__row">
           <span>Tip</span>
@@ -1195,7 +1285,7 @@ function resetToOrdering() {
         </div>
         <div class="o-cart__row o-cart__row--total">
           <span>Total</span>
-          <span class="o-cart__total-val">₹<span id="cart-total" aria-live="polite">0.00</span></span>
+          <span class="o-cart__total-val">${CUR}<span id="cart-total" aria-live="polite">0.00</span></span>
         </div>
       </div>
       <div class="o-cart__actions">
@@ -1217,8 +1307,8 @@ function resetToOrdering() {
           <button class="o-tip-btn js-tip-btn${isSel(20)}" data-tip="20" aria-pressed="${ariaSel(20)}">20%</button>
           <button class="o-tip-btn js-tip-btn${isSel('custom')}" data-tip="custom" aria-pressed="${ariaSel('custom')}">Custom</button>
         </div>
-        <label class="o-field-label" for="tip-custom-input">Custom tip amount (₹)</label>
-        <input id="tip-custom-input" type="number" min="0" max="10000" step="1" placeholder="Custom tip ₹" class="o-tip-custom" style="display:${showCustom};" value="${customVal}" aria-label="Custom tip amount in rupees" />
+        <label class="o-field-label" for="tip-custom-input">Custom tip amount (${CUR})</label>
+        <input id="tip-custom-input" type="number" min="0" max="10000" step="1" placeholder="Custom tip ${CUR}" class="o-tip-custom" style="display:${showCustom};" value="${customVal}" aria-label="Custom tip amount" />
       </div>
       <!-- Favourites -->
       <div class="o-favourites">
@@ -1528,8 +1618,13 @@ document.addEventListener("focusout", e => {
 });
 
 /* ── Search + feedback count + custom tip (delegated: survives cart rebuilds) ── */
+let _searchTimer = null;
 document.addEventListener("input", e => {
-  if (e.target.id === "search-input") renderMenu();
+  if (e.target.id === "search-input") {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(renderMenu, 150);
+    return;
+  }
   if (e.target.id === "feedback-comment") updateFeedbackCount();
   if (e.target.id === "tip-custom-input") {
     customTip = parseFloat(e.target.value) || 0;
@@ -1541,6 +1636,34 @@ document.addEventListener("input", e => {
 document.addEventListener("keydown", e => {
   if (e.key === "Enter" && e.target && e.target.id === "lookup-code-input") {
     lookupByCode((e.target.value || "").trim().toUpperCase());
+    return;
+  }
+  /* Roving arrow-key navigation for the category tablist */
+  if (e.target.closest && e.target.closest("#cat-nav .o-cat") &&
+      ["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) {
+    e.preventDefault();
+    const tabs = [...document.querySelectorAll("#cat-nav .o-cat")];
+    let i = tabs.indexOf(e.target.closest("#cat-nav .o-cat"));
+    if (e.key === "ArrowRight") i = (i + 1) % tabs.length;
+    else if (e.key === "ArrowLeft") i = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") i = 0;
+    else i = tabs.length - 1;
+    tabs[i].focus();
+    tabs[i].click();
+    return;
+  }
+  /* Focus trap for the feedback modal */
+  if (e.key === "Tab" && $("feedback-modal-bg")?.classList.contains("is-open")) {
+    const modal = document.querySelector("#feedback-modal-bg .o-modal");
+    if (modal) {
+      const f = [...modal.querySelectorAll("button, textarea, input, [tabindex]")]
+        .filter(el => !el.disabled && el.offsetParent !== null);
+      if (f.length) {
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    }
     return;
   }
   if (e.key !== "Escape") return;

@@ -46,6 +46,7 @@
 /* ── Skip link + focus ── */
 .o-skip{position:absolute;left:-9999px;top:0;background:#1c1510;color:#fff;padding:.7rem 1.1rem;z-index:10000;border-radius:0 0 12px 0;font-weight:700;}
 .o-skip:focus{left:0;}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;}
 *:focus-visible{outline:3px solid #4f46e5;outline-offset:2px;border-radius:6px;}
 .o-field-label{display:block;font-size:.75rem;font-weight:700;color:var(--text-2);margin:.5rem 0 .3rem;letter-spacing:.02em;}
 
@@ -400,6 +401,8 @@
   color: var(--gold-text);
   letter-spacing: -0.01em;
 }
+
+.o-item__action { flex-shrink: 0; }
 
 /* Add button */
 .o-add {
