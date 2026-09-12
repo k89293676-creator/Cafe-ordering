@@ -48,6 +48,20 @@ def payment_sdk_status() -> dict:
 
     out: dict = {}
     for pkg in ("razorpay", "stripe"):
+        entry: dict = {"installed": False, "version": "", "dist": "",
+                       "location": "", "error": ""}
+        # Dist metadata answers "was it pip-installed into this image?"
+        # even when the import itself blows up — this separates a stale
+        # deploy (no dist) from a broken install (dist present, import fails).
+        try:
+            from importlib import metadata as _md
+            entry["dist"] = str(_md.version(pkg))
+            try:
+                entry["location"] = str(_md.distribution(pkg).locate_file(""))[:160]
+            except Exception:
+                entry["location"] = ""
+        except Exception:
+            pass
         try:
             mod = importlib.import_module(pkg)
             ver = (
@@ -60,10 +74,11 @@ def payment_sdk_status() -> dict:
                     ver = ver()
                 except Exception:
                     ver = None
-            out[pkg] = {"installed": True, "version": str(ver or "unknown")}
+            entry["installed"] = True
+            entry["version"] = str(ver or entry["dist"] or "unknown")
         except Exception as exc:
-            out[pkg] = {"installed": False, "version": "",
-                        "error": str(exc)[:160]}
+            entry["error"] = f"{type(exc).__name__}: {exc}"[:200]
+        out[pkg] = entry
     return out
 
 # Canonical inbound webhook paths (see app/api/v1/payments.py).

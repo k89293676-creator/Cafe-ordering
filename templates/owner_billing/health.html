@@ -27,7 +27,7 @@
   <div class="stat"><div class="label">Active providers</div><div class="value">{{ snapshot.metrics.payment_credentials_active }}</div><div class="sub">online charging</div></div>
   <div class="stat"><div class="label">Payment SDKs</div>
     <div class="value" style="font-size:1rem;">{% for name, s in (snapshot.sdk|default({})).items() %}{{ '✓' if s.installed else '✕' }} {{ name }}{% if s.version %} {{ s.version }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>
-    <div class="sub">must import in web process{% for name, s in (snapshot.sdk|default({})).items() %}{% if not s.installed %} · {{ name }}: {{ s.error|default('import failed') }}{% endif %}{% endfor %}</div></div>
+    <div class="sub">must import in web process{% for name, s in (snapshot.sdk|default({})).items() %}{% if not s.installed %} · {{ name }}: dist={{ s.dist|default('absent', true) }}{% if s.error %} — {{ s.error }}{% endif %}{% endif %}{% endfor %}</div></div>
 </div>
 
 <div class="panel" style="margin-bottom:1.25rem;">
