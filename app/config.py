@@ -90,6 +90,7 @@ _DB_POOL_SIZE = int(os.environ.get("DB_POOL_SIZE", "25"))      # was 5
 _DB_MAX_OVERFLOW = int(os.environ.get("DB_MAX_OVERFLOW", "10")) # was 5
 _DB_POOL_TIMEOUT = int(os.environ.get("DB_POOL_TIMEOUT", "30")) # was 20
 _DB_STATEMENT_TIMEOUT_MS = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "30000"))
+_DB_LOCK_TIMEOUT_MS = int(os.environ.get("DB_LOCK_TIMEOUT_MS", "15000"))
 _DB_CONNECT_TIMEOUT_S = int(os.environ.get("DB_CONNECT_TIMEOUT_S", "10"))
 
 # Issue 6: slow-query threshold for the SQLAlchemy event-listener (separate
@@ -115,7 +116,10 @@ if _RAW_DB_URL and _IS_POSTGRES_URL:
         "connect_args": {
             "application_name": "cafe-ordering",
             "connect_timeout": _DB_CONNECT_TIMEOUT_S,
-            "options": f"-c statement_timeout={_DB_STATEMENT_TIMEOUT_MS}ms",
+            # lock_timeout keeps DDL (migrations, sync-schema) from wedging
+            # behind another session's open transaction forever — fail fast
+            # instead of hanging a deploy with no port bound.
+            "options": f"-c statement_timeout={_DB_STATEMENT_TIMEOUT_MS}ms -c lock_timeout={_DB_LOCK_TIMEOUT_MS}ms",
         },
     }
 else:

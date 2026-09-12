@@ -16,8 +16,11 @@
 #   4.  flask sync-schema — idempotent CREATE TABLE IF NOT EXISTS safety net.
 #   5.  flask db current — log the active revision.
 #
-# Failure in steps 0-3 aborts the deploy. Steps 4-5 are non-fatal so a
-# missing CLI command never blocks a legitimate deploy.
+# Failure in step 0 aborts the deploy. Steps 1-5 are non-fatal: a stuck or
+# failed migration must never prevent gunicorn from binding a port (a hung
+# `flask db upgrade` once burned the whole Render port-scan window). Each
+# alembic revision is transactional, so retrying next deploy is safe, and
+# the app self-heals schema at startup.
 #
 # NOTE: SECRET_KEY and other runtime env vars are NOT validated here because
 # Railway does not inject Variables into the pre-deploy environment. Runtime
@@ -37,61 +40,46 @@ step_done() {
   echo "[release] done (${elapsed}s)"
 }
 
-# ── Step 0a: Critical package audit ───────────────────────────────────────
-# These packages must import cleanly or the app cannot start at all.
-step_start "Auditing critical packages…"
-MISSING_PKGS=""
-audit_critical() {
-  local import_name="$1" friendly="$2"
-  if ! python3 -c "import ${import_name}" 2>/dev/null; then
-    echo "[release] MISSING critical package: ${friendly} (import ${import_name} failed)" >&2
-    MISSING_PKGS="${MISSING_PKGS} ${friendly}"
-  fi
-}
-
-audit_critical flask               "Flask"
-audit_critical flask_sqlalchemy    "Flask-SQLAlchemy"
-audit_critical flask_migrate       "Flask-Migrate"
-audit_critical flask_login         "Flask-Login"
-audit_critical flask_bcrypt        "Flask-Bcrypt"
-audit_critical flask_limiter       "Flask-Limiter"
-audit_critical flask_compress      "Flask-Compress"
-audit_critical flask_talisman      "Flask-Talisman"
-audit_critical flask_wtf           "Flask-WTF"
-audit_critical flask_mail          "Flask-Mail"
-audit_critical flask_session       "Flask-Session"
-audit_critical sqlalchemy          "SQLAlchemy"
-audit_critical alembic             "alembic"
-audit_critical psycopg2            "psycopg2-binary"
-audit_critical cryptography        "cryptography"
-audit_critical gunicorn            "gunicorn"
-
-if [[ -n "${MISSING_PKGS}" ]]; then
-  echo "[release] FATAL: critical packages missing:${MISSING_PKGS}" >&2
+# ── Step 0a/0b: Package audits (single interpreter boot, not ~25) ──────────
+# One python process imports everything: keeps pre-boot fast so Render's
+# port scan sees gunicorn sooner. Critical set exits 1; optional only warns.
+step_start "Auditing packages…"
+AUDIT_RESULT="$(python3 - <<'PY'
+import importlib
+def _missing(mod):
+    try:
+        importlib.import_module(mod)
+        return False
+    except Exception:
+        return True
+critical = [
+    ("flask", "Flask"), ("flask_sqlalchemy", "Flask-SQLAlchemy"),
+    ("flask_migrate", "Flask-Migrate"), ("flask_login", "Flask-Login"),
+    ("flask_bcrypt", "Flask-Bcrypt"), ("flask_limiter", "Flask-Limiter"),
+    ("flask_compress", "Flask-Compress"), ("flask_talisman", "Flask-Talisman"),
+    ("flask_wtf", "Flask-WTF"), ("flask_mail", "Flask-Mail"),
+    ("flask_session", "Flask-Session"), ("sqlalchemy", "SQLAlchemy"),
+    ("alembic", "alembic"), ("psycopg2", "psycopg2-binary"),
+    ("cryptography", "cryptography"), ("gunicorn", "gunicorn"),
+]
+optional = [
+    ("redis", "redis"), ("rq", "rq"), ("gevent", "gevent"),
+    ("sentry_sdk", "sentry-sdk"), ("prometheus_client", "prometheus-client"),
+    ("psutil", "psutil"), ("pandas", "pandas"),
+]
+missing = [friendly for mod, friendly in critical if _missing(mod)]
+warn = [friendly for mod, friendly in optional if _missing(mod)]
+for w in warn:
+    print(f"[release] WARN: optional package unavailable: {w}")
+if missing:
+    print("FATAL:" + ",".join(missing))
+PY
+)"
+if [[ "${AUDIT_RESULT}" == FATAL:* ]]; then
+  echo "[release] FATAL: critical packages missing:${AUDIT_RESULT#FATAL}" >&2
   echo "[release] Re-run the build or add the package to requirements.txt." >&2
   exit 1
 fi
-step_done
-
-# ── Step 0b: Optional package audit (warn-only) ────────────────────────────
-# These are runtime extras whose absence degrades functionality but does not
-# prevent the app from starting. A failed C-extension build (gevent, redis)
-# after a successful pip install is common on some container runtimes.
-step_start "Auditing optional packages…"
-audit_optional() {
-  local import_name="$1" friendly="$2"
-  if ! python3 -c "import ${import_name}" 2>/dev/null; then
-    echo "[release] WARN: optional package unavailable: ${friendly} (import ${import_name} failed)" >&2
-  fi
-}
-
-audit_optional redis              "redis"
-audit_optional rq                 "rq"
-audit_optional gevent             "gevent"
-audit_optional sentry_sdk         "sentry-sdk"
-audit_optional prometheus_client  "prometheus-client"
-audit_optional psutil             "psutil"
-audit_optional pandas             "pandas"
 step_done
 
 # ── Step 0c: Flask extensions smoke-test ──────────────────────────────────
@@ -165,15 +153,27 @@ PY
 )"
 step_done
 
-# ── Step 3: Migrations ────────────────────────────────────────────────────
+# ── Step 3: Migrations (bounded — must never wedge the deploy) ─────────────
+# A hung `flask db upgrade` (DB lock wait, stalled connection, …) used to
+# block `python start.py` indefinitely: gunicorn never bound a port and
+# Render timed the deploy out. Each alembic revision runs in its own
+# transaction, so killing a stuck upgrade is safe — the next deploy retries.
+# The app additionally self-heals schema at startup (sync-schema safety net
+# below + automatic table creation), so a skipped upgrade degrades to a
+# warning, not an outage.
 if [[ "${LEGACY_DB}" == "yes" ]]; then
   step_start "Legacy DB detected (no alembic_version) — stamping at head…"
   flask db stamp head
   step_done
 else
-  step_start "Running flask db upgrade…"
-  flask db upgrade
-  step_done
+  step_start "Running flask db upgrade (max ${MIGRATION_TIMEOUT_SECS:-240}s)…"
+  echo "[release] DB at revision before upgrade: $(flask db current 2>/dev/null | tail -n 1 || echo unknown)"
+  if timeout "${MIGRATION_TIMEOUT_SECS:-240}" flask db upgrade; then
+    step_done
+  else
+    echo "[release] WARN: flask db upgrade failed or timed out — continuing to start." >&2
+    echo "[release] WARN: sync-schema below + app startup self-heal still apply; investigate DB locks." >&2
+  fi
 fi
 
 # ── Step 4: Idempotent schema sync (non-fatal) ────────────────────────────
