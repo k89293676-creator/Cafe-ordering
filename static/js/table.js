@@ -1211,19 +1211,21 @@ function handleTipSelect(btn) {
   document.querySelectorAll(".js-tip-btn").forEach(b => { b.classList.remove("is-selected"); b.setAttribute("aria-pressed", "false"); });
   btn.classList.add("is-selected");
   btn.setAttribute("aria-pressed", "true");
+  const customInput = $("tip-custom-input");
+  const customLabel = document.querySelector('label[for="tip-custom-input"]');
   const val = btn.dataset.tip;
   if (val === "custom") {
     tipPercent = 0;
-    const customInput = $("tip-custom-input");
     if (customInput) {
       customInput.style.display = "block";
       customTip = parseFloat(customInput.value) || 0;
     }
+    if (customLabel) customLabel.style.display = "";
   } else {
     tipPercent = parseInt(val) || 0;
     customTip = 0;
-    const ci = $("tip-custom-input");
-    if (ci) ci.style.display = "none";
+    if (customInput) customInput.style.display = "none";
+    if (customLabel) customLabel.style.display = "none";
   }
   syncCart();
 }
@@ -1307,7 +1309,7 @@ function resetToOrdering() {
           <button class="o-tip-btn js-tip-btn${isSel(20)}" data-tip="20" aria-pressed="${ariaSel(20)}">20%</button>
           <button class="o-tip-btn js-tip-btn${isSel('custom')}" data-tip="custom" aria-pressed="${ariaSel('custom')}">Custom</button>
         </div>
-        <label class="o-field-label" for="tip-custom-input">Custom tip amount (${CUR})</label>
+        <label class="o-field-label" for="tip-custom-input" style="display:${showCustom};">Custom tip amount (${CUR})</label>
         <input id="tip-custom-input" type="number" min="0" max="10000" step="1" placeholder="Custom tip ${CUR}" class="o-tip-custom" style="display:${showCustom};" value="${customVal}" aria-label="Custom tip amount" />
       </div>
       <!-- Favourites -->

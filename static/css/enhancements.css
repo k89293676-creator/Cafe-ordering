@@ -613,9 +613,9 @@ body { background: var(--enh-bg); }
   border-color: var(--text, #1c1510);
 }
 
-/* Menu item card */
-.menu-item,
-.o-item {
+/* Menu item card (legacy .menu-item picker — NOT the order-page .o-item,
+   which is owned by order.css as a vertical photo card) */
+.menu-item {
   background: var(--surface, #fff);
   border: 1px solid var(--border, #e2d9cd);
   border-radius: var(--radius, 14px);
@@ -627,40 +627,36 @@ body { background: var(--enh-bg); }
   transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease;
 }
 
-.menu-item:hover,
-.o-item:hover {
+.menu-item:hover {
   box-shadow: 0 6px 20px rgba(0, 0, 0, .08);
   border-color: var(--border-dark, #c8bfb2);
   transform: translateY(-1px);
 }
 
-.menu-item__title,
-.o-item__title {
+.menu-item__title {
   font-weight: 700;
   font-size: 1rem;
   letter-spacing: -.01em;
   color: var(--text, #1c1510);
 }
 
-.menu-item__desc,
-.o-item__desc {
+.menu-item__desc {
   color: var(--text-2, #5a4e42);
   font-size: .85rem;
   margin-top: .2rem;
   line-height: 1.45;
 }
 
-.menu-item__price,
-.o-item__price {
+.menu-item__price {
   font-weight: 800;
   color: var(--gold, #b8860b);
   font-size: 1.05rem;
   letter-spacing: -.01em;
 }
 
-/* Add-to-cart / qty buttons */
-.qty-btn,
-.o-qty-btn {
+/* Add-to-cart / qty buttons (legacy .qty-btn picker — NOT the order-page
+   .o-qty-btn, which is owned by order.css at 44px touch targets) */
+.qty-btn {
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -675,8 +671,7 @@ body { background: var(--enh-bg); }
   transition: transform .12s ease, background-color .15s ease;
 }
 
-.qty-btn:hover,
-.o-qty-btn:hover {
+.qty-btn:hover {
   background: var(--text, #1c1510);
   color: #fff;
   border-color: var(--text, #1c1510);
@@ -847,7 +842,7 @@ body { background: var(--enh-bg); }
 }
 
 @media (max-width: 640px) {
-  .menu-item, .o-item {
+  .menu-item {
     padding: .85rem;
     gap: .5rem;
   }

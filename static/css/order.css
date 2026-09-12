@@ -274,6 +274,16 @@
   align-items: flex-start;
 }
 
+/* Service bar spans the full row above menu + cart on wide screens
+   (never a squeezed side column); stacks naturally in mobile column */
+@media (min-width: 769px) {
+  .o-layout { flex-wrap: wrap; }
+  #ays-bar {
+    flex: 1 1 100%;
+    border-radius: var(--radius);
+  }
+}
+
 .o-menu { flex: 1; min-width: 0; }
 
 /* ==========================================
@@ -1646,6 +1656,16 @@ body.feedback-open { overflow: hidden; }
   .o-subnav__inner{padding:.5rem .75rem;}
   .o-item__body{padding:1rem 1rem .65rem;}
   .o-item__footer{padding:.65rem 1rem .9rem;}
+}
+/* Small phones: one slim scroll row each for cats + diet filters so the
+   sticky subnav stops eating a third of the viewport */
+@media (max-width:480px){
+  .o-subnav__inner{gap:.4rem;padding:.5rem .8rem;}
+  .o-search{padding:.4rem .85rem;}
+  .o-cats{padding-bottom:0;}
+  .o-diet-filters{flex-wrap:nowrap;overflow-x:auto;padding-top:0;padding-bottom:2px;scrollbar-width:none;}
+  .o-diet-filters::-webkit-scrollbar{display:none;}
+  .o-diet-filters .o-cat{flex-shrink:0;}
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001s !important;transition-duration:.001s !important;scroll-behavior:auto !important;}
