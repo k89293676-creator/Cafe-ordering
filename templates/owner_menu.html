@@ -66,6 +66,7 @@
     .add-item-form input.w-name { flex: 1; min-width: 130px; }
     .add-item-form input.w-price { width: 90px; }
     .add-item-form input.w-desc { flex: 2; min-width: 160px; }
+    .add-item-form input.w-img { flex: 2; min-width: 160px; }
     .add-item-form .btn-add-item { background: #4f46e5; color: #fff; border: none; border-radius: 9px; padding: .45rem 1rem; font-size: .86rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
     .add-item-form .btn-add-item:hover { background: #4338ca; }
     .empty-cat { padding: 1.25rem 1rem; color: #94a3b8; font-size: .88rem; text-align: center; font-style: italic; }
@@ -206,8 +207,17 @@
               {% for item in category['items'] %}
               <tr>
                 <td>
-                  <div class="item-name">{{ item.name }}</div>
-                  {% if item.description %}<div class="item-desc">{{ item.description | truncate(80) }}</div>{% endif %}
+                  <div style="display:flex;align-items:center;gap:.6rem;">
+                    {% if item.imageUrl %}
+                    <img src="{{ item.imageUrl }}" alt="" loading="lazy"
+                         style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;flex-shrink:0;"
+                         onerror="this.style.display='none'" />
+                    {% endif %}
+                    <div>
+                      <div class="item-name">{{ item.name }}</div>
+                      {% if item.description %}<div class="item-desc">{{ item.description | truncate(80) }}</div>{% endif %}
+                    </div>
+                  </div>
                 </td>
                 <td class="item-price">{{ currency_symbol }}{{ "%.2f" | format(item.price | float) }}</td>
                 <td>
@@ -224,7 +234,14 @@
                   {% endif %}
                 </td>
                 <td style="text-align:right;">
-                  <div style="display:flex;gap:.45rem;justify-content:flex-end;flex-wrap:wrap;">
+                  <div style="display:flex;gap:.45rem;justify-content:flex-end;flex-wrap:wrap;align-items:center;">
+                    <form method="post" action="{{ url_for('web_owner_menu.owner_upload_item_image', item_id=item.id) }}" enctype="multipart/form-data" style="display:inline-flex;gap:.3rem;align-items:center;" title="Upload a photo for this item (max 512 KB)">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                      <label style="font-size:.75rem;font-weight:600;color:#4f46e5;cursor:pointer;white-space:nowrap;">
+                        🖼 Photo
+                        <input type="file" name="image" accept="image/png,image/jpeg" style="display:none;" onchange="this.form.submit()" />
+                      </label>
+                    </form>
                     <form method="post" action="{{ url_for('toggle_menu_item_availability', item_id=item.id) }}" style="display:inline;">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                       <button type="submit" class="btn-toggle {% if not item.available %}unavailable{% endif %}">
@@ -252,6 +269,7 @@
                   <input class="w-name" type="text" name="name" placeholder="Item name" maxlength="100" required />
                   <input class="w-price" type="number" name="price" placeholder="Price" step="0.01" min="0" max="99999" required />
                   <input class="w-desc" type="text" name="description" placeholder="Description (optional)" maxlength="500" />
+                  <input class="w-img" type="url" name="imageUrl" placeholder="Photo URL https://… (optional)" maxlength="500" inputmode="url" />
                   <button type="submit" class="btn-add-item">+ Add item</button>
                 </form>
               </td>

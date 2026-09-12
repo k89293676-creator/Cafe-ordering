@@ -322,6 +322,31 @@
   transform: translateY(-1px);
 }
 
+/* ── Item image: fixed 400:250 aspect reserves space (no layout shift);
+   shimmer placeholder shows until the photo paints ── */
+.o-item__imgwrap {
+  position: relative;
+  aspect-ratio: 400 / 250;
+  overflow: hidden;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: linear-gradient(100deg, var(--bg-alt) 30%, var(--surface-2) 45%, var(--bg-alt) 60%);
+  background-size: 200% 100%;
+  animation: o-img-shimmer 1.6s linear infinite;
+}
+@keyframes o-img-shimmer {
+  from { background-position: 180% 0; }
+  to   { background-position: -80% 0; }
+}
+.o-item__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transition: opacity .3s ease;
+}
+.o-item__img.is-loaded { opacity: 1; }
+
 .o-item__body {
   padding: 1.125rem 1.25rem 0.75rem;
   flex: 1;

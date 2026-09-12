@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import uuid
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
@@ -28,6 +29,22 @@ MAX_PRICE = 99999.99
 
 # Cells beginning with these chars can execute as formulas in Excel.
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_image_url(value, max_len: int = 500) -> str:
+    """Accept http(s) URLs and site-relative paths for menu item photos.
+
+    Anything else (javascript:, data:text/html, …) is dropped so a
+    pasted value can never become an XSS vector on the order page.
+    Uploaded photos are stored separately as data:image/* by the
+    upload-image endpoint.
+    """
+    s = _safe_text(value, max_len=max_len)
+    if not s:
+        return ""
+    if re.match(r"(?i)^(https?://|/)", s):
+        return s
+    return ""
 
 
 def _sanitize_csv_cell(value) -> str:
@@ -171,6 +188,7 @@ def owner_add_item(category_id: str):
     owner_id = logged_in_owner_id()
     name = _safe_text(request.form.get("name"), max_len=100)
     description = _safe_text(request.form.get("description"), max_len=500)
+    image_url = _safe_image_url(request.form.get("imageUrl"))
     try:
         price = round(float(request.form.get("price", "0")), 2)
         if price < 0:
@@ -192,7 +210,7 @@ def owner_add_item(category_id: str):
                 "description": description,
                 "price": price,
                 "available": available,
-                "imageUrl": "",
+                "imageUrl": image_url,
             }
             cat.setdefault("items", []).append(item)
             break
@@ -357,7 +375,7 @@ def save_menu_item():
     name = _safe_text(str(form.get("itemName", "")), max_len=200)
     description = _safe_text(str(form.get("itemDescription", "")), max_len=500)
     price_text = str(form.get("itemPrice", "")).strip()[:20]
-    image_url = _safe_text(str(form.get("itemImageUrl", "")), max_len=500)
+    image_url = _safe_image_url(str(form.get("itemImageUrl") or form.get("imageUrl") or ""))
     try:
         prep_time = max(0, min(300, int(form.get("itemPrepTime") or 0)))
     except (TypeError, ValueError):

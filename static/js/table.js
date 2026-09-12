@@ -288,6 +288,29 @@ function closeCart() {
 }
 
 /* ── Menu loading ── */
+function _sanitizeImgUrl(u) {
+  const s = String(u || "").trim();
+  if (!s) return "";
+  if (/^(https?:\/\/|\/)/i.test(s)) return s.slice(0, 500);
+  if (/^data:image\/(png|jpe?g|gif|webp);base64,/i.test(s)) return s;
+  return "";
+}
+/* Server stores camelCase keys (imageUrl, dietaryTags, prepTime,
+   imageSeed); normalize once so render/filter code has one shape. */
+function _normalizeItem(it) {
+  if (!it || typeof it !== "object") return it;
+  if (it.image_url === undefined && it.imageUrl !== undefined)
+    it.image_url = _sanitizeImgUrl(it.imageUrl);
+  else if (it.image_url !== undefined)
+    it.image_url = _sanitizeImgUrl(it.image_url);
+  if (it.dietary_tags === undefined && it.dietaryTags !== undefined)
+    it.dietary_tags = Array.isArray(it.dietaryTags) ? it.dietaryTags : [];
+  if (it.prep_time === undefined && it.prepTime !== undefined)
+    it.prep_time = it.prepTime;
+  if (it.image_seed === undefined && it.imageSeed !== undefined)
+    it.image_seed = it.imageSeed;
+  return it;
+}
 async function loadMenu() {
   const mc = $("menu-container");
   if (!mc) return;
@@ -297,7 +320,9 @@ async function loadMenu() {
     const res = await fetch(`/api/menu?table_id=${encodeURIComponent(TABLE_ID)}`);
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
-    menuData = (data.categories || []).filter(c => c.items && c.items.length > 0);
+    menuData = (data.categories || [])
+      .filter(c => c.items && c.items.length > 0)
+      .map(c => ({ ...c, items: c.items.map(_normalizeItem) }));
     try { localStorage.setItem(`cafe_menu_${TABLE_ID}`, JSON.stringify({at: Date.now(), data: menuData})); } catch {}
     buildCatNav();
     renderMenu();
@@ -450,11 +475,15 @@ function itemCard(item) {
   // Only AI → SVG, or explicit → AI → SVG. Skip duplicate steps.
   const chain = item.image_url ? [aiUrl, svgUrl] : [svgUrl];
   _imgFallbacks[item.id] = chain;
-  const imgHtml = `<img class="o-item__img" src="${esc(primary)}" alt="${esc(item.name)}"
-                        loading="lazy" decoding="async" fetchpriority="low"
-                        referrerpolicy="no-referrer"
-                        data-item-img="${esc(item.id)}"
-                        onerror="window.__menuImgFail&&window.__menuImgFail(this)" />`;
+  /* Fixed-aspect wrapper reserves space (no layout shift) and shows a
+     shimmer until the image paints; broken/slow sources fall through
+     the _imgFallbacks chain to the inline SVG placeholder. */
+  const imgHtml = `<div class="o-item__imgwrap" aria-hidden="false">` +
+    `<img class="o-item__img" src="${esc(primary)}" alt="${esc(item.name)}" ` +
+    `width="400" height="250" loading="lazy" decoding="async" fetchpriority="low" ` +
+    `referrerpolicy="no-referrer" data-item-img="${esc(item.id)}" ` +
+    `onerror="window.__menuImgFail&&window.__menuImgFail(this)" ` +
+    `onload="this.classList.add('is-loaded')" /></div>`;
 
   return `
     <div class="o-item${avail ? "" : " o-item--sold-out"}" data-item="${esc(item.id)}">

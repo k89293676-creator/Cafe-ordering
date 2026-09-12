@@ -9,9 +9,9 @@
   <link rel="manifest" href="/static/manifest-customer.json" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <!-- Image hosts for menu thumbnails — preconnect so TLS handshake is paid
-       once up-front instead of per <img>. Cuts perceived menu load by ~1s. -->
-  <link rel="preconnect" href="https://loremflickr.com" crossorigin />
+  <!-- AI dish-photo host — preconnect so the TLS handshake is paid
+       once up-front instead of per <img>. -->
+  <link rel="preconnect" href="https://image.pollinations.ai" crossorigin />
   <link rel="dns-prefetch" href="https://image.pollinations.ai" />
   <link rel="stylesheet" href="/static/css/order.css" />
   <link rel="stylesheet" href="/static/css/mobile-patch.css" />
@@ -790,7 +790,6 @@
 <script src="/static/js/table.js" defer></script>
 <style>
   .o-popular-badge{display:inline-block;background:#fff3cd;color:#92400e;border:1px solid #fbbf24;border-radius:999px;font-size:.65rem;font-weight:700;padding:.1rem .45rem;margin-right:.3rem;vertical-align:middle;}
-  .o-item__img{width:100%;height:120px;object-fit:cover;border-radius:.65rem .65rem 0 0;display:block;}
 </style>
 
 <script>
